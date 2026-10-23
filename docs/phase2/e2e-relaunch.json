@@ -1,0 +1,29 @@
+{
+  "scenario": "relaunch",
+  "checks": {
+    "profilePersisted": true,
+    "proxiesPersisted": {
+      "ok": true,
+      "rows": 3
+    },
+    "idleAfterRelaunch": true,
+    "connectFailureExplained": {
+      "ok": true,
+      "detail": "无法连接节点：连接被拒绝（127.0.0.1:17999），请检查地址和端口，或节点是否在运行"
+    },
+    "failedStateColors": {
+      "ok": true,
+      "tagBg": "rgba(208, 48, 80, 0.1)",
+      "btnBg": "rgb(24, 160, 88)"
+    },
+    "pingShowsReason": true,
+    "themeFollowsSystem": {
+      "ok": true,
+      "darkBg": "rgb(58, 58, 62)",
+      "lightBg": "rgb(170, 170, 172)"
+    },
+    "runningAfterFix": true
+  },
+  "timings": {},
+  "ok": true
+}

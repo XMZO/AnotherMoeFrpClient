@@ -1,0 +1,55 @@
+# /etc/systemd/system/moefrp.service
+#
+# 首次安装（详见 docs/server-ops.md）：
+#   useradd --system --no-create-home --shell /usr/sbin/nologin moefrp
+#   install -m 0755 moefrp-server /usr/local/bin/moefrp-server
+#   install -d -m 0750 -o root -g moefrp /etc/moefrp
+#   install -m 0640 -o root -g moefrp config.example.toml /etc/moefrp/config.toml   # 再按需修改
+#   install -d -m 0700 -o moefrp -g moefrp /var/lib/moefrp
+#   sudo -u moefrp moefrp-server migrate -c /etc/moefrp/config.toml
+#   systemctl daemon-reload && systemctl enable --now moefrp
+#   curl -fsS http://127.0.0.1:8080/healthz
+
+[Unit]
+Description=MoeFrp server (accounts and cloud sync)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=moefrp
+Group=moefrp
+ExecStart=/usr/local/bin/moefrp-server serve -c /etc/moefrp/config.toml
+Restart=on-failure
+RestartSec=3s
+# 收到 SIGTERM 后最多等 10 秒处理完正在进行的请求
+TimeoutStopSec=20s
+
+# 数据目录 /var/lib/moefrp，属主为 moefrp，权限 0700
+StateDirectory=moefrp
+StateDirectoryMode=0700
+# 新建的数据库、WAL、备份文件只有 moefrp 能读
+UMask=0077
+
+# 加固（PLAN 7.11）
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# 每次登录 / 改密码会做 argon2（约 64MB 内存），服务端同时最多算 4 个
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target

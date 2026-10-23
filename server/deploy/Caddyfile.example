@@ -1,0 +1,23 @@
+# Caddy 反向代理示例（PLAN 7.11）。Caddy 会自动申请 HTTPS 证书。
+#
+# moefrp-server 只监听 127.0.0.1:8080，并且只信任 trusted_proxies（默认 127.0.0.1、::1）
+# 发来的 X-Forwarded-For。Caddy 的 reverse_proxy 默认就会设置 X-Forwarded-For，不需要额外配置。
+#
+# Caddy 2.5 起访问日志默认会隐去 Authorization 头，不要打开全局选项 log_credentials。
+
+frplus.loli-con.cn {
+	encode gzip
+
+	# 新客户端的 /api/v1/*、/healthz，以及旧客户端的 /api/*（统一返回"请升级"提示）
+	reverse_proxy 127.0.0.1:8080
+
+	# 如果下载页也放在这台机器上，可以单独指定目录，例如：
+	# handle_path /download/* {
+	# 	root * /srv/moefrp/download
+	# 	file_server
+	# }
+
+	log {
+		output file /var/log/caddy/moefrp-access.log
+	}
+}

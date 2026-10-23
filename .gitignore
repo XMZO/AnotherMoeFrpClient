@@ -1,0 +1,29 @@
+# PLAN 8.2 第 4 条：仓库里不放任何数据库、二进制、密码和密钥
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.exe
+*.dll
+*.7z
+config.toml
+node_modules/
+frontend/dist/
+
+# 构建产物
+*.test
+*.out
+/server/moefrp-server
+/server/bin/
+
+# 发布产物
+/dist/
+
+# 端到端测试的运行产物
+client/scripts/e2e/out*/
+client/scripts/e2e/*-stdout.txt
+client/scripts/e2e/*-stderr.txt
+# spike 只保留源码和报告
+spike/*/build/
+spike/*.log
+spike/bin/

@@ -1,0 +1,63 @@
+{
+  "exe": "E:\\frp_end\\gogogo\\client\\bin\\MoeFrp.exe",
+  "exeBytes": 20189696,
+  "dataHome": "%TEMP%\\moefrp-e2e-20261023-173536",
+  "firstRunReadyMs": 1877,
+  "mainScenarioOk": true,
+  "quitWhileRunning": {
+    "menuItems": [
+      "[0] id=33793 text='显示主界面' state=0x0",
+      "[1] id=33794 text='状态：运行中（e2e）' state=0x3",
+      "[2] id=33795 text='停止隧道' state=0x0",
+      "[3] id=33796 text='' state=0x803",
+      "[4] id=33797 text='退出' state=0x0"
+    ],
+    "attempts": 1,
+    "quitClicked": true,
+    "exited": true,
+    "exitMs": 676,
+    "remotePortFreeAfterQuit": true,
+    "engineStoppedLogged": true
+  },
+  "relaunchScenarioOk": true,
+  "shell": {
+    "windowFound": true,
+    "hiddenToTray": true,
+    "aliveAfterClose": true,
+    "tunnelStillForwarding": true,
+    "secondExited": true,
+    "secondLifetimeMs": 53,
+    "secondInstanceActivatedWindow": true,
+    "processCount": 1
+  },
+  "quitSecondRun": {
+    "menuItems": [
+      "[0] id=33793 text='显示主界面' state=0x0",
+      "[1] id=33794 text='状态：运行中（e2e）' state=0x3",
+      "[2] id=33795 text='停止隧道' state=0x0",
+      "[3] id=33796 text='' state=0x803",
+      "[4] id=33797 text='退出' state=0x0"
+    ],
+    "attempts": 1,
+    "quitClicked": true,
+    "exited": true,
+    "exitMs": 675,
+    "remotePortFreeAfterQuit": true
+  },
+  "endSession": {
+    "trayStartLast": true,
+    "endSessionHandledMs": 501,
+    "engineStoppedOnEndSession": true,
+    "remotePortFreeAfterEndSession": true,
+    "exitedAfterEndSession": false
+  },
+  "storage": {
+    "settingsJson": true,
+    "installId": "01a1681d-aec6-7005-a9d0-e627adfd1228",
+    "cacheMagic": "MFC1",
+    "cacheHasPlainToken": false,
+    "webView2Dir": true,
+    "crashLog": true,
+    "startupLog": true
+  }
+}

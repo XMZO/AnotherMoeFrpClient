@@ -1,0 +1,16 @@
+.task
+bin
+frontend/dist
+frontend/node_modules
+build/linux/appimage/build
+build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
+# Mobile generated (per-machine; overlays hold absolute paths)
+build/ios/xcode/overlay.json
+build/ios/xcode/gen/
+build/android/overlay.json
+build/android/gen/
+# 端到端测试的输出（截图、诊断日志）
+scripts/e2e/out/
+scripts/e2e/out-phase3/
+scripts/e2e/phase3-stdout.txt
+scripts/e2e/phase3-stderr.txt

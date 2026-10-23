@@ -1,0 +1,17 @@
+login: state=running runID=0f93dc269557d0e6 logins=1 connects=1 after 20ms
+GetProxyStatus(echo1): phase="running" remoteAddr=":53246" err="" after 20ms
+forward: 127.0.0.1:53246 -> frps -> frpc -> echo 127.0.0.1:53244 OK
+hot update: runID 0f93dc269557d0e6 -> 0f93dc269557d0e6, login lines 1 -> 1, connect lines 1 -> 1, frps 'client login info' 1 -> 1
+invalid update rejected before submit: proxy bad: unsupported type "nope"
+stop: GracefulClose(500ms) -> Run returned in 500ms, err=<nil>, state=idle, remote port 53247 free
+restart with a new Service: OK (runID=e5bd6dd99cc362df)
+frps closed, bind port 53245 free; goroutines before=36 after=39
+wrong token: Run returned after 5ms, state=failed, err=login to the server failed: token in login doesn't match token from configuration. With loginFailExit enabled, no additional retries will be attempted
+unreachable server: Run returned after 3309ms, lastError="login to the server failed: session shutdown. With loginFailExit enabled, no additional retries will be attempted"
+duplicate proxy names: Start error = <nil>
+stop while connecting to refused(127.0.0.1:1): Stop()=frp service did not stop within 2s, Run returned=true after 2705ms, runErr=login to the server failed: <nil>. With loginFailExit enabled, no additional retries will be attempted, state=idle
+stop while connecting to blackhole(10.255.255.1:7000): Stop()=frp service did not stop within 2s, Run returned=true after 4802ms, runErr=login to the server failed: <nil>. With loginFailExit enabled, no additional retries will be attempted, state=idle
+log: 2026-10-18 19:10:48.763 [I] [client/service.go:335] try to connect to server...
+log: 2026-10-18 19:10:51.346 [W] [client/service.go:346] connect to server error: session shutdown
+remote port conflict: a="running" err="" | b="start error" err="port already used"
+GetProxyStatus during GracefulClose(2s) blocked for 1899ms

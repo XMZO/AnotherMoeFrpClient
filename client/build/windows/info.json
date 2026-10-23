@@ -1,0 +1,15 @@
+{
+	"fixed": {
+		"file_version": "3.0.0"
+	},
+	"info": {
+		"0409": {
+			"ProductVersion": "3.0.0",
+			"CompanyName": "XMZO",
+			"FileDescription": "萌！FRP 高级客户端",
+			"LegalCopyright": "Copyright © 2026 XMZO. All rights reserved.",
+			"ProductName": "Moe! FrpClient",
+			"Comments": "MoeFrp client"
+		}
+	}
+}

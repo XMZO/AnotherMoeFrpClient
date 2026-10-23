@@ -1,0 +1,74 @@
+{
+  "scenario": "main",
+  "checks": {
+    "createLocalProfile": true,
+    "addNode": true,
+    "addProxy": true,
+    "realForwarding": {
+      "ok": true,
+      "port": 17002,
+      "echoed": "hello-from-e2e"
+    },
+    "proxyStatusColumn": {
+      "ok": true,
+      "proxyStatusText": "运行中:17002"
+    },
+    "logPanelPlainText": {
+      "ok": true,
+      "count": 5,
+      "withChildren": 0,
+      "hasLogin": true
+    },
+    "longConnBefore": true,
+    "hotUpdateToast": {
+      "ok": true,
+      "toast": "已保存，并已热更新到运行中的隧道（连接不断）"
+    },
+    "hotUpdateNewProxyForwards": true,
+    "hotUpdateConnectionKept": {
+      "ok": true,
+      "pingAfter": "after-hot-update"
+    },
+    "hotUpdateNoReconnect": {
+      "ok": true,
+      "runId": "92fa5875438cff31",
+      "runIdAfter": "92fa5875438cff31",
+      "logins": "1"
+    },
+    "toggleOffReleasesPort": true,
+    "longConnAfterToggle": true,
+    "duplicateNameShown": {
+      "ok": true,
+      "dupText": "与已有的名称重复（代理和访客的名称不能相同）"
+    },
+    "duplicateNotSaved": true,
+    "portOccupiedByOtherProgramShown": {
+      "ok": true,
+      "code": "proxy_port_unavailable",
+      "text": "启动失败远程端口不可用（可能被节点上的其他程序占用）"
+    },
+    "portConflictShown": {
+      "ok": true,
+      "code": "proxy_port_in_use",
+      "text": "启动失败远程端口已被占用"
+    },
+    "otherProxiesUnaffected": true,
+    "deleteProxyHot": true,
+    "stopReleasesPort": {
+      "ok": true,
+      "port": 17002
+    },
+    "statusColumnClearedAfterStop": true,
+    "restartNewService": {
+      "ok": true,
+      "runId": "92fa5875438cff31",
+      "runId2": "66a41a5ce2fa36fc"
+    }
+  },
+  "timings": {
+    "clickToRunningMs": 61,
+    "clickToProxyRunningMs": 251,
+    "stopClickToIdleMs": 563
+  },
+  "ok": true
+}

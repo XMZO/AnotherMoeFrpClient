@@ -1,0 +1,172 @@
+{
+  "startedAt": "2026-10-23T10:30:12.851Z",
+  "dataRoot": "%TEMP%\\moefrp-e2e3-20261023103012",
+  "checks": {
+    "admin_invite_created": {
+      "ok": true,
+      "count": 2
+    },
+    "two_instances_run_side_by_side": true,
+    "register_frontend_rejects_bad_checksum": {
+      "ok": true,
+      "badState": "checksum",
+      "fmtState": "invalid",
+      "blockedText": "校验位不正确，请检查是否输错"
+    },
+    "register_frontend_accepts_valid_code": true,
+    "register_ok": true,
+    "default_cloud_profile_created": true,
+    "keep_logged_in_stores_token_only": {
+      "ok": true,
+      "creds": [
+        {
+          "target": "MoeFrp/session/e2e-ae1aa348",
+          "userName": "e2euser",
+          "blobLen": 47,
+          "tokenLike": true,
+          "persist": "2",
+          "hasComment": true
+        }
+      ]
+    },
+    "two_devices_logged_in_same_account": true,
+    "local_and_cloud_coexist": true,
+    "acceptance1_edit_on_A_reaches_B_within_60s": {
+      "ok": true,
+      "editToPushedMs": 1747,
+      "pushedToBMs": 58020,
+      "editToBMs": 59767,
+      "bTrigger": "timer"
+    },
+    "acceptance2_concurrent_edit_shows_conflict": {
+      "ok": true,
+      "loser": "A",
+      "diffText": "差异摘要代理「fromA」：只在本机代理「fromB」：只在云端",
+      "conflictName": "我的云端配置"
+    },
+    "acceptance2_keep_local_converges": {
+      "ok": true,
+      "winner": [
+        "fromA"
+      ],
+      "loser": [
+        "fromA"
+      ]
+    },
+    "offline_shows_status_and_allows_edit_and_start": {
+      "ok": true,
+      "pendingBadge": "待同步",
+      "offlineEcho": true,
+      "syncStatusText": "离线"
+    },
+    "offline_edits_pushed_after_reconnect": {
+      "ok": true,
+      "ms": 1050
+    },
+    "running_profile_remote_update_asks_then_hot_updates": {
+      "ok": true,
+      "echo5": true,
+      "hotToast": "已保存，并已热更新到运行中的隧道（连接不断）",
+      "runIdBefore": "",
+      "loginsBefore": 1
+    },
+    "logout_clears_cloud_cache_keeps_local": {
+      "ok": true,
+      "creds": [
+        {
+          "target": "MoeFrp/session/e2e-ae1aa348",
+          "userName": "e2euser",
+          "blobLen": 47,
+          "tokenLike": true,
+          "persist": "2",
+          "hasComment": true
+        }
+      ]
+    },
+    "acceptance3_single_device_kicks_A_with_clear_notice": {
+      "ok": true,
+      "endedCode": "session_replaced",
+      "endedText": "你的账号已在其他设备登录，本机已退出登录。",
+      "kickToNoticeMs": 58521
+    },
+    "kicked_device_credential_deleted": {
+      "ok": true,
+      "creds": [
+        {
+          "target": "MoeFrp/session/e2e-e0f55113",
+          "userName": "e2euser",
+          "blobLen": 47,
+          "tokenLike": true,
+          "persist": "2",
+          "hasComment": true
+        }
+      ]
+    },
+    "kicked_device_keeps_running_cached_profile": {
+      "ok": true,
+      "hint": "未登录：这些是 e2euser 的云端配置缓存，可以照常启动，登录后继续同步"
+    },
+    "change_password_wrong_old_stays_logged_in": {
+      "ok": true,
+      "cpErr": "当前密码不正确"
+    },
+    "change_password_ok": true,
+    "quit_B_gracefully": true,
+    "restart_auto_login": true,
+    "logout_deletes_credential": {
+      "ok": true,
+      "creds": []
+    },
+    "no_auto_login_after_logout": true,
+    "reset_password_ok": {
+      "ok": true,
+      "codeFormat": "XXX-XXXXX-XXXXX-XXXXX"
+    },
+    "reset_password_then_login": true,
+    "login_without_keep_stores_nothing": {
+      "ok": true,
+      "creds": []
+    },
+    "client_outdated_notice_and_local_start_still_works": {
+      "ok": true,
+      "sync": "outdated"
+    },
+    "no_password_in_data_dirs": {
+      "ok": true,
+      "scanA": {
+        "files": 257,
+        "hits": []
+      },
+      "scanB": {
+        "files": 278,
+        "hits": []
+      }
+    },
+    "cleanup_test_credentials_removed": {
+      "ok": true,
+      "left": []
+    },
+    "cleanup_temp_data_removed": true
+  },
+  "timings": {
+    "acceptance1": {
+      "editToPushedMs": 1747,
+      "pushedToBMs": 58020,
+      "editToBMs": 59767,
+      "bTrigger": "timer"
+    },
+    "acceptance2": {
+      "resolvedToWinnerMs": 59907
+    },
+    "offlineRecoveryMs": 1050,
+    "acceptance3": {
+      "kickToNoticeMs": 58521
+    }
+  },
+  "cleanup": {
+    "credentialsLeft": [],
+    "dataRootRemoved": true
+  },
+  "finishedAt": "2026-10-23T10:34:47.886Z",
+  "ok": true
+}

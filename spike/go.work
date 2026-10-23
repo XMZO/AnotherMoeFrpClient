@@ -1,0 +1,9 @@
+go 1.26.1
+
+use (
+	../../frp
+	./app-empty
+	./app-engine
+	./clipboard
+	./engine
+)

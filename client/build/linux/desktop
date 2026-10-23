@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=Moe! FrpClient
+Comment=萌！FRP 高级客户端
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/client.exe %u
+Terminal=false
+Type=Application
+Icon=client.exe
+Categories=Utility;
+StartupWMClass=client.exe
+
+ 

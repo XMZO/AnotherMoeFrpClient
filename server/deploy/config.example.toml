@@ -1,0 +1,39 @@
+# moefrp-server 配置示例（PLAN 7.11）。复制到 /etc/moefrp/config.toml 后修改。
+# 文件里出现未知字段时服务拒绝启动，避免拼错的配置项被静默忽略。
+# 每一项都可以用环境变量覆盖，例如 MOEFRP_LISTEN、MOEFRP_CLIENT_MIN_VERSION（见 docs/server-ops.md）。
+
+# 只监听本机，由 Caddy 反向代理并负责 HTTPS
+listen          = "127.0.0.1:8080"
+# 与 systemd 的 StateDirectory=moefrp 对应；数据库新建时权限为 0600
+db_path         = "/var/lib/moefrp/moefrp.db"
+# 只信任这些地址发来的 X-Forwarded-For（单个 IP 或网段）。直连的请求一律用 TCP 对端地址
+trusted_proxies = ["127.0.0.1/32", "::1/128"]
+# 单设备模式：新登录会把该用户的其他会话挤下线（客户端收到 session_replaced）
+single_session  = true
+# 滑动过期：这么久没有使用才失效
+session_ttl     = "720h"
+# debug / info / warn / error，日志以 JSON 输出到 stdout，由 journald 收集
+log_level       = "info"
+
+[client]
+# GET /api/v1/client/config 下发给客户端
+latest_version = "3.0.0"
+# 低于它的客户端访问 /api/v1 下的接口会收到 426 client_outdated；留空表示不检查
+min_version    = "3.0.0"
+download_url   = "https://frplus.loli-con.cn/download/MoeFrp-3.0.0-windows-amd64.exe"
+sha256         = ""
+release_notes  = ""
+announcement   = ""
+
+# 图片面板的图源，可以有多个
+[[client.image_sources]]
+url    = "https://umi.li/random?dir=lucky&type=img"
+weight = 5
+is_api = false
+
+# 返回 JSON 的图源：is_api = true，并用 json_path 指出图片地址所在的字段
+# [[client.image_sources]]
+# url       = "https://api.example.com/random"
+# weight    = 1
+# is_api    = true
+# json_path = "data.url"

@@ -127,7 +127,7 @@ agent 只会在机器上创建这些东西，卸载时全部删除：
 - **节点上执行** `sudo moefrp-agent uninstall`。
 - **安装脚本**：`curl -fsSL https://<面板域名>/agent/install.sh | sudo bash -s -- --uninstall`（agent 二进制已经坏了时用）。
 
-卸载步骤：停止并禁用服务 → 删除单元文件 → `systemctl daemon-reload` 和 `reset-failed` → 删除上表的目录和文件 → 最后删除程序自身。systemd 日志（journald）里的历史记录不会删，这是系统的公共日志；卸载结束时会提示可以用 `journalctl --vacuum-time` 清理。
+卸载步骤：停止并禁用服务 → 删除单元文件 → `systemctl daemon-reload` 和 `reset-failed` → 删除上表的目录和文件 → 最后删除程序自身。systemd 日志（journald）里的历史记录不会删：它是整个系统共用的日志，`journalctl --vacuum-*` 不能只清理一个服务（`-u` 对它无效），会按系统设置自动轮转。
 
 面板上**只删除节点**（不卸载）时会作废令牌。agent 被拒绝后在日志里说明原因，frps 按最后的配置继续运行，之后每小时重试一次（进程退出会被 systemd 立刻拉起，没有意义）。
 

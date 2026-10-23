@@ -185,7 +185,8 @@ func Uninstall(ctx context.Context, p paths.Paths, out io.Writer) error {
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
-	fmt.Fprintf(out, "卸载完成。systemd 日志里的历史记录没有删除，需要的话可以执行：journalctl --vacuum-time=1s -u %s\n", p.UnitName())
+	// journald 是整个系统共用的日志，没法只删一个服务的记录（--vacuum 不按 -u 过滤），所以不动它
+	fmt.Fprintln(out, "卸载完成。systemd 日志（journald）里的历史记录属于系统公共日志，没有删除，会按系统设置自动轮转。")
 	return nil
 }
 

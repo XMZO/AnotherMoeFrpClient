@@ -82,8 +82,8 @@ type Overview struct {
 	Admins         int `json:"admins"`
 	VIPs           int `json:"vips"`
 	DisabledUsers  int `json:"disabledUsers"`
-	OnlineUsers    int `json:"onlineUsers"`  // 有未过期会话的用户
-	ActiveToday    int `json:"activeToday"`  // 24 小时内用过的用户
+	OnlineUsers    int `json:"onlineUsers"` // 有未过期会话的用户
+	ActiveToday    int `json:"activeToday"` // 24 小时内用过的用户
 	Profiles       int `json:"profiles"`
 	ActiveShares   int `json:"activeShares"`
 	Subscriptions  int `json:"subscriptions"`

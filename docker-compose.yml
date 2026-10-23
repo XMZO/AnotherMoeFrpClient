@@ -1,98 +1,27 @@
-# MoeFrp 服务端单文件部署：moefrp-server + Caddy（自动申请 HTTPS 证书）。
-# 需要 Docker Compose v2.23.1 及以上（用到 configs.content）。
+# MoeFrp 服务端。
 #
-#   1. 域名的 A/AAAA 记录指向这台服务器，开放 80 和 443 端口
-#   2. 下载本文件，按需修改下面 moefrp_config 里的 [client] 部分
-#   3. DOMAIN=frplus.example.com docker compose up -d
-#      （或者在同目录写一个 .env：DOMAIN=frplus.example.com）
-#   4. docker compose logs moefrp 找到"初始化码"，打开 https://<域名>/admin/ 创建管理员
+#   docker compose up -d
+#   docker compose logs moefrp | grep 初始化码    # 打开 https://<你的域名>/admin/ 用它创建管理员
 #
-# 邀请码、用户、审计日志、备份下载都在网页管理后台 https://<域名>/admin/ 里操作。
+# 只监听 127.0.0.1:8080，HTTPS 和域名由宿主机上的反向代理（Nginx、Caddy 等）负责，
+# 反代时带上 X-Forwarded-For 和 X-Forwarded-Proto。
 #
-# 常用命令（镜像里没有 shell，直接执行程序）：
-#   docker compose logs -f moefrp
-#   docker compose exec moefrp moefrp-server backup --to /var/lib/moefrp/backup-$(date +%F).db
-#   docker compose pull && docker compose up -d      # 升级；有数据库迁移时会先自动备份
-# 更多见 docs/docker.md。
-
-name: moefrp
+# 所有数据都在同目录的 ./data 里：数据库、可选的 config.toml、升级前的自动备份。
+# 删容器、删镜像都不影响它，整个目录打包带走就是完整迁移。
+# 更多设置（客户端版本号、公告、图源等）写在 ./data/config.toml，见 docs/docker.md。
 
 services:
   moefrp:
     image: ghcr.io/xmzo/moefrp-server:latest
     restart: unless-stopped
-    configs:
-      - source: moefrp_config
-        target: /etc/moefrp/config.toml
-    volumes:
-      - moefrp-data:/var/lib/moefrp
-    networks:
-      - moefrp
-    # 不对外暴露端口，只由 Caddy 访问。不用 Caddy 时可以改成 ports: ["127.0.0.1:8080:8080"]
-
-  caddy:
-    image: caddy:2
-    restart: unless-stopped
+    # ./data 不存在时由 Docker 以 root 创建，所以用 root 运行。
+    # 想用普通用户：sudo chown -R 65532:65532 data 后删掉这一行
+    user: "0:0"
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    configs:
-      - source: caddyfile
-        target: /etc/caddy/Caddyfile
+      - "127.0.0.1:8080:8080"
     volumes:
-      - caddy-data:/data
-      - caddy-config:/config
-    depends_on:
-      moefrp:
-        condition: service_healthy
-    networks:
-      - moefrp
-
-networks:
-  moefrp:
-    ipam:
-      config:
-        # 固定网段：moefrp 只信任来自这里（Caddy）的 X-Forwarded-For，见 trusted_proxies
-        - subnet: 172.29.0.0/24
-
-volumes:
-  moefrp-data:
-  caddy-data:
-  caddy-config:
-
-configs:
-  caddyfile:
-    content: |
-      ${DOMAIN:?请设置 DOMAIN，例如 DOMAIN=frplus.example.com docker compose up -d} {
-        encode gzip
-        reverse_proxy moefrp:8080
-      }
-
-  # moefrp-server 的配置（格式见 server/deploy/config.example.toml）。
-  # listen 和 db_path 由镜像的环境变量决定，这里不用写。
-  moefrp_config:
-    content: |
-      trusted_proxies = ["172.29.0.0/24"]
-      single_session  = true
-      session_ttl     = "720h"
-      log_level       = "info"
-
-      # 管理后台初始化码：留空时第一次启动随机生成并写进日志。
-      # admin_setup_code = "至少 12 个字符"
-      # 管理员密码丢了：设为 true 并重启，用日志里的初始化码再建一个管理员，用完改回 false
-      # admin_recovery = false
-
-      [client]
-      latest_version = "3.0.0"
-      min_version    = "3.0.0"
-      download_url   = "https://github.com/XMZO/AnotherMoeFrpClient/releases/latest"
-      sha256         = ""
-      release_notes  = ""
-      announcement   = ""
-
-      # 图片面板的图源，可以有多个；不配置时客户端的图片面板显示"暂时没有可用的图源"
-      [[client.image_sources]]
-      url    = "https://umi.li/random?dir=lucky&type=img"
-      weight = 5
-      is_api = false
+      - ./data:/data
+    environment:
+      # 端口只绑在 127.0.0.1，进来的连接都来自宿主机的反代，所以信任 Docker 网段转发来的真实 IP。
+      # 改成对外监听时要删掉这一行，否则别人可以伪造 X-Forwarded-For。
+      MOEFRP_TRUSTED_PROXIES: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"

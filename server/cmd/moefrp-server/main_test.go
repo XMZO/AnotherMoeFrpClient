@@ -103,3 +103,24 @@ func TestParseArgsInterleaved(t *testing.T) {
 		t.Fatalf("交错解析失败：%v %v c=%s n=%d", pos, err, *c, *n)
 	}
 }
+
+func TestLoadConfigDefaultPaths(t *testing.T) {
+	dir := t.TempDir()
+	etc, data := filepath.Join(dir, "etc.toml"), filepath.Join(dir, "data.toml")
+	old := defaultConfigPaths
+	defaultConfigPaths = []string{etc, data}
+	t.Cleanup(func() { defaultConfigPaths = old })
+	t.Setenv("MOEFRP_CONFIG", "")
+
+	if _, p, err := loadConfig(""); err != nil || p != "" {
+		t.Fatalf("都不存在时不用配置文件：%q %v", p, err)
+	}
+	os.WriteFile(data, []byte("log_level = \"debug\"\n"), 0o600)
+	if cfg, p, err := loadConfig(""); err != nil || p != data || cfg.LogLevel != "debug" {
+		t.Fatalf("应使用 /data/config.toml：%q %v", p, err)
+	}
+	os.WriteFile(etc, []byte("log_level = \"warn\"\n"), 0o600)
+	if _, p, _ := loadConfig(""); p != etc {
+		t.Fatalf("/etc 优先：%q", p)
+	}
+}

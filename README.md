@@ -33,16 +33,16 @@
 
 ## 服务端 Docker 部署
 
-服务端镜像 `ghcr.io/xmzo/moefrp-server` 同时支持 amd64 和 arm64，由 GitHub Actions 在原生 x86 和 ARM 机器上构建（不用 QEMU）。部署只需要根目录的 `docker-compose.yml` 一个文件，它包含服务端和自动申请 HTTPS 证书的 Caddy：
+服务端镜像 `ghcr.io/xmzo/moefrp-server` 同时支持 amd64 和 arm64，由 GitHub Actions 在原生 x86 和 ARM 机器上构建（不用 QEMU）。部署只需要根目录的 `docker-compose.yml` 一个文件：
 
 ```bash
+mkdir moefrp && cd moefrp
 curl -O https://raw.githubusercontent.com/XMZO/AnotherMoeFrpClient/main/docker-compose.yml
-echo "DOMAIN=frplus.example.com" > .env
 docker compose up -d
 docker compose logs moefrp | grep 初始化码    # 打开 https://<域名>/admin/ 用它创建管理员
 ```
 
-邀请码、用户、审计日志和备份都在网页管理后台 `/admin/` 里操作。详见 `docs/docker.md`。
+服务只监听 `127.0.0.1:8080`，域名和 HTTPS 交给宿主机上的反向代理。数据全部在同目录的 `./data` 里，整个目录打包就能带走。邀请码、用户、审计日志和备份都在网页管理后台 `/admin/` 里操作。详见 `docs/docker.md`。
 
 ## 常用命令
 

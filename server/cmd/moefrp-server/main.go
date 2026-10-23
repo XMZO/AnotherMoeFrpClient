@@ -32,8 +32,10 @@ import (
 // version 在构建时用 -ldflags "-X main.version=<版本>" 设置。
 var version = "dev"
 
-// defaultConfigPath 是服务器上的默认配置路径；不存在时只用默认值和环境变量。
-const defaultConfigPath = "/etc/moefrp/config.toml"
+// defaultConfigPaths 是没指定 -c 和 MOEFRP_CONFIG 时依次尝试的配置文件：
+// 服务器上的 /etc/moefrp/config.toml，以及 Docker 镜像数据目录里的 /data/config.toml。
+// 都不存在时只用默认值和环境变量。
+var defaultConfigPaths = []string{"/etc/moefrp/config.toml", "/data/config.toml"}
 
 func main() {
 	os.Exit(run(context.Background(), os.Args[1:], os.Stdout, os.Stderr))
@@ -47,7 +49,7 @@ const usage = `用法：
   moefrp-server health   [-c config.toml]     # 检查本机服务是否正常（容器健康检查用）
   moefrp-server version
 
--c 未指定时依次尝试环境变量 MOEFRP_CONFIG 和 /etc/moefrp/config.toml，
+-c 未指定时依次尝试环境变量 MOEFRP_CONFIG、/etc/moefrp/config.toml 和 /data/config.toml，
 都没有时只使用默认值和 MOEFRP_* 环境变量。
 
 邀请码、用户管理、审计日志和备份下载在网页管理后台：http(s)://<服务地址>/admin/
@@ -134,9 +136,12 @@ func loadConfig(path string) (config.Config, string, error) {
 	if path == "" {
 		path = os.Getenv("MOEFRP_CONFIG")
 	}
-	if path == "" {
-		if _, err := os.Stat(defaultConfigPath); err == nil {
-			path = defaultConfigPath
+	for _, p := range defaultConfigPaths {
+		if path != "" {
+			break
+		}
+		if _, err := os.Stat(p); err == nil {
+			path = p
 		}
 	}
 	cfg, err := config.Load(path)

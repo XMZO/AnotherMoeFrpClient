@@ -82,7 +82,7 @@ func newLegacyDB(t *testing.T, aliceHash string) string {
 		bad = valid[:len(valid)-1] + "3"
 	}
 	mustExec(`INSERT INTO invitation_codes (code, is_used) VALUES (?, 0)`, bad) // 校验位错误
-	mustExec(`INSERT INTO shares VALUES ('s1', ?, 'x', 1, '{}')`, aliceID) // 没有节点：跳过
+	mustExec(`INSERT INTO shares VALUES ('s1', ?, 'x', 1, '{}')`, aliceID)      // 没有节点：跳过
 	nodes := `[{"remark":"上海","server_addr":"frp.example.com","server_port":"7000","token":"tok"},{"remark":"香港","server_addr":"hk.example.com","server_port":7001,"token":"tok"}]`
 	mustExec(`INSERT INTO shares VALUES ('share-tpl', ?, '模板 &amp; 节点', 1, ?)`, aliceID, `{"nodes":`+nodes+`}`)
 	mustExec(`INSERT INTO shares VALUES ('share-full', ?, '完整', 0, ?)`, aliceID,

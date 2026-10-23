@@ -971,7 +971,7 @@
         h('div', { class: 'card-head' }, h('h2', null, '怎么恢复')),
         h('div', { class: 'card-body' }, h('ol', { class: 'steps' },
           h('li', null, '停止服务：', h('code', null, 'docker compose stop moefrp')),
-          h('li', null, '用备份文件替换数据目录里的数据库文件（Docker 部署在 ', h('code', null, 'moefrp-data'), ' 卷里的 ', h('code', null, 'moefrp.db'), '）'),
+          h('li', null, '用备份文件替换数据目录里的数据库文件（Docker 部署是 compose 同目录下的 ', h('code', null, 'data/moefrp.db'), '）'),
           h('li', null, '启动服务：', h('code', null, 'docker compose start moefrp'))))),
       h('section', { class: 'card' },
         h('div', { class: 'card-head' }, h('h2', null, '自动备份')),

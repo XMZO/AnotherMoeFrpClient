@@ -88,7 +88,7 @@ jobs:
           cache-from: type=gha,scope=${{ env.PLATFORM_PAIR }}
       - name: smoke test
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           up() { # 名字 端口 docker-run 参数...
             local name=$1 port=$2; shift 2
             docker run -d --name "$name" -p "127.0.0.1:$port:8080" "$@" moefrp-smoke
@@ -102,8 +102,8 @@ jobs:
           sudo ls -ln smoke1
           test "$(sudo stat -c %u:%g smoke1 smoke1/moefrp.db | sort -u)" = 65532:65532
           test "$(runuid d1)" = 65532
-          docker logs d1 2>&1 | grep -q 初始化码
-          curl -fsS http://127.0.0.1:18081/admin/ | grep -q app.js
+          docker logs d1 2>&1 | grep 初始化码 > /dev/null   # 不用 grep -q：提前退出会让 pipefail 误报
+          curl -fsS http://127.0.0.1:18081/admin/ | grep app.js > /dev/null
           docker stop d1
 
           # 2) 已有数据、属于 root，指定 PUID/PGID 为当前用户：文件归当前用户

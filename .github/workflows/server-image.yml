@@ -11,12 +11,16 @@ on:
     paths:
       - 'server/**'
       - 'shared/**'
+      - 'agent/**'
+      - 'scripts/ci/**'
       - '.dockerignore'
       - '.github/workflows/server-image.yml'
   pull_request:
     paths:
       - 'server/**'
       - 'shared/**'
+      - 'agent/**'
+      - 'scripts/ci/**'
       - '.github/workflows/server-image.yml'
   workflow_dispatch:
 
@@ -36,13 +40,18 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: server/go.mod
-          cache-dependency-path: server/go.sum
+          cache-dependency-path: |
+            server/go.sum
+            agent/go.sum
       - name: shared
         working-directory: shared
         run: go vet ./... && go test -count=1 ./...
       - name: server
         working-directory: server
-        run: go vet ./... && go test -count=1 ./...
+        run: go vet ./... && go test -count=1 -race ./...
+      - name: agent
+        working-directory: agent
+        run: go vet ./... && go test -count=1 -race ./...
 
   build:
     needs: test
@@ -115,6 +124,15 @@ jobs:
           docker exec d2 moefrp-server backup --to /data/backup.db
           test "$(stat -c %u smoke2/backup.db)" = "$(id -u)"
           docker rm -f d1 d2
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: agent smoke test
+        run: |
+          # 编一个"旧版本"的 agent，用来测试从旧版本升级到镜像里的版本
+          (cd agent && CGO_ENABLED=0 go build -ldflags "-X main.version=ci-old" -o "$RUNNER_TEMP/moefrp-agent-old" ./cmd/moefrp-agent)
+          bash scripts/ci/agent-smoke.sh moefrp-smoke "$RUNNER_TEMP/moefrp-agent-old"
       - uses: docker/build-push-action@v6
         id: build
         with:

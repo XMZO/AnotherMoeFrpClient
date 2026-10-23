@@ -11,6 +11,7 @@
 | `shared/` | 两端共用的数据模型、API 结构体、错误码、校验 |
 | `server/` | moefrp-server：账号、云端配置同步、分享与订阅、版本信息、旧库导入、网页管理后台（`/admin/`） |
 | `client/` | Wails v3 + Vue 3 客户端；`internal/engine` 内嵌 frp v0.71.1 |
+| `agent/` | 节点 agent：内嵌 frps，由管理后台远程配置、监控、升级和卸载（`docs/node-agent.md`） |
 | `spike/` | Phase 0 技术验证，保留作参考 |
 | `scripts/release.ps1` | 发布构建 |
 | `docs/` | 各阶段说明、服务端运维、发布清单、上线切换手册 |
@@ -44,10 +45,12 @@ docker compose logs moefrp | grep 初始化码    # 打开 https://<域名>/admi
 
 服务只监听 `127.0.0.1:8080`，域名和 HTTPS 交给宿主机上的反向代理。数据全部在同目录的 `./data` 里，整个目录打包就能带走。邀请码、用户、审计日志和备份都在网页管理后台 `/admin/` 里操作。详见 `docs/docker.md`。
 
+**frps 节点**也在管理后台里管：添加节点后复制安装命令到 VPS 上执行，之后在网页上改 frps 配置、看状态和代理、执行命令、升级和卸载（`docs/node-agent.md`）。
+
 ## 常用命令
 
 ```powershell
-# 测试（分别在 shared、server、client 目录下）
+# 测试（分别在 shared、server、agent、client 目录下）
 go vet ./...; go test ./...
 cd client\frontend; pnpm exec vue-tsc --noEmit; pnpm test
 

@@ -1,7 +1,8 @@
-# 镜像只需要 shared/ 和 server/
+# 镜像只需要 shared/、server/ 和 agent/
 *
 !shared/
 !server/
+!agent/
 server/**/*.db
 server/**/*.db-*
 server/moefrp-server

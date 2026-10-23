@@ -43,6 +43,11 @@ const (
 	// 以下两个不在 PLAN 5.4 的初版表里，是实现时补充的通用错误。
 	MethodNotAllowed Code = "method_not_allowed"
 	PayloadTooLarge  Code = "payload_too_large"
+
+	// 管理后台的节点管理用到的错误。
+	ReauthRequired Code = "reauth_required" // 敏感操作前需要重新输入密码
+	NodeOffline    Code = "node_offline"    // 节点不在线，操作无法执行
+	NodeFailed     Code = "node_failed"     // 节点执行失败，原因在 message 里
 )
 
 type codeInfo struct {
@@ -75,6 +80,9 @@ var codes = map[Code]codeInfo{
 	Internal:           {http.StatusInternalServerError, "服务器内部错误"},
 	MethodNotAllowed:   {http.StatusMethodNotAllowed, "不支持的请求方法"},
 	PayloadTooLarge:    {http.StatusRequestEntityTooLarge, "请求体过大"},
+	ReauthRequired:     {http.StatusForbidden, "请重新输入密码确认身份"},
+	NodeOffline:        {http.StatusConflict, "节点不在线"},
+	NodeFailed:         {http.StatusBadGateway, "节点执行失败"},
 }
 
 // Codes 返回全部已定义的错误码，供测试和前端映射表核对。

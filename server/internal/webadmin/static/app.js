@@ -51,6 +51,14 @@
     activity: 'M22 12h-4l-3 9L9 3l-3 9H2',
     layers: 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
     logo: 'M7 17V7l5 6 5-6v10',
+    server: 'M4 4h16v6H4zM4 14h16v6H4zM8 7h.01M8 17h.01',
+    terminal: 'M4 17l6-6-6-6M12 19h8',
+    back: 'M19 12H5M12 19l-7-7 7-7',
+    upgrade: 'M12 19V5M5 12l7-7 7 7',
+    trash: 'M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6',
+    play: 'M6 4l14 8-14 8z',
+    eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+    lock: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4',
   };
 
   function icon(name, size = 18, width = 1.8) {
@@ -176,9 +184,26 @@
   }
 
   function fmtBytes(n) {
-    if (n < 1024) return n + ' B';
-    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
-    return (n / 1024 / 1024).toFixed(1) + ' MB';
+    n = Number(n) || 0;
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0;
+    while (n >= 1024 && i < units.length - 1) {
+      n /= 1024;
+      i++;
+    }
+    return (i === 0 ? n : n.toFixed(n >= 100 ? 0 : 1)) + ' ' + units[i];
+  }
+
+  const fmtRate = (n) => fmtBytes(n) + '/s';
+
+  function fmtUptime(sec) {
+    sec = Number(sec) || 0;
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    if (d) return d + ' 天 ' + h + ' 小时';
+    if (h) return h + ' 小时 ' + m + ' 分钟';
+    return m + ' 分钟';
   }
 
   function fmtSeconds(s) {
@@ -218,11 +243,18 @@
     }
     if (!res.ok) {
       const err = new ApiError((data && data.error) || { code: 'http_' + res.status, message: '请求失败（HTTP ' + res.status + '）' }, res.status);
-      if (res.status === 401 && !opts.noRedirect && state.me) {
+      // 只有会话失效才回登录页；密码输错（invalid_credentials）也是 401，不能当成退出
+      const sessionGone = ['unauthorized', 'session_expired', 'session_replaced'].includes(err.code);
+      if (res.status === 401 && sessionGone && !opts.noRedirect && state.me) {
         err.handled = true;
         state.me = null;
         toast('登录已过期，请重新登录', 'error');
         showLogin();
+      }
+      // 敏感操作：先让管理员重新输入密码，成功后重发一次
+      if (err.code === 'reauth_required' && !opts.noReauth) {
+        if (await reauthDialog()) return api(method, path, body, Object.assign({}, opts, { noReauth: true }));
+        err.handled = true;
       }
       throw err;
     }
@@ -345,15 +377,18 @@
 
   const PAGES = [
     { id: 'overview', label: '概览', icon: 'grid', desc: '用户、邀请码和客户端发布情况', render: pageOverview },
+    { id: 'nodes', label: '节点', icon: 'server', desc: '在面板上管理 frps 节点：配置、监控、升级、执行命令、卸载', render: pageNodes },
     { id: 'invites', label: '邀请码', icon: 'ticket', desc: '注册需要邀请码，每个码只能用一次', render: pageInvites },
     { id: 'users', label: '用户', icon: 'users', desc: '调整角色、停用账号、踢下线、生成密码重置码', render: pageUsers },
     { id: 'audit', label: '审计日志', icon: 'list', desc: '登录、注册、分享和管理操作的记录', render: pageAudit },
     { id: 'backup', label: '备份', icon: 'database', desc: '下载数据库快照', render: pageBackup },
   ];
 
+  // 路由：#/页面[/参数...]，例如 #/nodes/<节点ID>
   function currentPage() {
-    const id = location.hash.replace(/^#\/?/, '');
-    return PAGES.find((p) => p.id === id) || PAGES[0];
+    const [id, ...params] = location.hash.replace(/^#\/?/, '').split('/').map(decodeURIComponent);
+    const page = PAGES.find((p) => p.id === id) || PAGES[0];
+    return { page, params: page.id === id ? params.filter(Boolean) : [] };
   }
 
   // 切换页面（包括浏览器后退）或回到登录页时，关掉还开着的对话框
@@ -474,7 +509,7 @@
   }
 
   function renderPage() {
-    const page = currentPage();
+    const { page, params } = currentPage();
     const gen = ++state.gen;
     for (const a of $nav.children) {
       if (a.getAttribute('href') === '#/' + page.id) a.setAttribute('aria-current', 'page');
@@ -485,7 +520,15 @@
     $desc.textContent = page.desc;
     $actions.replaceChildren();
     $body.replaceChildren();
-    page.render({ actions: $actions, body: $body, alive: () => gen === state.gen && state.me !== null });
+    page.render({
+      actions: $actions, body: $body, params,
+      alive: () => gen === state.gen && state.me !== null,
+      setHead: (title, desc) => {
+        $title.replaceChildren(title);
+        $desc.textContent = desc || '';
+        document.title = (typeof title === 'string' ? title : page.label) + ' · MoeFrp 管理后台';
+      },
+    });
   }
 
   // ---------- 概览 ----------
@@ -978,6 +1021,569 @@
         h('div', { class: 'card-body muted' },
           '服务端带 ', h('code', null, '--auto-migrate'), ' 启动且需要升级数据库结构时，会先在数据库旁边自动保存一份 ',
           h('code', null, '*.pre-migrate-时间.db'), '。日常备份建议定期在这里下载，或者备份整个数据卷。'))));
+  }
+
+  // ---------- 二次验证 ----------
+
+  // reauthDialog 让管理员重新输入密码，15 分钟内的敏感操作不用再输。返回是否成功。
+  function reauthDialog() {
+    return new Promise((resolve) => {
+      let ok = false;
+      const pw = input({ type: 'password', autocomplete: 'current-password', required: true });
+      const err = h('div', { class: 'form-error', role: 'alert' });
+      const submit = button('确认', { kind: 'primary', type: 'submit' });
+      const d = openDialog({
+        title: '确认身份',
+        titleIcon: 'lock',
+        body: [h('p', { class: 'dialog-text' }, '这是敏感操作（执行命令、卸载、删除、重置令牌），请重新输入密码。之后 15 分钟内不用再输。'),
+          h('div', { class: 'gap' }), field('密码', pw), err],
+        actions: [button('取消', { onclick: () => d.close() }), submit],
+        onSubmit: () => busy(submit, async () => {
+          err.classList.remove('show');
+          try {
+            await api('POST', '/elevate', { password: pw.value }, { noRedirect: true, noReauth: true });
+            ok = true;
+            d.close();
+          } catch (e) {
+            err.textContent = errText(e);
+            err.classList.add('show');
+            pw.select();
+          }
+        }),
+        onClose: () => resolve(ok),
+      });
+    });
+  }
+
+  // ---------- 节点 ----------
+
+  const NODE_STATUS = { online: ['在线', 'ok'], offline: ['离线', 'danger'], pending: ['待安装', 'warn'] };
+  const FRPS_STATE = { running: ['运行中', 'ok'], stopped: ['未启动', null], error: ['出错', 'danger'] };
+
+  function nodeStatusBadge(n) {
+    if (n.pendingUninstall) return badge('待卸载', 'warn');
+    const [label, kind] = NODE_STATUS[n.status] || [n.status];
+    return h('span', { class: 'badge ' + (kind || '') }, n.status === 'online' ? h('span', { class: 'dot ok' }) : null, label);
+  }
+
+  function meter(used, total) {
+    const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0;
+    const el = h('div', { class: 'meter' + (pct > 90 ? ' danger' : pct > 75 ? ' warn' : '') }, h('i'));
+    el.firstChild.style.width = pct.toFixed(1) + '%';
+    return el;
+  }
+
+  function meterCell(label, used, total, text) {
+    return h('div', { class: 'meter-row' }, h('span', { class: 'meter-label' }, label), meter(used, total), h('span', { class: 'meter-text' }, text));
+  }
+
+  function copyBox(text, label = '已复制') {
+    return h('div', { class: 'copybox' }, h('code', null, text), button('复制', { small: true, icon: 'copy', onclick: () => copyText(text, label) }));
+  }
+
+  function installBlock(res) {
+    const parts = [];
+    if (res.installCommand) {
+      parts.push(h('p', { class: 'dialog-text' }, '在节点上以 root 执行下面的命令（Debian / Ubuntu / 红帽系等 systemd 系统，amd64 或 arm64）：'));
+      parts.push(copyBox(res.installCommand, '安装命令已复制'));
+    } else {
+      parts.push(h('p', { class: 'dialog-text' }, '无法确定面板地址，请在服务端配置 public_url。安装码：'), copyBox(res.enrollCode));
+    }
+    parts.push(h('ul', { class: 'hints' },
+      h('li', null, '安装码 ', h('time', { datetime: res.expiresAt, title: fmtTime(res.expiresAt) }, relTime(res.expiresAt)), '失效，只能用一次。'),
+      h('li', null, '不想让面板在这台机器上执行命令：在命令末尾加 ', h('code', null, '--no-exec'), '。'),
+      h('li', null, '卸载：在面板上点"卸载"，或者在节点上执行 ', h('code', null, 'sudo moefrp-agent uninstall'), '。')));
+    if (res.warning) parts.push(h('div', { class: 'callout warn' }, icon('alert', 16), h('span', null, res.warning)));
+    return parts;
+  }
+
+  function createNodeDialog(onDone) {
+    const name = input({ maxlength: 40, placeholder: '例如：东京 1', required: true });
+    const err = h('div', { class: 'form-error', role: 'alert' });
+    const submit = button('添加', { kind: 'primary', type: 'submit' });
+    const d = openDialog({
+      title: '添加节点',
+      titleIcon: 'server',
+      body: [field('名称', name, '只在面板上显示，之后可以改'), err],
+      actions: [button('取消', { onclick: () => d.close() }), submit],
+      onSubmit: () => busy(submit, async () => {
+        err.classList.remove('show');
+        try {
+          const res = await api('POST', '/nodes', { name: name.value });
+          d.close();
+          showInstall(res, '节点「' + res.node.name + '」已添加');
+          if (onDone) onDone(res.node);
+        } catch (e) {
+          if (e.handled) return;
+          err.textContent = errText(e);
+          err.classList.add('show');
+        }
+      }),
+    });
+  }
+
+  function showInstall(res, title) {
+    const d = openDialog({
+      title,
+      titleIcon: 'check',
+      wide: true,
+      body: installBlock(res),
+      actions: [button('完成', { kind: 'primary', onclick: () => d.close() })],
+    });
+  }
+
+  async function pageNodes(p) {
+    if (p.params[0]) return pageNode(p, p.params[0]);
+    const box = h('div', { class: 'card' });
+    const notice = h('div');
+    let data = null;
+    p.actions.append(
+      button('刷新', { icon: 'refresh', onclick: () => load() }),
+      button('执行命令', { icon: 'terminal', onclick: () => data && execDialog(data.nodes) }),
+      button('添加节点', { kind: 'primary', icon: 'plus', onclick: () => createNodeDialog(() => load()) }));
+    p.body.append(notice, box);
+    box.append(loadingBox());
+
+    async function load(quiet) {
+      try {
+        const res = await api('GET', '/nodes');
+        if (!p.alive()) return;
+        data = res;
+        draw();
+      } catch (e) {
+        if (!quiet && p.alive()) box.replaceChildren(errorBox(e, () => load()));
+      }
+    }
+
+    function draw() {
+      notice.replaceChildren(...(data.agent ? [] : [h('div', { class: 'callout warn mb' }, icon('alert', 16),
+        h('span', null, '这个面板没有打包 agent 程序，安装和升级不可用。正式部署请使用 Docker 镜像。'))]));
+      const list = data.nodes || [];
+      if (!list.length) {
+        box.replaceChildren(stateBox('server', '还没有节点', '添加一台 VPS，面板会在上面运行 frps，并负责配置、监控、升级和卸载。',
+          button('添加节点', { kind: 'primary', icon: 'plus', onclick: () => createNodeDialog(() => load()) })));
+        return;
+      }
+      box.replaceChildren(
+        table([{ label: '节点' }, { label: '状态' }, { label: 'frps' }, { label: '资源' }, { label: '网络' }, { label: 'agent' }, { label: '', cls: 'actions' }],
+          list.map((n) => {
+            const r = n.report;
+            const info = n.info || {};
+            const fs = r && r.frps;
+            const [fl, fk] = fs ? (FRPS_STATE[fs.state] || [fs.state]) : [null];
+            const href = '#/nodes/' + encodeURIComponent(n.id);
+            return h('tr', null,
+              h('td', null, h('a', { class: 'node-link', href }, n.name),
+                h('div', { class: 'cell-sub' }, [info.hostname, n.client && n.client.addr].filter(Boolean).join(' · ') || '—')),
+              h('td', null, nodeStatusBadge(n),
+                h('div', { class: 'cell-sub' }, n.status === 'online' ? '' : n.lastSeen ? ['最后在线 ', timeEl(n.lastSeen)] : '')),
+              h('td', null, fs ? [badge(fl, fk), h('div', { class: 'cell-sub' }, fs.state === 'running' ? ':' + fs.bindPort + ' · ' + fs.clients + ' 个客户端' : (fs.error || ''))]
+                : h('span', { class: 'faint' }, '—')),
+              h('td', { class: 'res-cell' }, r ? [meterCell('CPU', r.cpu, 100, r.cpu.toFixed(0) + '%'), meterCell('内存', r.memUsed, r.memTotal, fmtBytes(r.memUsed))]
+                : h('span', { class: 'faint' }, '—')),
+              h('td', { class: 'nowrap' }, r ? h('div', { class: 'cell-sub' }, '↓ ' + fmtRate(n.netRxRate), h('br'), '↑ ' + fmtRate(n.netTxRate)) : h('span', { class: 'faint' }, '—')),
+              h('td', { class: 'nowrap' }, info.agentVersion ? h('code', null, info.agentVersion) : h('span', { class: 'faint' }, '—'),
+                n.upgradeTo ? h('div', null, badge('可升级', 'info')) : null),
+              h('td', { class: 'actions' }, h('a', { class: 'btn btn-sm', href }, '管理')));
+          })),
+        h('div', { class: 'card-foot' }, '共 ' + list.length + ' 个节点，' + list.filter((n) => n.status === 'online').length + ' 个在线 · 每 10 秒自动刷新'));
+    }
+
+    await load();
+    const timer = setInterval(() => (p.alive() ? load(true) : clearInterval(timer)), 10000);
+  }
+
+  // execDialog 在选中的节点上执行命令（批量），结果逐个显示。
+  function execDialog(nodes, preselect) {
+    const online = nodes.filter((n) => n.status === 'online');
+    if (!online.length) {
+      toast('没有在线的节点', 'error');
+      return;
+    }
+    const checks = online.map((n) => {
+      const cb = h('input', { type: 'checkbox', value: n.id });
+      cb.checked = preselect ? preselect === n.id : online.length === 1;
+      if (n.info && n.info.execEnabled === false) {
+        cb.disabled = true;
+        cb.checked = false;
+      }
+      return h('label', { class: 'check' }, cb, n.name, n.info && n.info.execEnabled === false ? h('span', { class: 'faint' }, '（已关闭远程命令）') : null);
+    });
+    const cmd = h('textarea', { class: 'input mono textarea', rows: 4, placeholder: '例如：df -h; systemctl status nginx', spellcheck: 'false' });
+    const timeout = h('select', { class: 'input select' }, [['60', '1 分钟'], ['300', '5 分钟'], ['1800', '30 分钟'], ['3600', '1 小时']].map(([v, t]) => h('option', { value: v }, t)));
+    const results = h('div', { class: 'exec-results' });
+    const err = h('div', { class: 'form-error', role: 'alert' });
+    const submit = button('执行', { kind: 'primary', type: 'submit', icon: 'play' });
+    const d = openDialog({
+      title: '执行命令',
+      titleIcon: 'terminal',
+      wide: true,
+      body: [
+        h('div', { class: 'callout warn' }, icon('alert', 16), h('span', null, '命令以 root 身份在节点上执行，会写入审计日志。')),
+        h('div', { class: 'gap' }),
+        online.length > 1 ? field('节点', h('div', { class: 'checks' }, checks)) : h('div', { class: 'checks', hidden: true }, checks),
+        field('命令', cmd),
+        field('超时', timeout),
+        err, results,
+      ],
+      actions: [button('关闭', { onclick: () => d.close() }), submit],
+      onSubmit: () => busy(submit, async () => {
+        err.classList.remove('show');
+        const ids = checks.map((c) => c.querySelector('input')).filter((c) => c.checked).map((c) => c.value);
+        if (!ids.length) {
+          err.textContent = '请至少选择一个节点';
+          err.classList.add('show');
+          return;
+        }
+        try {
+          const res = await api('POST', '/nodes/exec', { nodes: ids, command: cmd.value, timeoutSec: Number(timeout.value) });
+          results.replaceChildren(...res.tasks.map((t) => taskResult(t, nodes.find((n) => n.id === t.nodeId))));
+        } catch (e) {
+          if (e.handled) return;
+          err.textContent = errText(e);
+          err.classList.add('show');
+        }
+      }),
+    });
+    cmd.focus();
+  }
+
+  // taskResult 显示一个任务的结果，任务还在运行时每秒查一次。
+  function taskResult(t, node) {
+    const status = h('span');
+    const out = h('pre', { class: 'term' });
+    const el = h('div', { class: 'task' }, h('div', { class: 'task-head' }, h('b', null, node ? node.name : t.nodeId), status), out);
+    const draw = (t) => {
+      const st = t.status === 'running' ? badge('运行中', 'info') : t.status === 'done' ? badge('完成 · 退出码 0', 'ok')
+        : badge('失败' + (t.exitCode != null ? ' · 退出码 ' + t.exitCode : ''), 'danger');
+      status.replaceChildren(st);
+      out.textContent = [t.output, t.error].filter(Boolean).join('\n') || (t.status === 'running' ? '…' : '（没有输出）');
+    };
+    draw(t);
+    (async () => {
+      for (let i = 0; i < 7200 && t.status === 'running'; i++) {
+        await new Promise((r) => setTimeout(r, i < 10 ? 500 : 1500));
+        if (!el.isConnected) return; // 对话框关了或者换了页面
+        try {
+          t = await api('GET', '/tasks/' + encodeURIComponent(t.id));
+          draw(t);
+        } catch (e) {
+          return;
+        }
+      }
+    })();
+    return el;
+  }
+
+  async function pageNode(p, id) {
+    let n = null;
+    let tab = 'overview';
+    const tabs = segmented([['overview', '概况'], ['config', 'frps 配置'], ['proxies', '代理'], ['logs', '日志'], ['exec', '命令'], ['settings', '设置']], tab, (v, set) => {
+      tab = v;
+      set(v);
+      drawTab();
+    }, { label: '节点页面' });
+    const content = h('div');
+    p.actions.append(button('刷新', { icon: 'refresh', onclick: () => load() }));
+    p.body.append(h('a', { class: 'back', href: '#/nodes' }, icon('back', 16), '全部节点'), loadingBox());
+
+    async function load(quiet) {
+      try {
+        const v = await api('GET', '/nodes/' + encodeURIComponent(id));
+        if (!p.alive()) return;
+        const first = !n;
+        n = v;
+        p.setHead(h('span', { class: 'title-row' }, n.name, nodeStatusBadge(n)), [n.info && n.info.hostname, n.client && n.client.addr].filter(Boolean).join(' · '));
+        if (first) {
+          p.body.replaceChildren(h('a', { class: 'back', href: '#/nodes' }, icon('back', 16), '全部节点'), h('div', { class: 'toolbar' }, tabs), content);
+          drawTab();
+        } else if (tab === 'overview') {
+          drawTab();
+        }
+      } catch (e) {
+        if (!quiet && p.alive()) p.body.replaceChildren(h('a', { class: 'back', href: '#/nodes' }, icon('back', 16), '全部节点'), errorBox(e, () => load()));
+      }
+    }
+
+    function drawTab() {
+      const fn = { overview: tabOverview, config: tabConfig, proxies: tabProxies, logs: tabLogs, exec: tabExec, settings: tabSettings }[tab];
+      content.replaceChildren(fn());
+    }
+
+    const offlineBox = () => stateBox('server', '节点不在线', n.status === 'pending' ? '还没有安装 agent。' : '节点上线后才能查看。');
+
+    function tabOverview() {
+      const info = n.info || {};
+      const r = n.report;
+      const kv = (pairs) => h('dl', { class: 'kv' }, pairs.filter(Boolean).map(([k, v]) => [h('dt', null, k), h('dd', null, v == null || v === '' ? h('span', { class: 'faint' }, '—') : v)]));
+      const cards = [];
+      if (n.status === 'pending') {
+        cards.push(h('section', { class: 'card span-2' }, h('div', { class: 'card-head' }, h('h2', null, '安装 agent')),
+          h('div', { class: 'card-body' }, h('p', { class: 'muted' }, '这个节点还没有安装。添加节点时给出的安装命令 24 小时内有效；找不到或过期了就重新生成。'),
+            h('div', { class: 'gap' }), button('重新生成安装命令', { kind: 'primary', onclick: (e) => resetToken(e.currentTarget, false) }))));
+      }
+      if (n.pendingUninstall) {
+        cards.push(h('div', { class: 'callout warn span-2' }, icon('alert', 16), h('span', null, '已标记卸载：节点下次上线时会自动卸载并从面板删除。'),
+          button('取消卸载', { small: true, onclick: async () => { await api('POST', '/nodes/' + encodeURIComponent(id) + '/cancel-uninstall').catch(fail); load(); } })));
+      }
+      if (n.client) {
+        cards.push(h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', null, '客户端连接信息'), h('span', null, '在 MoeFrp 客户端的"节点"里填这些')),
+          h('div', { class: 'card-body' }, kv([
+            ['地址', n.client.addr ? copyBox(n.client.addr) : h('span', { class: 'faint' }, '节点上线后显示，或在"设置"里填域名')],
+            ['端口', String(n.client.port)],
+            ['token', n.client.token ? secretBox(n.client.token) : h('span', { class: 'faint' }, '未设置（任何人都能连）')],
+          ]))));
+      }
+      const fs = r && r.frps;
+      const [fl, fk] = fs ? (FRPS_STATE[fs.state] || [fs.state]) : ['—'];
+      const sync = n.configRev === n.appliedRev ? badge('已同步', 'ok') : badge('未同步（面板 v' + n.configRev + ' / 节点 v' + n.appliedRev + '）', 'warn');
+      cards.push(h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', null, 'frps')),
+        h('div', { class: 'card-body' }, kv([
+          ['状态', fs ? badge(fl, fk) : null],
+          fs && fs.error ? ['错误', h('span', { class: 'text-danger' }, fs.error)] : null,
+          ['配置', sync],
+          n.applyError ? ['上次下发', h('span', { class: 'text-danger' }, n.applyError)] : null,
+          ['监听端口', fs && fs.bindPort ? String(fs.bindPort) : null],
+          ['客户端 / 代理 / 连接', fs ? fs.clients + ' / ' + fs.proxies + ' / ' + fs.conns : null],
+          ['今日流量', fs ? '↓ ' + fmtBytes(fs.trafficIn) + ' · ↑ ' + fmtBytes(fs.trafficOut) : null],
+          ['frp 版本', info.frpVersion ? h('code', null, info.frpVersion) : null],
+        ]))));
+      cards.push(h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', null, '资源')),
+        h('div', { class: 'card-body' }, r ? [
+          meterCell('CPU', r.cpu, 100, r.cpu.toFixed(1) + '%'),
+          meterCell('内存', r.memUsed, r.memTotal, fmtBytes(r.memUsed) + ' / ' + fmtBytes(r.memTotal)),
+          meterCell('磁盘', r.diskUsed, r.diskTotal, fmtBytes(r.diskUsed) + ' / ' + fmtBytes(r.diskTotal)),
+          h('div', { class: 'gap' }),
+          kv([['负载', r.load.map((x) => x.toFixed(2)).join(' / ')], ['网络', '↓ ' + fmtRate(n.netRxRate) + ' · ↑ ' + fmtRate(n.netTxRate)], ['运行时间', fmtUptime(r.uptime)]]),
+        ] : h('p', { class: 'muted' }, '节点在线后显示'))));
+      cards.push(h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', null, '系统')),
+        h('div', { class: 'card-body' }, kv([
+          ['系统', info.distro], ['内核', info.kernel], ['架构', info.arch ? info.os + '/' + info.arch : null], ['主机名', info.hostname],
+          ['IP', n.lastIp], ['agent', info.agentVersion ? [h('code', null, info.agentVersion), n.upgradeTo ? [' ', badge('可升级到 ' + n.upgradeTo, 'info')] : null] : null],
+          ['远程命令', info.agentVersion ? (info.execEnabled ? '允许' : '已关闭（--no-exec）') : null],
+          ['上线时间', n.connectedAt ? timeEl(n.connectedAt) : null], ['最后在线', n.lastSeen ? timeEl(n.lastSeen) : null], ['添加于', fmtTime(n.createdAt)],
+        ]))));
+      return h('div', { class: 'grid-2' }, cards);
+    }
+
+    function secretBox(text) {
+      const code = h('code', null, '••••••••••••');
+      let shown = false;
+      return h('div', { class: 'copybox' }, code,
+        iconButton('eye', '显示', () => { shown = !shown; code.textContent = shown ? text : '••••••••••••'; }),
+        button('复制', { small: true, icon: 'copy', onclick: () => copyText(text, 'token 已复制') }));
+    }
+
+    function tabConfig() {
+      const ta = h('textarea', { class: 'input mono textarea code-editor', rows: 22, spellcheck: 'false', wrap: 'off' });
+      ta.value = n.frpsConfig || '';
+      const result = h('div');
+      const save = button(n.status === 'online' ? '保存并应用' : '保存', {
+        kind: 'primary',
+        onclick: () => busy(save, async () => {
+          try {
+            const res = await api('PUT', '/nodes/' + encodeURIComponent(id) + '/config', { config: ta.value });
+            const r = res.result;
+            if (!res.pushed) {
+              result.replaceChildren(h('div', { class: 'callout info' }, icon('info', 16), h('span', null, '已保存（v' + res.rev + '）。节点不在线，上线后自动下发。')));
+            } else if (r.applied) {
+              result.replaceChildren(h('div', { class: 'callout ok' }, icon('check', 16), h('span', null, '已生效（v' + res.rev + '），frps 已用新配置重启。' + (r.warning ? ' 提示：' + r.warning : ''))));
+              toast('frps 配置已生效');
+            } else {
+              result.replaceChildren(h('div', { class: 'callout danger' }, icon('alert', 16),
+                h('span', null, r.error + (r.rolledBack ? '。frps 已恢复为之前的配置继续运行。' : ''))));
+            }
+            const v = await api('GET', '/nodes/' + encodeURIComponent(id));
+            n = v;
+          } catch (e) {
+            fail(e);
+          }
+        }),
+      });
+      return h('div', { class: 'card' }, h('div', { class: 'card-body' },
+        h('p', { class: 'muted' }, 'frps 原生 TOML 配置。保存后 agent 先校验，再重启 frps；新配置启动失败（例如端口被占用）会自动恢复旧配置。不支持 webServer（dashboard），状态在面板上看。'),
+        h('div', { class: 'gap' }), ta, h('div', { class: 'gap' }), result,
+        h('div', { class: 'row-end' }, button('还原', { onclick: () => { ta.value = n.frpsConfig || ''; result.replaceChildren(); } }), save)));
+    }
+
+    function tabProxies() {
+      if (n.status !== 'online') return offlineBox();
+      const box = h('div', { class: 'card' }, loadingBox());
+      (async () => {
+        try {
+          const res = await api('GET', '/nodes/' + encodeURIComponent(id) + '/proxies');
+          const list = (res.proxies || []).sort((a, b) => (b.online - a.online) || a.name.localeCompare(b.name));
+          if (!list.length) {
+            box.replaceChildren(stateBox('inbox', '还没有代理', '客户端连上这个节点并开启代理后显示在这里。'));
+            return;
+          }
+          box.replaceChildren(table([{ label: '名称' }, { label: '类型' }, { label: '用户' }, { label: '状态' }, { label: '连接' }, { label: '今日流量' }, { label: '上线时间' }],
+            list.map((x) => h('tr', null, h('td', null, h('code', null, x.name)), h('td', null, x.type), h('td', null, x.user || h('span', { class: 'faint' }, '—')),
+              h('td', null, x.online ? badge('在线', 'ok') : badge('离线')), h('td', null, String(x.conns)),
+              h('td', { class: 'nowrap' }, '↓ ' + fmtBytes(x.trafficIn) + ' · ↑ ' + fmtBytes(x.trafficOut)),
+              h('td', { class: 'nowrap cell-sub' }, x.lastStart || '—')))),
+          h('div', { class: 'card-foot' }, '在线 ' + list.filter((x) => x.online).length + ' / 共 ' + list.length + ' 个（包括最近下线的）'));
+        } catch (e) {
+          box.replaceChildren(errorBox(e));
+        }
+      })();
+      return box;
+    }
+
+    function tabLogs() {
+      if (n.status !== 'online') return offlineBox();
+      const pre = h('pre', { class: 'term term-tall' }, '加载中…');
+      const load = async () => {
+        try {
+          const res = await api('GET', '/nodes/' + encodeURIComponent(id) + '/logs?lines=500');
+          pre.textContent = (res.lines || []).join('\n') || '（没有日志）';
+          pre.scrollTop = pre.scrollHeight;
+        } catch (e) {
+          pre.textContent = errText(e);
+        }
+      };
+      load();
+      return h('div', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', null, '最近 500 行'), button('刷新', { small: true, icon: 'refresh', onclick: load })),
+        h('div', { class: 'card-body' }, pre, h('p', { class: 'cell-sub' }, '完整日志在节点上：journalctl -u moefrp-agent')));
+    }
+
+    function tabExec() {
+      const hist = h('div');
+      const loadHist = async () => {
+        try {
+          const res = await api('GET', '/nodes/' + encodeURIComponent(id) + '/tasks');
+          const list = res.tasks || [];
+          hist.replaceChildren(list.length ? table([{ label: '时间' }, { label: '类型' }, { label: '内容' }, { label: '结果' }, { label: '', cls: 'actions' }],
+            list.map((t) => h('tr', null, h('td', { class: 'nowrap' }, timeEl(t.createdAt)), h('td', null, t.kind === 'exec' ? '命令' : '升级'),
+              h('td', null, h('code', { class: 'clip' }, t.command)),
+              h('td', { class: 'nowrap' }, t.status === 'running' ? badge('运行中', 'info') : t.status === 'done' ? badge('成功', 'ok') : badge('失败', 'danger')),
+              h('td', { class: 'actions' }, button('查看', { small: true, onclick: async () => {
+                try {
+                  const full = await api('GET', '/tasks/' + encodeURIComponent(t.id));
+                  openDialog({ title: t.kind === 'exec' ? '命令结果' : '升级结果', wide: true, body: [h('pre', { class: 'term' }, '$ ' + full.command), taskResult(full, n)] });
+                } catch (e) {
+                  fail(e);
+                }
+              } }))))) : stateBox('inbox', '还没有执行过命令', null));
+        } catch (e) {
+          hist.replaceChildren(errorBox(e));
+        }
+      };
+      loadHist();
+      const disabled = n.info && n.info.execEnabled === false;
+      return h('div', null,
+        h('div', { class: 'card mb' }, h('div', { class: 'card-body row-between' },
+          h('div', null, h('div', { class: 'setting-title' }, '以 root 执行命令'),
+            h('div', { class: 'setting-desc' }, disabled ? '这台节点安装时加了 --no-exec，已关闭远程命令。' : '需要重新输入密码确认身份，命令全文写入审计日志。')),
+          button('执行命令', { kind: 'primary', icon: 'terminal', disabled: disabled || n.status !== 'online', onclick: () => execDialog([n], n.id) }))),
+        h('div', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', null, '历史'), button('刷新', { small: true, icon: 'refresh', onclick: loadHist })), hist));
+    }
+
+    async function resetToken(btn, confirmFirst) {
+      if (confirmFirst && !(await confirmDialog({ title: '重置令牌', danger: true, ok: '重置',
+        message: '节点当前的令牌会立即失效并断开连接，需要用新的安装命令在节点上重新安装（加 --force）。用于令牌泄露或机器重装。' }))) return;
+      await busy(btn, async () => {
+        try {
+          const res = await api('POST', '/nodes/' + encodeURIComponent(id) + '/reset-token');
+          if (confirmFirst && res.installCommand) res.installCommand += ' --force';
+          showInstall(res, '新的安装命令');
+          load(true);
+        } catch (e) {
+          fail(e);
+        }
+      });
+    }
+
+    function tabSettings() {
+      const name = input({ value: n.name, maxlength: 40 });
+      const addr = input({ value: n.publicAddr, placeholder: n.lastIp || 'frp.example.com', maxlength: 253 });
+      const save = button('保存', {
+        kind: 'primary',
+        onclick: () => busy(save, async () => {
+          try {
+            await api('PATCH', '/nodes/' + encodeURIComponent(id), { name: name.value, publicAddr: addr.value });
+            toast('已保存');
+            load(true);
+          } catch (e) {
+            fail(e);
+          }
+        }),
+      });
+      const setting = (title, desc, control) => h('div', { class: 'setting' },
+        h('div', { class: 'setting-text' }, h('div', { class: 'setting-title' }, title), h('div', { class: 'setting-desc' }, desc)), control);
+      const online = n.status === 'online';
+      const op = (label, path, msg, opts = {}) => button(label, Object.assign({ small: true, disabled: !online }, opts, {
+        onclick: async (e) => {
+          const b = e.currentTarget;
+          if (opts.confirm && !(await confirmDialog(opts.confirm))) return;
+          await busy(b, async () => {
+            try {
+              await api('POST', '/nodes/' + encodeURIComponent(id) + path);
+              toast(msg);
+              load(true);
+            } catch (ex) {
+              fail(ex);
+            }
+          });
+        },
+      }));
+      const uninstall = button('卸载', {
+        small: true, kind: 'danger-ghost',
+        onclick: async (e) => {
+          const b = e.currentTarget;
+          if (!(await confirmDialog({ title: '卸载节点', danger: true, ok: '卸载',
+            message: online ? '节点会停止 frps，删除 agent 的程序、配置、systemd 服务和所有数据，然后从面板移除。连在这个节点上的客户端会断开。'
+              : '节点不在线，会先标记，下次上线时自动卸载并从面板移除。' }))) return;
+          await busy(b, async () => {
+            try {
+              const res = await api('POST', '/nodes/' + encodeURIComponent(id) + '/uninstall');
+              if (res.done) {
+                toast('节点正在卸载，已从面板移除');
+                location.hash = '#/nodes';
+              } else {
+                toast('已标记，节点上线后卸载');
+                load(true);
+              }
+            } catch (ex) {
+              fail(ex);
+            }
+          });
+        },
+      });
+      const del = button('删除', {
+        small: true, kind: 'danger-ghost',
+        onclick: async (e) => {
+          const b = e.currentTarget;
+          if (!(await confirmDialog({ title: '只从面板删除', danger: true, ok: '删除',
+            message: '节点上的 agent 和 frps 不会被卸载，会继续按最后的配置运行，只是面板不再管理它。一般应该用"卸载"。' }))) return;
+          await busy(b, async () => {
+            try {
+              await api('DELETE', '/nodes/' + encodeURIComponent(id));
+              toast('已删除');
+              location.hash = '#/nodes';
+            } catch (ex) {
+              fail(ex);
+            }
+          });
+        },
+      });
+      return h('div', null,
+        h('section', { class: 'card mb' }, h('div', { class: 'card-head' }, h('h2', null, '基本信息')),
+          h('div', { class: 'card-body' }, h('div', { class: 'form-grid' },
+            field('名称', name), field('客户端连接地址', addr, '填域名或 IP；留空时用节点上报的 IP')), h('div', { class: 'row-end' }, save))),
+        h('section', { class: 'card mb' }, h('div', { class: 'card-head' }, h('h2', null, '维护')), h('div', { class: 'card-body' },
+          setting('重启 frps', '用当前配置重启，客户端会短暂断开', op('重启', '/restart', 'frps 已重启')),
+          setting('升级 agent', n.upgradeTo ? '当前 ' + n.info.agentVersion + '，可升级到 ' + n.upgradeTo + '。升级失败会自动回滚。' : '已是面板打包的版本',
+            op('升级', '/upgrade', '已开始升级，完成后在"命令"页的历史里查看结果', { disabled: !online || !n.upgradeTo, icon: 'upgrade',
+              confirm: { title: '升级 agent', ok: '升级', message: 'agent 会下载新版本并重启，frps 会断开几秒。' } })),
+          setting('重置令牌', '令牌泄露或机器重装时使用，需要在节点上重新安装', button('重置', { small: true, onclick: (e) => resetToken(e.currentTarget, true) })))),
+        h('section', { class: 'card danger-zone' }, h('div', { class: 'card-head' }, h('h2', null, '危险操作')), h('div', { class: 'card-body' },
+          setting('卸载', '停止 frps，删除节点上 agent 的所有文件，并从面板移除', uninstall),
+          setting('只从面板删除', '不卸载节点上的程序', del))));
+    }
+
+    await load();
+    const timer = setInterval(() => (p.alive() ? load(true) : clearInterval(timer)), 10000);
   }
 
   boot();

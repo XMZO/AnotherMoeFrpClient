@@ -48,6 +48,8 @@ journalctl -u moefrp | grep 初始化码     # 第一次启动时打印，用来
 | `log_level` | `info` | `MOEFRP_LOG_LEVEL` | `debug` / `info` / `warn` / `error` |
 | `admin_setup_code` | 空 | `MOEFRP_ADMIN_SETUP_CODE` | 管理后台初始化码，12–128 个字符；空时随机生成并写进日志 |
 | `admin_recovery` | `false` | `MOEFRP_ADMIN_RECOVERY` | 已有用户时也开放初始化页面（管理员密码丢失时用，用完关掉） |
+| `public_url` | 空 | `MOEFRP_PUBLIC_URL` | 节点访问面板的地址，写进节点安装命令；空时取打开后台时的地址 |
+| `agent_dist_dir` | `/usr/share/moefrp/agent` | `MOEFRP_AGENT_DIST_DIR` | 打包的节点 agent 程序（Docker 镜像里已有）；没有时不能安装、升级节点 |
 | `client.latest_version` | 空 | `MOEFRP_CLIENT_LATEST_VERSION` | |
 | `client.min_version` | 空 | `MOEFRP_CLIENT_MIN_VERSION` | 低于它的客户端收到 426；空表示不检查 |
 | `client.download_url` | 空 | `MOEFRP_CLIENT_DOWNLOAD_URL` | 同时用于旧客户端的"请下载新版"提示 |

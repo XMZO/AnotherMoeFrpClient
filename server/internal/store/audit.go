@@ -25,6 +25,17 @@ const (
 	AuditAdminLogin        = "admin.login"  // 预留
 	AuditAdminBackup       = "admin.backup" // 下载数据库备份
 
+	AuditNodeCreate     = "node.create"
+	AuditNodeEnroll     = "node.enroll" // agent 用安装码注册
+	AuditNodeUpdate     = "node.update"
+	AuditNodeConfig     = "node.config"
+	AuditNodeResetToken = "node.reset_token"
+	AuditNodeDelete     = "node.delete"
+	AuditNodeUninstall  = "node.uninstall"
+	AuditNodeExec       = "node.exec"
+	AuditNodeUpgrade    = "node.upgrade"
+	AuditNodeRestart    = "node.restart"
+
 	AuditShareCreate    = "share.create"
 	AuditShareRepublish = "share.republish"
 	AuditShareRevoke    = "share.revoke"

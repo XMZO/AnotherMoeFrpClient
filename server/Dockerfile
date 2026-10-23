@@ -1,4 +1,4 @@
-# moefrp-server 镜像。构建上下文是仓库根目录（server 通过 replace 引用 ../shared）：
+# moefrp-server 镜像（内含两个架构的节点 agent）。构建上下文是仓库根目录（通过 replace 引用 ../shared）：
 #   docker build -f server/Dockerfile -t moefrp-server .
 # GitHub Actions 在 x86 和 ARM 的原生机器上分别构建（不用 QEMU），再合并成多架构镜像。
 
@@ -6,17 +6,26 @@ FROM golang:1.26-alpine AS build
 WORKDIR /src
 COPY shared/ shared/
 COPY server/go.mod server/go.sum server/
-RUN cd server && go mod download
+COPY agent/go.mod agent/go.sum agent/
+RUN cd server && go mod download && cd ../agent && go mod download
 COPY server/ server/
+COPY agent/ agent/
 ARG VERSION=dev
 RUN cd server && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/moefrp-server ./cmd/moefrp-server \
  && mkdir -p /out/data
+# 节点 agent：两个架构都打包进镜像（Go 交叉编译，不用 QEMU），面板安装和升级节点时从这里下发，版本号和面板一致
+RUN cd agent && for arch in amd64 arm64; do \
+      CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+        -o /out/agent/moefrp-agent-linux-$arch ./cmd/moefrp-agent || exit 1; \
+    done \
+ && echo "${VERSION}" > /out/agent/VERSION
 
 # distroless：没有 shell 和包管理器，自带 CA 证书和时区数据。
 # 以 root 启动，程序先把 /data 的属主改成 MOEFRP_PUID:MOEFRP_PGID，再永久切换到这个用户运行
 # （见 cmd/moefrp-server/privdrop.go）。所以绑定挂载的目录不管属于谁都能直接用，服务本身不以 root 运行。
 FROM gcr.io/distroless/static-debian12
 COPY --from=build /out/moefrp-server /usr/local/bin/moefrp-server
+COPY --from=build /out/agent /usr/share/moefrp/agent
 # 所有数据都在 /data：数据库、可选的 config.toml、升级前的自动备份。挂载宿主机目录即可整体带走。
 COPY --from=build --chown=65532:65532 /out/data /data
 # 容器里监听所有地址，对外暴露在哪由端口映射决定；环境变量 MOEFRP_* 优先于 config.toml

@@ -14,6 +14,7 @@ import (
 	"moefrp/server/internal/auth"
 	"moefrp/server/internal/config"
 	"moefrp/server/internal/legacy"
+	"moefrp/server/internal/nodes"
 	"moefrp/server/internal/profile"
 	"moefrp/server/internal/ratelimit"
 	"moefrp/server/internal/share"
@@ -47,6 +48,7 @@ type Deps struct {
 	Auth     *auth.Service
 	Profiles *profile.Service
 	Shares   *share.Service // nil 时自动创建
+	Nodes    *nodes.Service // nil 时自动创建
 	Logger   *slog.Logger
 	Version  string           // 服务端版本，显示在 /healthz
 	Limits   *Limits          // nil 时用 DefaultLimits
@@ -61,6 +63,8 @@ type Server struct {
 	profiles *profile.Service
 	shares   *share.Service
 	admin    *admin.Admin
+	nodes    *nodes.Service
+	elevated elevation
 	log      *slog.Logger
 	version  string
 	now      func() time.Time
@@ -107,6 +111,17 @@ func New(d Deps) (*Server, error) {
 		s.shares = share.New(d.Store, s.now)
 	}
 	s.admin = admin.New(d.Store, d.Auth, s.now)
+	s.nodes = d.Nodes
+	if s.nodes == nil {
+		dist, err := nodes.LoadDist(d.Config.AgentDistDir, d.Version)
+		if err != nil {
+			return nil, err
+		}
+		if dist == nil {
+			s.log.Info("no bundled agent binaries; node install and upgrade are unavailable", "dir", d.Config.AgentDistDir)
+		}
+		s.nodes = nodes.New(nodes.Options{Store: d.Store, Log: s.log, Now: s.now, Dist: dist})
+	}
 	if v := d.Config.Client.MinVersion; v != "" {
 		mv, err := api.ParseVersion(v)
 		if err != nil {
@@ -178,6 +193,7 @@ func (s *Server) routes() {
 	mux.Handle("GET "+api.RouteSubscriptionRuntime, authed(s.handleSubscriptionRuntime))
 
 	s.adminRoutes(mux)
+	s.nodeRoutes(mux)
 	mux.Handle("GET /admin/", s.adminUI())
 	mux.Handle("GET /admin", http.RedirectHandler("/admin/", http.StatusMovedPermanently))
 

@@ -98,6 +98,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .muted { color: var(--muted); }
 .faint { color: var(--faint); }
 .nowrap { white-space: nowrap; }
+[hidden] { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 .icon { flex: none; display: block; }
@@ -445,3 +446,69 @@ dialog.dialog[open] { animation: pop 0.14s ease-out; }
 
 .manage-head { align-items: center; margin-bottom: 12px; }
 .manage-head + .callout { margin-bottom: 4px; }
+
+/* ---------- 节点 ---------- */
+
+.mb { margin-bottom: 14px; }
+.gap { height: 12px; }
+.text-danger { color: var(--danger); }
+.row-end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.row-between { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.span-2 { grid-column: 1 / -1; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.form-grid .field + .field { margin-top: 0; }
+
+.back { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 14px; color: var(--muted); font-size: 13px; }
+.back:hover { color: var(--text); text-decoration: none; }
+.title-row { display: inline-flex; align-items: center; gap: 10px; }
+.node-link { font-weight: 600; color: var(--text); }
+
+.callout.ok { background: var(--ok-weak); color: var(--ok); }
+.callout.danger { background: var(--danger-weak); color: var(--danger); }
+.callout > .btn { margin-left: auto; }
+
+.hints { margin: 12px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+.hints li + li { margin-top: 4px; }
+
+.copybox {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  padding: 6px 6px 6px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2);
+}
+.copybox code { flex: 1; min-width: 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; user-select: all; }
+.dialog-body .copybox { margin-top: 10px; }
+
+.meter-row { display: grid; grid-template-columns: 40px 1fr auto; align-items: center; gap: 8px; font-size: 12px; }
+.meter-row + .meter-row { margin-top: 6px; }
+.meter-label { color: var(--muted); }
+.meter-text { color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.meter { height: 6px; min-width: 60px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.meter > i { display: block; height: 100%; border-radius: 99px; background: var(--ok); }
+.meter.warn > i { background: var(--warn); }
+.meter.danger > i { background: var(--danger); }
+.card-body .meter-row { grid-template-columns: 48px 1fr auto; font-size: 13px; }
+.card-body .meter-row + .meter-row { margin-top: 10px; }
+.card-body .meter { height: 8px; }
+.res-cell { min-width: 200px; }
+
+.textarea { height: auto; padding: 10px 12px; line-height: 1.6; resize: vertical; }
+.code-editor { font: 13px/1.6 var(--mono); tab-size: 2; white-space: pre; }
+.select { width: auto; min-width: 140px; padding-right: 8px; }
+
+.term {
+  margin: 0; padding: 12px 14px; max-height: 360px; overflow: auto;
+  border-radius: var(--radius-sm); background: #0f1218; color: #d6dae1;
+  font: 12.5px/1.6 var(--mono); white-space: pre-wrap; word-break: break-all;
+}
+.term-tall { max-height: 60vh; min-height: 240px; }
+.exec-results { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+.task-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.dialog-body > .term + .task { margin-top: 10px; }
+
+.checks { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.check input { width: 16px; height: 16px; accent-color: var(--accent); }
+
+code.clip { display: inline-block; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+
+.danger-zone { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
+.danger-zone .card-head h2 { color: var(--danger); }

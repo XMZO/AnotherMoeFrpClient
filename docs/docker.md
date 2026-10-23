@@ -31,6 +31,10 @@ frplus.example.com {
 ```nginx
 location / {
     proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;       # 节点 agent 用 WebSocket
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 120s;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
@@ -52,6 +56,18 @@ docker compose logs moefrp | grep 初始化码
 管理后台里可以：生成和撤销邀请码、查看用户、改角色（普通用户 / VIP / 管理员）、停用账号、踢下线、生成密码重置码、看审计日志、下载数据库备份。只有管理员能登录，12 小时不操作自动退出，和桌面客户端的登录互不影响。
 
 **管理员密码丢了**：在 `data/config.toml` 里加一行 `admin_recovery = true`，`docker compose restart`，用日志里新的初始化码再建一个管理员，然后删掉这一行再重启。
+
+## frps 节点
+
+管理后台的"节点"页可以管理 frps 节点：添加节点 → 复制安装命令到 VPS 上用 root 执行 → 之后在网页上改 frps 配置、看状态、执行命令、升级和卸载。镜像里已经带了 amd64 和 arm64 两个架构的节点 agent，安装和升级都从面板下载，不依赖 GitHub。
+
+安装命令里的面板地址默认取你打开后台时的地址。节点要通过别的地址访问面板时（例如你在内网打开后台），在 `data/config.toml` 里写：
+
+```toml
+public_url = "https://frp.example.com"
+```
+
+节点通过 WebSocket 连接面板，反代要支持 WebSocket（Caddy 默认支持；Nginx 要加 `proxy_http_version 1.1`、`proxy_set_header Upgrade $http_upgrade`、`proxy_set_header Connection "upgrade"`）。设计和安全说明见 `node-agent.md`。
 
 ## 数据目录
 

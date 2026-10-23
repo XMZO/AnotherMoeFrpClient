@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -30,6 +31,12 @@ type Config struct {
 	// （管理员密码丢失时用，用完记得关掉）。
 	AdminSetupCode string `toml:"admin_setup_code"`
 	AdminRecovery  bool   `toml:"admin_recovery"`
+
+	// 节点 agent（docs/node-agent.md）：
+	// PublicURL 是节点访问面板用的地址（例如 https://frp.example.com），写进安装命令；
+	// 为空时按管理员访问后台时的地址生成。AgentDistDir 是打包的 agent 程序所在目录。
+	PublicURL    string `toml:"public_url"`
+	AgentDistDir string `toml:"agent_dist_dir"`
 
 	Client Client `toml:"client"`
 }
@@ -79,6 +86,7 @@ func Default() Config {
 		SingleSession:  true,
 		SessionTTL:     Duration(30 * 24 * time.Hour),
 		LogLevel:       "info",
+		AgentDistDir:   "/usr/share/moefrp/agent",
 	}
 }
 
@@ -128,6 +136,8 @@ var envVars = []struct {
 	}},
 	{"SESSION_TTL", func(c *Config, v string) error { return c.SessionTTL.UnmarshalText([]byte(v)) }},
 	{"LOG_LEVEL", func(c *Config, v string) error { c.LogLevel = v; return nil }},
+	{"PUBLIC_URL", func(c *Config, v string) error { c.PublicURL = v; return nil }},
+	{"AGENT_DIST_DIR", func(c *Config, v string) error { c.AgentDistDir = v; return nil }},
 	{"ADMIN_SETUP_CODE", func(c *Config, v string) error { c.AdminSetupCode = v; return nil }},
 	{"ADMIN_RECOVERY", func(c *Config, v string) error {
 		b, err := strconv.ParseBool(v)
@@ -185,6 +195,12 @@ func (c Config) Validate() error {
 	}
 	if _, err := c.TrustedPrefixes(); err != nil {
 		errs = append(errs, err)
+	}
+	if c.PublicURL != "" {
+		if u, err := url.Parse(c.PublicURL); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" ||
+			(u.Path != "" && u.Path != "/") || u.RawQuery != "" || strings.ContainsAny(c.PublicURL, "'\"` $\\") {
+			errs = append(errs, fmt.Errorf("public_url %q 不正确，应类似 https://frp.example.com", c.PublicURL))
+		}
 	}
 	if code := c.AdminSetupCode; code != "" && (len(code) < 12 || len(code) > 128) {
 		errs = append(errs, errors.New("admin_setup_code 长度应为 12–128 个字符"))

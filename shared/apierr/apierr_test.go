@@ -35,6 +35,9 @@ func TestStatusTable(t *testing.T) {
 		Internal:           500,
 		MethodNotAllowed:   405,
 		PayloadTooLarge:    413,
+		ReauthRequired:     403,
+		NodeOffline:        409,
+		NodeFailed:         502,
 	}
 	for code, status := range want {
 		if got := code.Status(); got != status {

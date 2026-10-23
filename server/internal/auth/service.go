@@ -682,6 +682,40 @@ func (s *Service) ChangePassword(ctx context.Context, p Principal, oldPassword, 
 	})
 }
 
+// ConfirmPassword 让已登录的用户再输入一次密码（管理后台执行敏感操作前的二次验证）。
+// 和登录共用失败锁定计数，防止拿到 cookie 的人借此暴力猜密码。
+func (s *Service) ConfirmPassword(ctx context.Context, p Principal, password string, meta ClientMeta) error {
+	if password == "" {
+		return validationError(validate.Errors{{Field: "password", Reason: validate.ReasonRequired, Message: "请输入密码"}})
+	}
+	now := s.now()
+	att, denial, wait := s.lockout.Begin(p.User.Nickname, now)
+	switch denial {
+	case Locked:
+		return lockedError(wait)
+	case Busy:
+		return busyError()
+	}
+	defer att.Cancel()
+	ok, _, err := s.verify(ctx, password, p.User.PasswordHash)
+	if err != nil {
+		return fmt.Errorf("auth: verify password: %w", err)
+	}
+	if !ok {
+		d, locked := att.Fail(now)
+		s.auditBestEffort(ctx, store.AuditEntry{
+			ActorID: p.User.ID, Action: store.AuditLoginFailed, Target: p.User.Nickname, IP: meta.IP,
+			Detail: map[string]any{"reason": "confirm_password"},
+		})
+		if locked {
+			return lockedError(d)
+		}
+		return apierr.New(apierr.InvalidCredentials)
+	}
+	att.Succeed()
+	return nil
+}
+
 // ResetPassword 用管理员发放的一次性重置码设置新密码，成功后吊销该用户的所有会话。
 // 重置码不存在、与昵称不匹配、已用过、已过期，一律返回 reset_code_invalid。
 func (s *Service) ResetPassword(ctx context.Context, nickname, code, newPassword string, meta ClientMeta) error {

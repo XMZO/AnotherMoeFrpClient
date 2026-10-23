@@ -20,6 +20,11 @@ log_level       = "info"
 # 管理员密码丢失时设为 true 重启，即使已有用户也开放初始化页面；用完改回 false
 # admin_recovery = false
 
+# frps 节点：节点访问面板用的地址（写进安装命令），不填时取打开后台时的地址
+# public_url = "https://frplus.loli-con.cn"
+# 打包的节点 agent 程序目录（非 Docker 部署时把 moefrp-agent-linux-amd64 / -arm64 和 VERSION 放进去）
+# agent_dist_dir = "/usr/share/moefrp/agent"
+
 [client]
 # GET /api/v1/client/config 下发给客户端
 latest_version = "3.0.0"

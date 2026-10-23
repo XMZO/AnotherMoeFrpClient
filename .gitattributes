@@ -1,0 +1,2 @@
+# shell 脚本必须是 LF：install.sh 会被编译进服务端并下发到 Linux 节点执行
+*.sh text eol=lf

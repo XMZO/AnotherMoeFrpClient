@@ -40,7 +40,7 @@ trap cleanup EXIT
 docker run -d --name smoke-panel -p 127.0.0.1:18090:8080 -v "$DATA:/data" \
   -e MOEFRP_ADMIN_SETUP_CODE=CI-ADMIN-SETUP-CODE "$IMAGE"
 wait_for "面板启动" 30 curl -fsS "$BASE/healthz"
-api -X POST "$BASE/api/v1/admin/setup" -d '{"code":"CI-ADMIN-SETUP-CODE","nickname":"ci-admin","password":"ci-admin-password"}' >/dev/null
+api -X POST "$BASE/api/v1/admin/setup" -d '{"code":"CI-ADMIN-SETUP-CODE","nickname":"ci_admin","password":"ci-admin-password"}' >/dev/null
 api -X POST "$BASE/api/v1/admin/elevate" -d '{"password":"ci-admin-password"}' >/dev/null
 VERSION=$(api "$BASE/api/v1/admin/nodes" | jq -r .agent.version)
 test -n "$VERSION" && test "$VERSION" != null

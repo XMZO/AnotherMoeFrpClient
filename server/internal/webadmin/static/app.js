@@ -453,7 +453,7 @@
         : ['初始化码在服务端启动日志里，Docker 部署可以用 ', h('code', null, 'docker compose logs moefrp'), ' 查看。']);
     authCard(recovery ? '创建新管理员' : '初始化管理后台', '还没有管理员账号，先创建一个。', note, [
       field('初始化码', code),
-      field('管理员昵称', nick, '2–20 个字符，之后也用它登录桌面客户端'),
+      field('管理员昵称', nick, '3–20 位字母、数字或下划线，之后也用它登录桌面客户端'),
       field('密码', pw, '至少 8 位'),
       field('确认密码', pw2),
     ], '创建并登录', async () => {

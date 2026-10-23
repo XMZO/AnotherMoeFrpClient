@@ -95,7 +95,8 @@ jobs:
             for _ in $(seq 30); do curl -fsS "http://127.0.0.1:$port/healthz" && echo && return 0; sleep 1; done
             docker logs "$name"; return 1
           }
-          runuid() { docker top "$1" -eo uid,args | awk '/moefrp-server serve/ {print $1}'; }
+          # 容器主进程的 uid（/proc/<pid>/status 的 Uid 行：real effective saved fs，四个都要是目标用户）
+          runuid() { awk '/^Uid:/ {print $2; print $3; print $4; print $5}' "/proc/$(docker inspect -f '{{.State.Pid}}' "$1")/status" | sort -u; }
 
           # 1) ./data 不存在，由 Docker 以 root 创建：自动改属主，以 65532 运行
           up d1 18081 -v "$PWD/smoke1:/data"

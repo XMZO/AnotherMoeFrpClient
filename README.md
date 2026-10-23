@@ -31,6 +31,18 @@
 
 需要你来做的事汇总在 `docs/todo-for-owner.md`。
 
+## 服务端 Docker 部署
+
+服务端镜像 `ghcr.io/xmzo/moefrp-server` 同时支持 amd64 和 arm64，由 GitHub Actions 在原生 x86 和 ARM 机器上构建（不用 QEMU）。部署只需要根目录的 `docker-compose.yml` 一个文件，它包含服务端和自动申请 HTTPS 证书的 Caddy：
+
+```bash
+curl -O https://raw.githubusercontent.com/XMZO/AnotherMoeFrpClient/main/docker-compose.yml
+echo "DOMAIN=frplus.example.com" > .env
+docker compose up -d
+```
+
+详见 `docs/docker.md`。
+
 ## 常用命令
 
 ```powershell

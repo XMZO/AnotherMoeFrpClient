@@ -54,6 +54,7 @@ const usage = `用法：
   moefrp-server admin user enable    <昵称>
   moefrp-server admin user reset-code <昵称>
   moefrp-server admin user kick      <昵称>
+  moefrp-server health   [-c config.toml]     # 检查本机服务是否正常（容器健康检查用）
   moefrp-server version
 
 -c 未指定时依次尝试环境变量 MOEFRP_CONFIG 和 /etc/moefrp/config.toml，
@@ -78,6 +79,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = cmdAdmin(ctx, args[1:], stdout, stderr)
 	case "import-legacy":
 		err = cmdImportLegacy(ctx, args[1:], stdout, stderr)
+	case "health":
+		err = cmdHealth(ctx, args[1:], stdout, stderr)
 	case "version", "--version", "-v":
 		fmt.Fprintln(stdout, version)
 		return 0
@@ -184,6 +187,16 @@ func cmdServe(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	}
 	defer st.Close()
 	if *autoMigrate {
+		// 已有数据的库在升级前自动备份一份（容器部署时没人手动执行 backup）
+		if pending, err := st.Pending(ctx); err == nil && len(pending) > 0 {
+			if applied, err := st.AppliedVersions(ctx); err == nil && len(applied) > 0 {
+				to := cfg.DBPath + ".pre-migrate-" + time.Now().Format("20060102-150405") + ".db"
+				if err := st.Backup(ctx, to); err != nil {
+					return fmt.Errorf("升级数据库前的自动备份失败：%w", err)
+				}
+				log.Info("backup before migration", "to", to)
+			}
+		}
 		done, err := st.Migrate(ctx)
 		if err != nil {
 			return err

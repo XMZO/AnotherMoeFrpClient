@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -176,6 +177,9 @@ func cmdServe(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	if err != nil {
 		return err
 	}
+	if err := dropPrivileges(filepath.Dir(cfg.DBPath), stderr); err != nil {
+		return err
+	}
 	log := newLogger(stdout, cfg.LogLevel)
 	slog.SetDefault(log)
 
@@ -277,6 +281,9 @@ func cmdMigrate(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	if err != nil {
 		return err
 	}
+	if err := dropPrivileges(filepath.Dir(cfg.DBPath), stderr); err != nil {
+		return err
+	}
 	st, err := store.Open(cfg.DBPath)
 	if err != nil {
 		return err
@@ -310,6 +317,9 @@ func cmdBackup(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	}
 	cfg, _, err := loadConfig(*cfgPath)
 	if err != nil {
+		return err
+	}
+	if err := dropPrivileges(filepath.Dir(cfg.DBPath), stderr); err != nil {
 		return err
 	}
 	if _, err := os.Stat(cfg.DBPath); err != nil {

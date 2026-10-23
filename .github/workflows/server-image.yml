@@ -76,6 +76,44 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # 先在本机构建并试跑：绑定挂载目录的属主处理、降权、健康检查、管理后台页面。通过后才推送
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: server/Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: VERSION=${{ env.VERSION }}
+          load: true
+          tags: moefrp-smoke
+          cache-from: type=gha,scope=${{ env.PLATFORM_PAIR }}
+      - name: smoke test
+        run: |
+          set -euo pipefail
+          up() { # 名字 端口 docker-run 参数...
+            local name=$1 port=$2; shift 2
+            docker run -d --name "$name" -p "127.0.0.1:$port:8080" "$@" moefrp-smoke
+            for _ in $(seq 30); do curl -fsS "http://127.0.0.1:$port/healthz" && echo && return 0; sleep 1; done
+            docker logs "$name"; return 1
+          }
+          runuid() { docker top "$1" -eo uid,args | awk '/moefrp-server serve/ {print $1}'; }
+
+          # 1) ./data 不存在，由 Docker 以 root 创建：自动改属主，以 65532 运行
+          up d1 18081 -v "$PWD/smoke1:/data"
+          sudo ls -ln smoke1
+          test "$(sudo stat -c %u:%g smoke1 smoke1/moefrp.db | sort -u)" = 65532:65532
+          test "$(runuid d1)" = 65532
+          docker logs d1 2>&1 | grep -q 初始化码
+          curl -fsS http://127.0.0.1:18081/admin/ | grep -q app.js
+          docker stop d1
+
+          # 2) 已有数据、属于 root，指定 PUID/PGID 为当前用户：文件归当前用户
+          sudo cp -a smoke1 smoke2 && sudo chown -R 0:0 smoke2
+          up d2 18082 -v "$PWD/smoke2:/data" -e MOEFRP_PUID="$(id -u)" -e MOEFRP_PGID="$(id -g)"
+          test "$(runuid d2)" = "$(id -u)"
+          test "$(stat -c %u:%g smoke2/moefrp.db)" = "$(id -u):$(id -g)"
+          docker exec d2 moefrp-server backup --to /data/backup.db
+          test "$(stat -c %u smoke2/backup.db)" = "$(id -u)"
+          docker rm -f d1 d2
       - uses: docker/build-push-action@v6
         id: build
         with:

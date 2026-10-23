@@ -14,9 +14,6 @@ services:
   moefrp:
     image: ghcr.io/xmzo/moefrp-server:latest
     restart: unless-stopped
-    # ./data 不存在时由 Docker 以 root 创建，所以用 root 运行。
-    # 想用普通用户：sudo chown -R 65532:65532 data 后删掉这一行
-    user: "0:0"
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
@@ -25,3 +22,7 @@ services:
       # 端口只绑在 127.0.0.1，进来的连接都来自宿主机的反代，所以信任 Docker 网段转发来的真实 IP。
       # 改成对外监听时要删掉这一行，否则别人可以伪造 X-Forwarded-For。
       MOEFRP_TRUSTED_PROXIES: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+      # 服务以这个用户运行，启动时自动把 ./data 的属主改成它（默认 65532）。
+      # 想让 ./data 里的文件归宿主机上的自己、不用 sudo 就能打包，填 `id -u` 和 `id -g` 的结果：
+      # MOEFRP_PUID: "1000"
+      # MOEFRP_PGID: "1000"

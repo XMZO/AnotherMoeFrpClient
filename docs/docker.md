@@ -115,16 +115,20 @@ docker compose exec moefrp moefrp-server import-legacy --from /data/old-users.db
 
 导入后用旧版的管理员账号登录管理后台。完整的切换步骤见 `cutover.md`。
 
-## 以普通用户运行
+## 运行用户和文件属主
 
-compose 里写了 `user: "0:0"`，因为 `./data` 不存在时 Docker 会以 root 身份创建它，普通用户写不进去。想以镜像默认的非 root 用户（uid 65532）运行：
+服务不以 root 运行。容器以 root 启动后，程序先把 `/data`（也就是 `./data`）里所有文件的属主改成 `MOEFRP_PUID:MOEFRP_PGID`（默认 `65532:65532`），然后永久切换到这个用户，才打开数据库、开始监听。所以 `./data` 不管是 Docker 自动建的、手动建的，还是从别的机器拷来的，都能直接用，不用手动 `chown`。
 
-```bash
-docker compose down
-sudo chown -R 65532:65532 data
-# 删掉 docker-compose.yml 里的 user: "0:0"
-docker compose up -d
+默认情况下宿主机上 `./data` 里的文件属于 uid 65532，查看或打包要 `sudo`。想让它们归自己，在 compose 的 `environment` 里填上自己的 id（`id -u`、`id -g`），然后 `docker compose up -d`：
+
+```yaml
+      MOEFRP_PUID: "1000"
+      MOEFRP_PGID: "1000"
 ```
+
+- `docker compose exec moefrp moefrp-server backup ...`、`import-legacy` 也会先做同样的切换，生成的文件属主一致。
+- rootless Docker 和 Podman 里，容器的 root 在宿主机上本来就是普通用户，这时不切换，文件属于启动容器的那个用户。
+- compose 里写了 `user:` 指定用户时，以那个用户直接运行，不做任何处理（这时 `./data` 的权限要自己保证）。
 
 ## 对外直接监听
 

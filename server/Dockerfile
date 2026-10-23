@@ -12,15 +12,18 @@ ARG VERSION=dev
 RUN cd server && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/moefrp-server ./cmd/moefrp-server \
  && mkdir -p /out/data
 
-# distroless：没有 shell 和包管理器，以 nonroot（uid 65532）运行，自带 CA 证书和时区数据
-FROM gcr.io/distroless/static-debian12:nonroot
+# distroless：没有 shell 和包管理器，自带 CA 证书和时区数据。
+# 以 root 启动，程序先把 /data 的属主改成 MOEFRP_PUID:MOEFRP_PGID，再永久切换到这个用户运行
+# （见 cmd/moefrp-server/privdrop.go）。所以绑定挂载的目录不管属于谁都能直接用，服务本身不以 root 运行。
+FROM gcr.io/distroless/static-debian12
 COPY --from=build /out/moefrp-server /usr/local/bin/moefrp-server
 # 所有数据都在 /data：数据库、可选的 config.toml、升级前的自动备份。挂载宿主机目录即可整体带走。
-# 目录归 nonroot 所有（命名卷第一次挂载时会继承这个属主；绑定挂载的目录属主由宿主机决定）
 COPY --from=build --chown=65532:65532 /out/data /data
 # 容器里监听所有地址，对外暴露在哪由端口映射决定；环境变量 MOEFRP_* 优先于 config.toml
 ENV MOEFRP_LISTEN=0.0.0.0:8080 \
-    MOEFRP_DB_PATH=/data/moefrp.db
+    MOEFRP_DB_PATH=/data/moefrp.db \
+    MOEFRP_PUID=65532 \
+    MOEFRP_PGID=65532
 EXPOSE 8080
 VOLUME ["/data"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["moefrp-server", "health"]

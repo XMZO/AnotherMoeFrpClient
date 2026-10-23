@@ -56,7 +56,9 @@ journalctl -u moefrp | grep 初始化码     # 第一次启动时打印，用来
 | `client.announcement` | 空 | `MOEFRP_CLIENT_ANNOUNCEMENT` | |
 | `client.image_sources` | 空 | 无（数组只能写在文件里） | 图片面板的图源 |
 
-配置文件路径：`-c` 优先；没给 `-c` 时依次尝试环境变量 `MOEFRP_CONFIG` 和 `/etc/moefrp/config.toml`；都没有就只用默认值和环境变量。
+配置文件路径：`-c` 优先；没给 `-c` 时依次尝试环境变量 `MOEFRP_CONFIG`、`/etc/moefrp/config.toml` 和 `/data/config.toml`（Docker 镜像用）；都没有就只用默认值和环境变量。
+
+另外两个只用环境变量设置的项：`MOEFRP_PUID`、`MOEFRP_PGID`。设置后，以 root 启动的 `serve`、`migrate`、`backup`、`import-legacy` 会先把数据库所在目录的属主改成这个用户，再切换到它运行（Docker 镜像默认 `65532`，见 `docker.md`）。systemd 部署不要设置，由 `User=` 决定用户。
 
 修改 `client.*` 后需要重启服务才生效。
 

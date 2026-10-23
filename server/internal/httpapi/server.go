@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"sync"
 	"time"
 
+	"moefrp/server/internal/admin"
 	"moefrp/server/internal/auth"
 	"moefrp/server/internal/config"
 	"moefrp/server/internal/legacy"
@@ -58,6 +60,7 @@ type Server struct {
 	auth     *auth.Service
 	profiles *profile.Service
 	shares   *share.Service
+	admin    *admin.Admin
 	log      *slog.Logger
 	version  string
 	now      func() time.Time
@@ -66,6 +69,9 @@ type Server struct {
 	minVersion     *api.Version
 
 	limLogin, limRegister, limReset, limUser, limPreview *ratelimit.Limiter
+
+	setupMu   sync.Mutex
+	setupCode string // 管理后台初始化码，空串表示不开放初始化
 
 	mux     *http.ServeMux
 	handler http.Handler
@@ -100,6 +106,7 @@ func New(d Deps) (*Server, error) {
 	if s.shares == nil {
 		s.shares = share.New(d.Store, s.now)
 	}
+	s.admin = admin.New(d.Store, d.Auth, s.now)
 	if v := d.Config.Client.MinVersion; v != "" {
 		mv, err := api.ParseVersion(v)
 		if err != nil {
@@ -117,6 +124,9 @@ func New(d Deps) (*Server, error) {
 	s.limUser = ratelimit.New(limits.Authenticated)
 	s.limPreview = ratelimit.New(limits.SharePreview)
 
+	if err := s.initSetup(context.Background()); err != nil {
+		return nil, err
+	}
 	s.routes()
 	// 中间件顺序（PLAN 7.5）：请求 ID → 真实 IP → panic 恢复 → 请求体大小限制 → 访问日志
 	// → 客户端版本检查 → 认证 → 限流。认证和限流按路由挂在 routes() 里。
@@ -166,6 +176,10 @@ func (s *Server) routes() {
 	mux.Handle("PUT "+api.RouteSubscription, authed(s.handleUpdateSubscription))
 	mux.Handle("DELETE "+api.RouteSubscription, authed(s.handleUnsubscribe))
 	mux.Handle("GET "+api.RouteSubscriptionRuntime, authed(s.handleSubscriptionRuntime))
+
+	s.adminRoutes(mux)
+	mux.Handle("GET /admin/", s.adminUI())
+	mux.Handle("GET /admin", http.RedirectHandler("/admin/", http.StatusMovedPermanently))
 
 	// /api/v1 下其他路径：404 或 405，统一 JSON 格式
 	mux.HandleFunc(api.Prefix+"/", s.handleV1Fallback)

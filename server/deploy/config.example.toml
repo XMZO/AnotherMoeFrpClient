@@ -14,6 +14,11 @@ single_session  = true
 session_ttl     = "720h"
 # debug / info / warn / error，日志以 JSON 输出到 stdout，由 journald 收集
 log_level       = "info"
+# 网页管理后台（/admin/）的初始化码：库里还没有用户时用它创建第一个管理员。
+# 留空时启动时随机生成并写进日志（journalctl -u moefrp | grep 初始化码）
+# admin_setup_code = ""
+# 管理员密码丢失时设为 true 重启，即使已有用户也开放初始化页面；用完改回 false
+# admin_recovery = false
 
 [client]
 # GET /api/v1/client/config 下发给客户端

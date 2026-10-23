@@ -20,22 +20,27 @@ docker compose ps                                  # moefrp 显示 healthy 即�
 curl https://frplus.example.com/healthz
 ```
 
-**第一个账号**：注册需要邀请码。
+**第一个管理员**：服务第一次启动、库里还没有用户时，会在日志里打印一个初始化码。
 
 ```bash
-docker compose exec moefrp moefrp-server admin invite create -n 5
-docker compose exec moefrp moefrp-server admin user set-role <昵称> admin
+docker compose logs moefrp | grep 初始化码
 ```
+
+打开 `https://<你的域名>/admin/`，填初始化码、管理员昵称和密码，创建后自动登录。初始化码只能用一次，之后就只能用管理员账号登录。这个管理员账号也可以直接登录桌面客户端。
+
+想用固定的初始化码（例如自动化部署），在 `moefrp_config` 里写 `admin_setup_code = "..."`（至少 12 个字符），这时日志里不会打印它。
+
+**管理后台**（`/admin/`）里可以：生成和撤销邀请码、查看用户、改角色（普通用户 / VIP / 管理员）、停用账号、踢下线、生成密码重置码、看审计日志、下载数据库备份。只有管理员角色能登录，登录 12 小时不操作会自动退出，和桌面客户端的登录互不影响。
+
+**管理员密码丢了**：在 `moefrp_config` 里加 `admin_recovery = true`，`docker compose up -d --force-recreate moefrp`，用日志里新的初始化码再建一个管理员，然后把这一行删掉再重建一次容器。
 
 ## 日常操作
 
 | 操作 | 命令 |
 |---|---|
 | 看日志 | `docker compose logs -f moefrp` |
-| 生成邀请码 | `docker compose exec moefrp moefrp-server admin invite create -n 5` |
-| 用户列表 / 改角色 / 停用 | `docker compose exec moefrp moefrp-server admin user list`（其余子命令见 `server-ops.md`） |
-| 重置密码 | `docker compose exec moefrp moefrp-server admin user reset-code <昵称>` |
-| 备份 | `docker compose exec moefrp moefrp-server backup --to /var/lib/moefrp/backup-$(date +%F).db` |
+| 邀请码 / 用户 / 重置密码 / 审计日志 | 网页管理后台 `https://<你的域名>/admin/` |
+| 备份 | 管理后台"备份"页直接下载；或者 `docker compose exec moefrp moefrp-server backup --to /var/lib/moefrp/backup-$(date +%F).db` |
 | 把备份拷出来 | `docker compose cp moefrp:/var/lib/moefrp/backup-2026-10-23.db .` |
 | 改配置 | 修改 `docker-compose.yml` 里的 `moefrp_config`，然后 `docker compose up -d --force-recreate moefrp` |
 | 升级 | `docker compose pull && docker compose up -d` |

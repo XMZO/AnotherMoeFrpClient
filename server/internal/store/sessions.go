@@ -14,9 +14,16 @@ const (
 	RevokeAdmin           = "admin"
 )
 
+// 会话类型（sessions.kind）。
+const (
+	SessionClient   = "client"    // 桌面客户端，Authorization: Bearer
+	SessionAdminWeb = "admin_web" // 管理后台网页，HttpOnly cookie
+)
+
 // Session 是 sessions 表的一行。
 type Session struct {
 	ID           string
+	Kind         string // 空串按 client 处理
 	UserID       string
 	TokenHash    []byte
 	InstallID    string
@@ -31,9 +38,9 @@ type Session struct {
 // InsertSession 插入会话。
 func InsertSession(ctx context.Context, q Querier, s Session) error {
 	_, err := q.ExecContext(ctx,
-		`INSERT INTO sessions (id, user_id, token_hash, install_id, device_name, created_at, last_seen_at, expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.ID, s.UserID, s.TokenHash, s.InstallID, nullString(s.DeviceName), s.CreatedAt, s.LastSeenAt, s.ExpiresAt)
+		`INSERT INTO sessions (id, user_id, token_hash, install_id, device_name, created_at, last_seen_at, expires_at, kind)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.ID, s.UserID, s.TokenHash, s.InstallID, nullString(s.DeviceName), s.CreatedAt, s.LastSeenAt, s.ExpiresAt, sessionKind(s.Kind))
 	return err
 }
 
@@ -53,12 +60,12 @@ func GetSessionByTokenHash(ctx context.Context, q Querier, tokenHash []byte) (Se
 	)
 	err := q.QueryRowContext(ctx,
 		`SELECT s.id, s.user_id, s.token_hash, s.install_id, s.device_name, s.created_at, s.last_seen_at, s.expires_at,
-		        s.revoked_at, s.revoke_reason,
+		        s.revoked_at, s.revoke_reason, s.kind,
 		        u.id, u.nickname, u.password_hash, u.role, u.status, u.state_version, u.created_at, u.updated_at
 		   FROM sessions s JOIN users u ON u.id = s.user_id
 		  WHERE s.token_hash = ?`, tokenHash).Scan(
 		&r.Session.ID, &r.Session.UserID, &r.Session.TokenHash, &r.Session.InstallID, &deviceName,
-		&r.Session.CreatedAt, &r.Session.LastSeenAt, &r.Session.ExpiresAt, &revokedAt, &reason,
+		&r.Session.CreatedAt, &r.Session.LastSeenAt, &r.Session.ExpiresAt, &revokedAt, &reason, &r.Session.Kind,
 		&r.User.ID, &r.User.Nickname, &r.User.PasswordHash, &r.User.Role, &r.User.Status,
 		&r.User.StateVersion, &r.User.CreatedAt, &r.User.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -103,6 +110,25 @@ func RevokeUserSessions(ctx context.Context, q Querier, userID, exceptID, reason
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// RevokeUserSessionsOfKind 吊销用户某一类型的所有有效会话（单设备模式用）。返回吊销的数量。
+func RevokeUserSessionsOfKind(ctx context.Context, q Querier, userID, kind, reason string, now int64) (int64, error) {
+	res, err := q.ExecContext(ctx,
+		`UPDATE sessions SET revoked_at = ?, revoke_reason = ?
+		  WHERE user_id = ? AND kind = ? AND revoked_at IS NULL`,
+		now, reason, userID, sessionKind(kind))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func sessionKind(k string) string {
+	if k == "" {
+		return SessionClient
+	}
+	return k
 }
 
 // CountActiveSessions 统计用户未吊销、未过期的会话数。

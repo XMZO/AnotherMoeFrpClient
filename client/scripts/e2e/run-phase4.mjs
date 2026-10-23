@@ -19,6 +19,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { connect, sleep, tid, waitUntil } from './cdp.mjs'
+import { ADMIN_SETUP_CODE, adminClient } from './adminapi.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const client = path.resolve(here, '..', '..')
@@ -73,10 +74,11 @@ const serverEnv = {
   MOEFRP_CLIENT_LATEST_VERSION: '3.0.0',
   MOEFRP_CLIENT_MIN_VERSION: '3.0.0-dev',
   MOEFRP_LOG_LEVEL: 'info',
+  MOEFRP_ADMIN_SETUP_CODE: ADMIN_SETUP_CODE,
 }
 let server = null
 let frps = null
-const admin = (...args) => execFileSync(serverExe, ['admin', ...args], { env: serverEnv, encoding: 'utf8' })
+const admin = adminClient(API)
 function portFree(port) {
   return new Promise((resolve) => {
     const s = net.createServer()
@@ -260,10 +262,10 @@ async function main() {
     if (!(await portFree(port))) throw new Error(`port ${port} is in use`)
   }
   execFileSync(serverExe, ['migrate'], { env: serverEnv, stdio: 'ignore' })
-  const invites = admin('invite', 'create', '-n', '2').trim().split(/\r?\n/).filter((l) => /^FRPT-/.test(l))
   const logFile = fs.openSync(path.join(OUT, 'server.log'), 'a')
   server = spawn(serverExe, ['serve'], { env: serverEnv, stdio: ['ignore', logFile, logFile] })
   await waitUntil('server healthz', async () => (await fetch(`${API}/healthz`)).ok, 15000, 100)
+  const invites = await admin.createInvites(2)
   frps = spawn(localfrps, ['-port', String(FRPS_PORT), '-token', NODE_TOKEN, '-echo', `127.0.0.1:${ECHO_PORT}`], { stdio: 'ignore' })
   await waitUntil('localfrps', async () => !(await portFree(FRPS_PORT)), 10000, 100)
 

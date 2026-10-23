@@ -898,6 +898,8 @@ CREATE TABLE schema_migrations (
 
 ### 7.10 管理命令
 
+> 2026-10-23 更新：命令行管理已改为网页管理后台 `/admin/`（`server/internal/webadmin`、`internal/httpapi/admin.go`），下面的子命令已移除。用法见 `docs/server-ops.md`"管理后台"一节。
+
 ```
 moefrp-server serve           -c config.toml
 moefrp-server migrate         -c config.toml

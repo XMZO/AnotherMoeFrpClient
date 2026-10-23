@@ -21,6 +21,9 @@ const (
 	AuditAdminEnable       = "admin.enable"
 	AuditAdminResetCode    = "admin.reset_code"
 	AuditAdminKick         = "admin.kick"
+	AuditAdminSetup        = "admin.setup"  // 初始化页面创建管理员
+	AuditAdminLogin        = "admin.login"  // 预留
+	AuditAdminBackup       = "admin.backup" // 下载数据库备份
 
 	AuditShareCreate    = "share.create"
 	AuditShareRepublish = "share.republish"

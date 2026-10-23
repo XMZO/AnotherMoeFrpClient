@@ -4,7 +4,6 @@
 //	moefrp-server migrate -c config.toml
 //	moefrp-server backup  -c config.toml --to /path/backup.db
 //	moefrp-server import-legacy -c config.toml --from users.db [--dry-run]
-//	moefrp-server admin invite|user ...
 //	moefrp-server version
 package main
 
@@ -45,20 +44,14 @@ const usage = `用法：
   moefrp-server migrate  [-c config.toml]
   moefrp-server backup   [-c config.toml] --to /path/backup.db
   moefrp-server import-legacy [-c config.toml] --from users.db [--dry-run]
-  moefrp-server admin invite create  [-n 5] [--note "给 xxx"]
-  moefrp-server admin invite list    [--unused]
-  moefrp-server admin invite revoke  FRPT-XXXX-XXXX
-  moefrp-server admin user list
-  moefrp-server admin user set-role  <昵称> user|vip|admin
-  moefrp-server admin user disable   <昵称>
-  moefrp-server admin user enable    <昵称>
-  moefrp-server admin user reset-code <昵称>
-  moefrp-server admin user kick      <昵称>
   moefrp-server health   [-c config.toml]     # 检查本机服务是否正常（容器健康检查用）
   moefrp-server version
 
 -c 未指定时依次尝试环境变量 MOEFRP_CONFIG 和 /etc/moefrp/config.toml，
 都没有时只使用默认值和 MOEFRP_* 环境变量。
+
+邀请码、用户管理、审计日志和备份下载在网页管理后台：http(s)://<服务地址>/admin/
+第一次打开时用启动日志里的初始化码创建管理员。
 `
 
 // run 是可测试的入口，返回进程退出码。
@@ -76,7 +69,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "backup":
 		err = cmdBackup(ctx, args[1:], stdout, stderr)
 	case "admin":
-		err = cmdAdmin(ctx, args[1:], stdout, stderr)
+		err = errors.New("命令行管理已移除，请打开网页管理后台 /admin/（首次使用的初始化码在 serve 的启动日志里）")
 	case "import-legacy":
 		err = cmdImportLegacy(ctx, args[1:], stdout, stderr)
 	case "health":

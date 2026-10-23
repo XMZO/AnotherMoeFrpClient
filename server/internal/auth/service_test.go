@@ -50,7 +50,7 @@ func TestLoginRacesWithReset(t *testing.T) {
 	ctx := context.Background()
 	s, st := newService(t, false)
 	mustRegister(t, s, st, "alice", "old-password")
-	code, _, err := s.IssueResetCode(ctx, "alice")
+	code, _, err := s.IssueResetCode(ctx, "alice", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestChangePasswordRacesWithReset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	code, _, _ := s.IssueResetCode(ctx, "alice")
+	code, _, _ := s.IssueResetCode(ctx, "alice", "", "")
 	s.afterVerify = func() {
 		s.afterVerify = nil
 		if err := s.ResetPassword(ctx, "alice", code, "reset-password", ClientMeta{}); err != nil {

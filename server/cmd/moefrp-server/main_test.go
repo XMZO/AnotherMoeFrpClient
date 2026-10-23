@@ -6,7 +6,6 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -43,11 +42,11 @@ func (c *cli) ok(args ...string) string {
 	return out
 }
 
-func TestMigrateAndAdmin(t *testing.T) {
+func TestMigrateAndBackup(t *testing.T) {
 	c := newCLI(t)
 
-	// 没迁移时管理命令拒绝执行，也不会凭空建库
-	if code, _, errs := c.run("admin", "invite", "list", "-c", c.cfg); code != 1 || !strings.Contains(errs, "不存在") {
+	// 没迁移时导入命令拒绝执行，也不会凭空建库
+	if code, _, errs := c.run("import-legacy", "--from", filepath.Join(c.dir, "users.db"), "-c", c.cfg); code != 1 || !strings.Contains(errs, "不存在") {
 		t.Fatalf("库不存在时应报错：%d %s", code, errs)
 	}
 
@@ -56,39 +55,6 @@ func TestMigrateAndAdmin(t *testing.T) {
 	}
 	if out := c.ok("migrate", "-c", c.cfg); !strings.Contains(out, "已是最新") {
 		t.Fatalf("第二次 migrate：%s", out)
-	}
-
-	out := c.ok("admin", "invite", "create", "-n", "3", "--note", "给 测试", "-c", c.cfg)
-	codes := strings.Fields(out)
-	re := regexp.MustCompile(`^FRPT-[A-Z2-9]{4}-[A-Z2-9]{4}$`)
-	if len(codes) != 3 || !re.MatchString(codes[0]) {
-		t.Fatalf("invite create 输出：%q", out)
-	}
-	out = c.ok("admin", "invite", "list", "--unused", "-c", c.cfg)
-	if strings.Count(out, "FRPT-") != 3 || !strings.Contains(out, "给 测试") {
-		t.Fatalf("invite list：%s", out)
-	}
-	c.ok("admin", "invite", "revoke", codes[0], "-c", c.cfg) // 选项写在参数后面也可以
-	if out := c.ok("admin", "invite", "list", "--unused", "-c", c.cfg); strings.Count(out, "FRPT-") != 2 {
-		t.Fatalf("撤销后 unused 应剩 2 个：%s", out)
-	}
-	if code, _, errs := c.run("admin", "invite", "revoke", codes[0], "-c", c.cfg); code != 1 || !strings.Contains(errs, "已撤销") {
-		t.Fatalf("重复撤销：%d %s", code, errs)
-	}
-
-	if out := c.ok("admin", "user", "list", "-c", c.cfg); !strings.Contains(out, "NICKNAME") {
-		t.Fatalf("user list：%s", out)
-	}
-	if code, _, errs := c.run("admin", "user", "set-role", "nobody", "vip", "-c", c.cfg); code != 1 || !strings.Contains(errs, "用户不存在") {
-		t.Fatalf("set-role 不存在的用户：%d %s", code, errs)
-	}
-	if code, _, _ := c.run("admin", "user", "set-role", "-c", c.cfg, "only-one-arg"); code != 2 {
-		t.Fatal("参数个数不对应返回 2")
-	}
-	for _, sub := range []string{"disable", "enable", "kick", "reset-code"} {
-		if code, _, _ := c.run("admin", "user", sub, "nobody", "-c", c.cfg); code != 1 {
-			t.Fatalf("%s 不存在的用户应返回 1", sub)
-		}
 	}
 
 	backup := filepath.Join(c.dir, "bak", "backup.db")
@@ -106,7 +72,7 @@ func TestMigrateAndAdmin(t *testing.T) {
 
 func TestUsageErrors(t *testing.T) {
 	c := newCLI(t)
-	for _, args := range [][]string{{}, {"nope"}, {"admin"}, {"admin", "foo", "bar"}, {"migrate", "extra"}} {
+	for _, args := range [][]string{{}, {"nope"}, {"migrate", "extra"}} {
 		if code, _, _ := c.run(args...); code != 2 {
 			t.Errorf("%v 应返回 2", args)
 		}
@@ -114,7 +80,10 @@ func TestUsageErrors(t *testing.T) {
 	if code, out, _ := c.run("version"); code != 0 || strings.TrimSpace(out) != version {
 		t.Fatalf("version：%d %s", code, out)
 	}
-	if code, out, _ := c.run("help"); code != 0 || !strings.Contains(out, "admin user reset-code") {
+	if code, _, errs := c.run("admin", "invite", "create"); code != 1 || !strings.Contains(errs, "/admin/") {
+		t.Fatalf("admin 子命令应提示改用网页：%d %s", code, errs)
+	}
+	if code, out, _ := c.run("help"); code != 0 || !strings.Contains(out, "/admin/") {
 		t.Fatal("help 应打印用法")
 	}
 	// 配置文件里有未知字段：报错退出

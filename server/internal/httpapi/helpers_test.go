@@ -248,7 +248,7 @@ func hasField(e *apierr.Error, field string) bool {
 
 func (e *env) invite() string {
 	e.t.Helper()
-	codes, err := e.admin.CreateInvites(context.Background(), 1, "test")
+	codes, err := e.admin.CreateInvites(context.Background(), admin.Actor{}, 1, "test")
 	if err != nil {
 		e.t.Fatal(err)
 	}

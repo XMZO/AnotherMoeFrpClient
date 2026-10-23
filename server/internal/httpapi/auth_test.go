@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"moefrp/server/internal/admin"
 	"net/http"
 	"strings"
 	"sync"
@@ -78,7 +79,7 @@ func TestRegisterInviteStates(t *testing.T) {
 	reg("alice", validate.NewInviteCode()).apiErr(apierr.InviteInvalid)
 	// 已撤销
 	revoked := e.invite()
-	if err := e.admin.RevokeInvite(ctx, revoked); err != nil {
+	if err := e.admin.RevokeInvite(ctx, admin.Actor{}, revoked); err != nil {
 		t.Fatal(err)
 	}
 	reg("alice", revoked).apiErr(apierr.InviteInvalid)
@@ -240,14 +241,14 @@ func assertNoSecretInDB(t *testing.T, e *env, secrets ...string) {
 func TestLoginDisabledAccount(t *testing.T) {
 	e := newEnv(t)
 	tok := e.user("alice")
-	if _, err := e.admin.Disable(context.Background(), "alice"); err != nil {
+	if _, err := e.admin.SetDisabled(context.Background(), admin.Actor{}, "alice", true); err != nil {
 		t.Fatal(err)
 	}
 	e.me(tok).apiErr(apierr.SessionExpired) // 停用时吊销了会话
 	e.do(req{method: "POST", path: api.RouteLogin, body: api.LoginRequest{Nickname: "alice", Password: "password-alice"}}).apiErr(apierr.AccountDisabled)
 	// 密码错误时不透露账号已停用
 	e.do(req{method: "POST", path: api.RouteLogin, body: api.LoginRequest{Nickname: "alice", Password: "wrong"}}).apiErr(apierr.InvalidCredentials)
-	if err := e.admin.Enable(context.Background(), "alice"); err != nil {
+	if _, err := e.admin.SetDisabled(context.Background(), admin.Actor{}, "alice", false); err != nil {
 		t.Fatal(err)
 	}
 	e.login("alice", "password-alice")
@@ -416,7 +417,7 @@ func TestLogout(t *testing.T) {
 func TestAdminKick(t *testing.T) {
 	e := newEnv(t)
 	tok := e.user("alice")
-	n, err := e.admin.Kick(context.Background(), "alice")
+	n, err := e.admin.Kick(context.Background(), admin.Actor{}, "alice")
 	if err != nil || n != 1 {
 		t.Fatalf("应吊销 1 个会话：%d %v", n, err)
 	}
@@ -473,7 +474,7 @@ func TestResetPassword(t *testing.T) {
 	s1 := e.login("alice", "forgotten-pw")
 	s2 := e.login("alice", "forgotten-pw")
 
-	code, exp, err := e.admin.ResetCode(ctx, "Alice")
+	code, exp, err := e.admin.ResetCode(ctx, admin.Actor{}, "Alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,18 +496,18 @@ func TestResetPassword(t *testing.T) {
 	reset("alice", code, "new-password-2").apiErr(apierr.ResetCodeInvalid) // 一次性
 
 	// 过期
-	code2, _, _ := e.admin.ResetCode(ctx, "alice")
+	code2, _, _ := e.admin.ResetCode(ctx, admin.Actor{}, "alice")
 	e.clock.Add(24*time.Hour + time.Second)
 	reset("alice", code2, "new-password-3").apiErr(apierr.ResetCodeInvalid)
 
 	// 新码作废旧码
-	c3, _, _ := e.admin.ResetCode(ctx, "alice")
-	c4, _, _ := e.admin.ResetCode(ctx, "alice")
+	c3, _, _ := e.admin.ResetCode(ctx, admin.Actor{}, "alice")
+	c4, _, _ := e.admin.ResetCode(ctx, admin.Actor{}, "alice")
 	reset("alice", c3, "new-password-4").apiErr(apierr.ResetCodeInvalid)
 	reset("alice", c4, "new-password-4").expect(http.StatusNoContent)
 
 	assertNoSecretInDB(t, e, code, code2, c3, c4)
-	if _, _, err := e.admin.ResetCode(ctx, "nobody"); err == nil {
+	if _, _, err := e.admin.ResetCode(ctx, admin.Actor{}, "nobody"); err == nil {
 		t.Fatal("不存在的用户应报错")
 	}
 }
@@ -518,7 +519,7 @@ func TestResetPasswordClearsLockout(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		e.do(req{method: "POST", path: api.RouteLogin, body: api.LoginRequest{Nickname: "alice", Password: "guess"}})
 	}
-	code, _, _ := e.admin.ResetCode(context.Background(), "alice")
+	code, _, _ := e.admin.ResetCode(context.Background(), admin.Actor{}, "alice")
 	e.do(req{method: "POST", path: api.RouteResetPassword, body: api.ResetPasswordRequest{Nickname: "alice", Code: code, NewPassword: "brand-new-pw"}}).
 		expect(http.StatusNoContent)
 	e.login("alice", "brand-new-pw")

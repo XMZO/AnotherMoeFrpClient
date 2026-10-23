@@ -23,9 +23,10 @@ sudo -u moefrp moefrp-server migrate -c /etc/moefrp/config.toml
 install -m 0644 moefrp.service /etc/systemd/system/moefrp.service
 systemctl daemon-reload && systemctl enable --now moefrp
 curl -fsS http://127.0.0.1:8080/healthz
+journalctl -u moefrp | grep 初始化码     # 第一次启动时打印，用来创建管理员
 ```
 
-然后按 `Caddyfile.example` 配置 Caddy，`systemctl reload caddy`。
+然后按 `Caddyfile.example` 配置 Caddy，`systemctl reload caddy`，打开 `https://<域名>/admin/` 用初始化码创建第一个管理员。
 
 要点：
 
@@ -45,6 +46,8 @@ curl -fsS http://127.0.0.1:8080/healthz
 | `single_session` | `true` | `MOEFRP_SINGLE_SESSION` | 单设备模式：新登录挤掉该用户的其他会话 |
 | `session_ttl` | `720h` | `MOEFRP_SESSION_TTL` | 滑动过期，至少 `1h` |
 | `log_level` | `info` | `MOEFRP_LOG_LEVEL` | `debug` / `info` / `warn` / `error` |
+| `admin_setup_code` | 空 | `MOEFRP_ADMIN_SETUP_CODE` | 管理后台初始化码，12–128 个字符；空时随机生成并写进日志 |
+| `admin_recovery` | `false` | `MOEFRP_ADMIN_RECOVERY` | 已有用户时也开放初始化页面（管理员密码丢失时用，用完关掉） |
 | `client.latest_version` | 空 | `MOEFRP_CLIENT_LATEST_VERSION` | |
 | `client.min_version` | 空 | `MOEFRP_CLIENT_MIN_VERSION` | 低于它的客户端收到 426；空表示不检查 |
 | `client.download_url` | 空 | `MOEFRP_CLIENT_DOWNLOAD_URL` | 同时用于旧客户端的"请下载新版"提示 |
@@ -57,30 +60,15 @@ curl -fsS http://127.0.0.1:8080/healthz
 
 修改 `client.*` 后需要重启服务才生效。
 
-## 管理命令
+## 管理后台
 
-在服务器上用 SSH 密钥登录后执行。数据目录是 0700，所以要以 `moefrp` 用户运行：
+邀请码、用户和审计日志都在网页管理后台 `https://<域名>/admin/` 里管理，服务端没有管理用的命令行子命令。
 
-```bash
-alias mf='sudo -u moefrp moefrp-server'
-
-mf admin invite create -n 5 --note "给 xxx"   # 每行一个邀请码
-mf admin invite list --unused
-mf admin invite revoke FRPT-XXXX-XXXX
-
-mf admin user list
-mf admin user set-role alice vip            # user | vip | admin
-mf admin user disable alice                 # 同时吊销所有会话
-mf admin user enable alice
-mf admin user kick alice                    # 吊销所有会话
-mf admin user reset-code alice              # 打印一次性重置码，24 小时有效
-```
-
-- 每条管理命令都会在 stderr 打印用的是哪个配置文件和数据库，避免操作错库。数据库不存在或没迁移时拒绝执行，不会凭空建一个新库。
-- 选项写在参数前后都可以，例如 `admin user set-role alice vip -c /etc/moefrp/config.toml`。
-- 重置码只打印这一次，库里只存哈希。请通过可信渠道交给用户；生成新码会作废该用户之前没用过的码。
-- 每个管理操作都写一条 `audit_log`（`detail.via = "cli"`）。
-- 服务在运行时执行管理命令是安全的：SQLite 用 WAL 模式，写入互相等待（`busy_timeout = 5000`）。
+- **首次使用**：库里还没有用户时，`serve` 启动时生成一个初始化码，以 `WARN` 级别写进日志（`journalctl -u moefrp | grep 初始化码`）。在 `/admin/` 页面填初始化码、昵称和密码创建第一个管理员，创建后自动登录。初始化码只能用一次；也可以用 `admin_setup_code` 固定它，这时日志里不打印。
+- **登录**：只有 `admin` 角色能登录。会话放在 HttpOnly、`SameSite=Strict` 的 cookie 里（HTTPS 下带 `Secure`），12 小时不操作自动过期。管理后台的会话和桌面客户端的会话分开计算，单设备模式不会让两者互相挤下线。
+- **功能**：概览统计；生成（一次最多 200 个，可写备注）、查看和撤销邀请码；用户列表、改角色、停用和启用、踢下线（只注销客户端会话）、生成一次性重置码（24 小时有效，只显示一次）；审计日志；下载数据库备份。
+- **保护**：不能修改或停用自己；把管理员降级会立刻注销他的管理后台会话。所有管理接口都要求带 `X-MoeFrp-Admin: 1` 请求头（防 CSRF），页面有严格的 CSP。每个操作都写一条 `audit_log`（`detail.via = "web"`）。
+- **管理员密码丢失**：配置里设 `admin_recovery = true` 并重启，日志里会出现新的初始化码，用它再建一个管理员；然后改回 `false` 再重启。也可以先在客户端用重置码改密码（需要另一个管理员生成）。
 
 ## 备份
 

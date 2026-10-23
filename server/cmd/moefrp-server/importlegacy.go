@@ -26,7 +26,7 @@ func cmdImportLegacy(ctx context.Context, args []string, stdout, stderr io.Write
 	if _, err := os.Stat(*from); err != nil {
 		return fmt.Errorf("旧库 %s 不存在：%w", *from, err)
 	}
-	st, _, err := openExisting(ctx, *cfgPath, stderr)
+	st, err := openExisting(ctx, *cfgPath, stderr)
 	if err != nil {
 		return err
 	}

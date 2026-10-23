@@ -9,7 +9,7 @@
 | 目录 | 内容 |
 |---|---|
 | `shared/` | 两端共用的数据模型、API 结构体、错误码、校验 |
-| `server/` | moefrp-server：账号、云端配置同步、分享与订阅、版本信息、旧库导入、管理命令 |
+| `server/` | moefrp-server：账号、云端配置同步、分享与订阅、版本信息、旧库导入、网页管理后台（`/admin/`） |
 | `client/` | Wails v3 + Vue 3 客户端；`internal/engine` 内嵌 frp v0.71.1 |
 | `spike/` | Phase 0 技术验证，保留作参考 |
 | `scripts/release.ps1` | 发布构建 |
@@ -39,9 +39,10 @@
 curl -O https://raw.githubusercontent.com/XMZO/AnotherMoeFrpClient/main/docker-compose.yml
 echo "DOMAIN=frplus.example.com" > .env
 docker compose up -d
+docker compose logs moefrp | grep 初始化码    # 打开 https://<域名>/admin/ 用它创建管理员
 ```
 
-详见 `docs/docker.md`。
+邀请码、用户、审计日志和备份都在网页管理后台 `/admin/` 里操作。详见 `docs/docker.md`。
 
 ## 常用命令
 

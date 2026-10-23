@@ -22,6 +22,7 @@ import (
 type Options struct {
 	SingleSession bool          // 单设备模式：新登录吊销该用户的其他会话
 	SessionTTL    time.Duration // 滑动过期，默认 30 天
+	AdminTTL      time.Duration // 管理后台网页会话的滑动过期，默认 12 小时
 	Params        Params        // 新哈希使用的 argon2 参数，默认 DefaultParams
 	Lockout       LockoutPolicy // 默认 DefaultLockout
 	ResetCodeTTL  time.Duration // 默认 24 小时
@@ -34,6 +35,9 @@ type Options struct {
 func (o *Options) setDefaults() {
 	if o.SessionTTL == 0 {
 		o.SessionTTL = 30 * 24 * time.Hour
+	}
+	if o.AdminTTL == 0 {
+		o.AdminTTL = 12 * time.Hour
 	}
 	if o.Params == (Params{}) {
 		o.Params = DefaultParams
@@ -171,6 +175,55 @@ func lockedError(d time.Duration) error {
 
 // ---- 注册 ----
 
+// CreateAdmin 不经邀请码直接创建一个管理员账号（管理后台的初始化页面使用，调用方负责校验初始化码）。
+// onlyIfEmpty 为 true 时要求库里还没有任何用户（首次初始化），在同一个事务里检查，避免并发重复初始化。
+func (s *Service) CreateAdmin(ctx context.Context, nickname, password string, onlyIfEmpty bool, meta ClientMeta) (store.User, error) {
+	nickname = strings.TrimSpace(nickname)
+	var c validate.Errors
+	for _, err := range []error{validate.Nickname(nickname), validate.Password("password", password)} {
+		var es validate.Errors
+		if errors.As(err, &es) {
+			c = append(c, es...)
+		}
+	}
+	if len(c) > 0 {
+		return store.User{}, validationError(c)
+	}
+	hash, err := s.hash(ctx, password)
+	if err != nil {
+		return store.User{}, err
+	}
+	now := s.now().Unix()
+	u := store.User{
+		ID: model.NewID(), Nickname: nickname, PasswordHash: hash,
+		Role: model.RoleAdmin, Status: model.StatusActive, CreatedAt: now, UpdatedAt: now,
+	}
+	err = s.st.Tx(ctx, func(tx *sql.Tx) error {
+		if onlyIfEmpty {
+			var n int
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM users`).Scan(&n); err != nil {
+				return err
+			}
+			if n > 0 {
+				return apierr.Newf(apierr.Forbidden, "已经初始化过了")
+			}
+		}
+		if err := store.InsertUser(ctx, tx, u); err != nil {
+			if store.IsUniqueViolation(err) {
+				return apierr.New(apierr.NicknameTaken)
+			}
+			return err
+		}
+		return s.audit(ctx, tx, store.AuditEntry{
+			At: now, ActorID: u.ID, Action: store.AuditAdminSetup, Target: u.Nickname, IP: meta.IP,
+		})
+	})
+	if err != nil {
+		return store.User{}, err
+	}
+	return u, nil
+}
+
 // Register 注册新用户。邀请码在创建用户的同一个事务里原子地占用（PLAN 7.4）。
 // 注册不会自动登录。
 func (s *Service) Register(ctx context.Context, nickname, password, inviteCode string, meta ClientMeta) (store.User, error) {
@@ -268,6 +321,23 @@ func inviteUsable(ctx context.Context, q store.Querier, code string) error {
 //   - 单设备模式下吊销该用户的其他会话，原因记为 replaced。
 //   - 旧哈希的参数与当前参数不同时，登录成功后自动重新哈希。
 func (s *Service) Login(ctx context.Context, nickname, password string, meta ClientMeta) (LoginResult, error) {
+	return s.login(ctx, nickname, password, meta, store.SessionClient)
+}
+
+// LoginAdmin 登录管理后台：只有 admin 角色可以登录，会话类型为 admin_web，12 小时滑动过期，
+// 不会把桌面客户端的会话挤下线。非管理员（密码正确时）返回 forbidden。
+func (s *Service) LoginAdmin(ctx context.Context, nickname, password string, meta ClientMeta) (LoginResult, error) {
+	return s.login(ctx, nickname, password, meta, store.SessionAdminWeb)
+}
+
+func (s *Service) ttl(kind string) time.Duration {
+	if kind == store.SessionAdminWeb {
+		return s.opt.AdminTTL
+	}
+	return s.opt.SessionTTL
+}
+
+func (s *Service) login(ctx context.Context, nickname, password string, meta ClientMeta, kind string) (LoginResult, error) {
 	nickname = strings.TrimSpace(nickname)
 	var c validate.Errors
 	if nickname == "" {
@@ -336,6 +406,13 @@ func (s *Service) Login(ctx context.Context, nickname, password string, meta Cli
 		})
 		return LoginResult{}, apierr.New(apierr.AccountDisabled)
 	}
+	if kind == store.SessionAdminWeb && u.Role != model.RoleAdmin {
+		s.auditBestEffort(ctx, store.AuditEntry{
+			ActorID: u.ID, Action: store.AuditLoginFailed, Target: u.Nickname, IP: meta.IP,
+			Detail: map[string]any{"reason": "not_admin", "kind": kind},
+		})
+		return LoginResult{}, apierr.Newf(apierr.Forbidden, "只有管理员可以登录管理后台")
+	}
 
 	var newHash string
 	if rehash {
@@ -347,13 +424,14 @@ func (s *Service) Login(ctx context.Context, nickname, password string, meta Cli
 	token, tokenHash := NewToken()
 	sess := store.Session{
 		ID:         model.NewID(),
+		Kind:       kind,
 		UserID:     u.ID,
 		TokenHash:  tokenHash,
 		InstallID:  meta.InstallID,
 		DeviceName: meta.DeviceName,
 		CreatedAt:  now.Unix(),
 		LastSeenAt: now.Unix(),
-		ExpiresAt:  now.Add(s.opt.SessionTTL).Unix(),
+		ExpiresAt:  now.Add(s.ttl(kind)).Unix(),
 	}
 	err = s.st.Tx(ctx, func(tx *sql.Tx) error {
 		// 校验密码是在事务外做的。期间如果密码被重置或修改、账号被停用，就不能再发令牌：
@@ -368,6 +446,9 @@ func (s *Service) Login(ctx context.Context, nickname, password string, meta Cli
 		if cur.Status != model.StatusActive {
 			return apierr.New(apierr.AccountDisabled)
 		}
+		if kind == store.SessionAdminWeb && cur.Role != model.RoleAdmin {
+			return apierr.Newf(apierr.Forbidden, "只有管理员可以登录管理后台")
+		}
 		u = cur
 
 		detail := map[string]any{}
@@ -379,7 +460,8 @@ func (s *Service) Login(ctx context.Context, nickname, password string, meta Cli
 			detail["rehashed"] = true
 		}
 		if s.opt.SingleSession {
-			n, err := store.RevokeUserSessions(ctx, tx, u.ID, "", store.RevokeReplaced, now.Unix())
+			// 只挤掉同一类型的会话：打开管理后台不影响桌面客户端，反之亦然
+			n, err := store.RevokeUserSessionsOfKind(ctx, tx, u.ID, kind, store.RevokeReplaced, now.Unix())
 			if err != nil {
 				return err
 			}
@@ -391,6 +473,9 @@ func (s *Service) Login(ctx context.Context, nickname, password string, meta Cli
 			return err
 		}
 		detail["session"] = sess.ID
+		if kind != store.SessionClient {
+			detail["kind"] = kind
+		}
 		if meta.InstallID != "" {
 			detail["installId"] = meta.InstallID
 		}
@@ -449,6 +534,22 @@ func checkDeviceName(name string) *validate.FieldError {
 // 已吊销的会话按原因区分：被挤下线返回 session_replaced；退出登录返回 unauthorized；
 // 改密码、重置密码、管理员踢下线以及过期返回 session_expired。
 func (s *Service) Authenticate(ctx context.Context, token string) (Principal, error) {
+	return s.authenticate(ctx, token, store.SessionClient)
+}
+
+// AuthenticateAdmin 校验管理后台 cookie 里的令牌：必须是 admin_web 会话，用户当前仍是管理员。
+func (s *Service) AuthenticateAdmin(ctx context.Context, token string) (Principal, error) {
+	p, err := s.authenticate(ctx, token, store.SessionAdminWeb)
+	if err != nil {
+		return p, err
+	}
+	if p.User.Role != model.RoleAdmin {
+		return Principal{}, apierr.Newf(apierr.Forbidden, "账号已不是管理员")
+	}
+	return p, nil
+}
+
+func (s *Service) authenticate(ctx context.Context, token, kind string) (Principal, error) {
 	if !ValidTokenFormat(token) {
 		return Principal{}, apierr.New(apierr.Unauthorized)
 	}
@@ -460,6 +561,13 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Principal, er
 		return Principal{}, err
 	}
 	sess := r.Session
+	if sess.Kind == "" {
+		sess.Kind = store.SessionClient
+	}
+	if sess.Kind != kind {
+		// 管理后台的令牌不能调客户端接口，客户端的令牌也不能进管理后台
+		return Principal{}, apierr.New(apierr.Unauthorized)
+	}
 	if sess.RevokedAt != nil {
 		switch sess.RevokeReason {
 		case store.RevokeReplaced:
@@ -480,7 +588,7 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Principal, er
 	// 滑动过期：最多每 TouchInterval 写一次库
 	if now.Sub(time.Unix(sess.LastSeenAt, 0)) >= s.opt.TouchInterval {
 		sess.LastSeenAt = now.Unix()
-		sess.ExpiresAt = now.Add(s.opt.SessionTTL).Unix()
+		sess.ExpiresAt = now.Add(s.ttl(sess.Kind)).Unix()
 		if err := store.TouchSession(ctx, s.st.DB(), sess.ID, sess.LastSeenAt, sess.ExpiresAt); err != nil {
 			// 写失败不影响本次请求，下次再写
 			s.opt.Logger.WarnContext(ctx, "touch session", "session_id", sess.ID, "err", err)
@@ -647,9 +755,9 @@ func (s *Service) ResetPassword(ctx context.Context, nickname, code, newPassword
 	return nil
 }
 
-// IssueResetCode 为用户生成一次性重置码（管理命令使用），同时作废该用户之前未用的重置码。
-// 返回的明文重置码只打印一次，库里只存哈希。
-func (s *Service) IssueResetCode(ctx context.Context, nickname string) (code string, expiresAt time.Time, err error) {
+// IssueResetCode 为用户生成一次性重置码（管理后台使用），同时作废该用户之前未用的重置码。
+// 返回的明文重置码只显示一次，库里只存哈希。actorID、ip 是操作的管理员，写进审计日志。
+func (s *Service) IssueResetCode(ctx context.Context, nickname, actorID, ip string) (code string, expiresAt time.Time, err error) {
 	now := s.now()
 	expiresAt = now.Add(s.opt.ResetCodeTTL)
 	code = NewResetCode()
@@ -664,8 +772,8 @@ func (s *Service) IssueResetCode(ctx context.Context, nickname string) (code str
 			return err
 		}
 		return s.audit(ctx, tx, store.AuditEntry{
-			At: now.Unix(), Action: store.AuditAdminResetCode, Target: u.Nickname,
-			Detail: map[string]any{"via": "cli", "expiresAt": expiresAt.Unix()},
+			At: now.Unix(), ActorID: actorID, Action: store.AuditAdminResetCode, Target: u.Nickname, IP: ip,
+			Detail: map[string]any{"via": "web", "expiresAt": expiresAt.Unix()},
 		})
 	})
 	if err != nil {

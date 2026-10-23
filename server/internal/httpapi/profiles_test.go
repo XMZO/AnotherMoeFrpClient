@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"moefrp/server/internal/admin"
 	"net/http"
 	"strings"
 	"sync"
@@ -358,7 +359,7 @@ func TestStateETag(t *testing.T) {
 		t.Fatalf("删除后 state 不对：%+v", s)
 	}
 	// 管理员改角色也让 stateVersion 加 1，客户端下次同步就能看到
-	if err := e.admin.SetRole(context.Background(), "alice", model.RoleVIP); err != nil {
+	if err := e.admin.SetRole(context.Background(), admin.Actor{}, "alice", model.RoleVIP); err != nil {
 		t.Fatal(err)
 	}
 	if s := e.state(tok); s.StateVersion != 4 || s.User.Role != model.RoleVIP {

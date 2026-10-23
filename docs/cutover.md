@@ -53,7 +53,6 @@ sudo cp /root/backf/users.db /root/users-$(date +%F).db
 # 2) 新库：全新的库，导入旧数据
 sudo -u moefrp moefrp-server migrate
 sudo -u moefrp moefrp-server import-legacy --from /root/users-$(date +%F).db     # 去掉 --dry-run
-sudo -u moefrp moefrp-server admin user list | head                             # 抽查
 
 # 3) 启动新服务，Caddy 指向它
 sudo systemctl enable --now moefrp
@@ -62,6 +61,8 @@ sudo cp deploy/Caddyfile.example /etc/caddy/Caddyfile   # 按需修改域名
 sudo systemctl reload caddy
 curl -s https://frplus.loli-con.cn/healthz
 ```
+
+导入后库里已经有用户，所以不会生成初始化码：直接用**旧版的管理员账号**登录 `https://frplus.loli-con.cn/admin/`，在"用户"页抽查导入结果。旧库里没有管理员时，按 `server-ops.md`"管理后台"一节用 `admin_recovery = true` 建一个。
 
 ## 3. 验证
 

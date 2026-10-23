@@ -5,12 +5,13 @@
 #   2. 下载本文件，按需修改下面 moefrp_config 里的 [client] 部分
 #   3. DOMAIN=frplus.example.com docker compose up -d
 #      （或者在同目录写一个 .env：DOMAIN=frplus.example.com）
+#   4. docker compose logs moefrp 找到"初始化码"，打开 https://<域名>/admin/ 创建管理员
+#
+# 邀请码、用户、审计日志、备份下载都在网页管理后台 https://<域名>/admin/ 里操作。
 #
 # 常用命令（镜像里没有 shell，直接执行程序）：
-#   docker compose exec moefrp moefrp-server admin invite create -n 5
-#   docker compose exec moefrp moefrp-server admin user list
-#   docker compose exec moefrp moefrp-server backup --to /var/lib/moefrp/backup-$(date +%F).db
 #   docker compose logs -f moefrp
+#   docker compose exec moefrp moefrp-server backup --to /var/lib/moefrp/backup-$(date +%F).db
 #   docker compose pull && docker compose up -d      # 升级；有数据库迁移时会先自动备份
 # 更多见 docs/docker.md。
 
@@ -76,6 +77,11 @@ configs:
       single_session  = true
       session_ttl     = "720h"
       log_level       = "info"
+
+      # 管理后台初始化码：留空时第一次启动随机生成并写进日志。
+      # admin_setup_code = "至少 12 个字符"
+      # 管理员密码丢了：设为 true 并重启，用日志里的初始化码再建一个管理员，用完改回 false
+      # admin_recovery = false
 
       [client]
       latest_version = "3.0.0"

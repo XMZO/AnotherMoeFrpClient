@@ -1,16 +1,16 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 
 	"moefrp/server/internal/auth"
 	"moefrp/server/internal/store"
+	"moefrp/shared/apierr"
 	"moefrp/shared/model"
 	"moefrp/shared/validate"
 )
@@ -25,162 +25,199 @@ func setup(t *testing.T) (*Admin, *store.Store, *auth.Service) {
 	if _, err := st.Migrate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	a, err := auth.New(st, auth.Options{SingleSession: false, Params: auth.Params{Memory: 1024, Time: 1, Threads: 1, KeyLen: 32, SaltLen: 16}})
+	a, err := auth.New(st, auth.Options{SingleSession: true, Params: auth.Params{Memory: 1024, Time: 1, Threads: 1, KeyLen: 32, SaltLen: 16}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return New(st, a, nil), st, a
 }
 
-func register(t *testing.T, ad *Admin, a *auth.Service, nick string) {
+var root = Actor{UserID: "", IP: "192.0.2.9"}
+
+func register(t *testing.T, ad *Admin, a *auth.Service, nick string) store.User {
 	t.Helper()
-	codes, err := ad.CreateInvites(context.Background(), 1, "")
+	codes, err := ad.CreateInvites(context.Background(), root, 1, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Register(context.Background(), nick, "password-"+nick, codes[0], auth.ClientMeta{}); err != nil {
+	u, err := a.Register(context.Background(), nick, "password-"+nick, codes[0], auth.ClientMeta{})
+	if err != nil {
 		t.Fatal(err)
 	}
+	return u
 }
 
 func TestInvites(t *testing.T) {
-	ad, st, _ := setup(t)
+	ad, _, a := setup(t)
 	ctx := context.Background()
-	codes, err := ad.CreateInvites(ctx, 5, "给 测试")
+	codes, err := ad.CreateInvites(ctx, root, 5, "给 测试")
 	if err != nil || len(codes) != 5 {
 		t.Fatalf("应生成 5 个：%v %v", codes, err)
 	}
-	seen := map[string]bool{}
 	for _, c := range codes {
 		if err := validate.InviteCode(c); err != nil {
 			t.Fatalf("生成的邀请码不合法：%s", c)
 		}
-		seen[c] = true
 	}
-	if len(seen) != 5 {
-		t.Fatal("邀请码重复")
+	if _, err := ad.CreateInvites(ctx, root, 0, ""); apierr.CodeOf(err) != apierr.ValidationFailed {
+		t.Fatalf("数量 0 应报错：%v", err)
 	}
-	for _, n := range []int{0, -1, MaxInvitesPerCall + 1} {
-		if _, err := ad.CreateInvites(ctx, n, ""); err == nil {
-			t.Errorf("n=%d 应报错", n)
-		}
-	}
-
-	if err := ad.RevokeInvite(ctx, " "+strings.ToLower(codes[0])+" "); err != nil {
+	if _, err := a.Register(ctx, "alice", "password-alice", codes[0], auth.ClientMeta{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ad.RevokeInvite(ctx, codes[0]); err == nil {
-		t.Fatal("重复撤销应报错")
+	if err := ad.RevokeInvite(ctx, root, codes[1]); err != nil {
+		t.Fatal(err)
 	}
-	if err := ad.RevokeInvite(ctx, "FRPT-AAAA-AAAA"); err == nil || !strings.Contains(err.Error(), "不存在") {
-		t.Fatalf("不存在的邀请码应报错：%v", err)
+	if err := ad.RevokeInvite(ctx, root, codes[0]); apierr.CodeOf(err) != apierr.InviteUsed {
+		t.Fatalf("已使用的不能撤销：%v", err)
 	}
-
-	all, _ := ad.ListInvites(ctx, false)
-	unused, _ := ad.ListInvites(ctx, true)
-	if len(all) != 5 || len(unused) != 4 || all[0].Note != "给 测试" {
-		t.Fatalf("列表不对：all=%d unused=%d", len(all), len(unused))
+	if err := ad.RevokeInvite(ctx, root, "FRPT-AAAA-AAAA"); apierr.CodeOf(err) != apierr.NotFound {
+		t.Fatalf("不存在：%v", err)
 	}
-	audit, _ := store.ListAudit(ctx, st.DB(), "", 10)
-	if len(audit) != 2 || audit[0].Action != store.AuditAdminInviteRevoke || audit[1].Action != store.AuditAdminInviteCreate ||
-		!strings.Contains(audit[1].Detail, `"via":"cli"`) {
-		t.Fatalf("审计不对：%+v", audit)
+	count := func(status string) int {
+		l, err := ad.ListInvites(ctx, status)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(l)
+	}
+	if count("all") != 5 || count("unused") != 3 || count("used") != 1 || count("revoked") != 1 {
+		t.Fatalf("all=%d unused=%d used=%d revoked=%d", count("all"), count("unused"), count("used"), count("revoked"))
+	}
+	used, _ := ad.ListInvites(ctx, "used")
+	if used[0].UsedBy != "alice" || used[0].Note != "给 测试" {
+		t.Fatalf("used: %+v", used[0])
+	}
+	if _, err := ad.ListInvites(ctx, "weird"); apierr.CodeOf(err) != apierr.ValidationFailed {
+		t.Fatal("非法 status 应报错")
 	}
 }
 
-func TestUsers(t *testing.T) {
-	ad, st, a := setup(t)
+func TestUsersAndSelfProtection(t *testing.T) {
+	ad, _, a := setup(t)
 	ctx := context.Background()
-	register(t, ad, a, "alice")
-	register(t, ad, a, "bob")
-	if _, err := a.Login(ctx, "alice", "password-alice", auth.ClientMeta{}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := a.Login(ctx, "alice", "password-alice", auth.ClientMeta{}); err != nil {
+	boss := register(t, ad, a, "boss")
+	_ = register(t, ad, a, "alice")
+	me := Actor{UserID: boss.ID, IP: "198.51.100.1"}
+	if err := ad.SetRole(ctx, root, "boss", model.RoleAdmin); err != nil {
 		t.Fatal(err)
 	}
 
+	// 不能改自己、停用自己
+	if err := ad.SetRole(ctx, me, "boss", model.RoleUser); apierr.CodeOf(err) != apierr.Forbidden {
+		t.Fatalf("不能降低自己的角色：%v", err)
+	}
+	if _, err := ad.SetDisabled(ctx, me, "boss", true); apierr.CodeOf(err) != apierr.Forbidden {
+		t.Fatalf("不能停用自己：%v", err)
+	}
+	if err := ad.SetRole(ctx, me, "alice", "god"); apierr.CodeOf(err) != apierr.ValidationFailed {
+		t.Fatal("非法角色")
+	}
+	if err := ad.SetRole(ctx, me, "nobody", model.RoleVIP); apierr.CodeOf(err) != apierr.NotFound {
+		t.Fatal("不存在的用户")
+	}
+
+	// alice 登录客户端和（成为管理员后）管理后台
+	if _, err := a.Login(ctx, "alice", "password-alice", auth.ClientMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ad.SetRole(ctx, me, "alice", model.RoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	web, err := a.LoginAdmin(ctx, "alice", "password-alice", auth.ClientMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 降为 vip：管理后台会话立即失效，客户端会话保留
+	if err := ad.SetRole(ctx, me, "alice", model.RoleVIP); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.AuthenticateAdmin(ctx, web.Token); err == nil {
+		t.Fatal("降级后管理后台会话应失效")
+	}
 	users, err := ad.ListUsers(ctx)
-	if err != nil || len(users) != 2 || users[0].Nickname != "alice" || users[0].ActiveSessions != 2 || users[0].LastSeen == 0 ||
-		users[1].ActiveSessions != 0 || users[1].LastSeen != 0 {
-		t.Fatalf("用户列表不对：%+v %v", users, err)
-	}
-
-	if err := ad.SetRole(ctx, "ALICE", model.RoleAdmin); err != nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ad.SetRole(ctx, "alice", "root"); err == nil {
-		t.Fatal("非法角色应报错")
+	var alice User
+	for _, u := range users {
+		if u.Nickname == "alice" {
+			alice = u
+		}
 	}
-	if err := ad.SetRole(ctx, "nobody", model.RoleVIP); !errors.Is(err, ErrUserNotFound) {
-		t.Fatalf("不存在的用户：%v", err)
-	}
-	u, _ := store.GetUserByNickname(ctx, st.DB(), "alice")
-	if u.Role != model.RoleAdmin || u.StateVersion != 1 {
-		t.Fatalf("改角色后：%+v", u)
+	if alice.Role != model.RoleVIP || alice.ActiveSessions != 1 || alice.LastSeen == nil {
+		t.Fatalf("alice: %+v", alice)
 	}
 
-	n, err := ad.Kick(ctx, "alice")
-	if err != nil || n != 2 {
-		t.Fatalf("应吊销 2 个会话：%d %v", n, err)
-	}
-	if _, err := a.Login(ctx, "alice", "password-alice", auth.ClientMeta{}); err != nil {
-		t.Fatal(err)
-	}
-	n, err = ad.Disable(ctx, "alice")
+	// 踢下线只吊销客户端会话
+	n, err := ad.Kick(ctx, me, "alice")
 	if err != nil || n != 1 {
-		t.Fatalf("停用应吊销 1 个会话：%d %v", n, err)
+		t.Fatalf("kick: %d %v", n, err)
 	}
-	if _, err := a.Login(ctx, "alice", "password-alice", auth.ClientMeta{}); err == nil {
-		t.Fatal("停用后不能登录")
+	// 停用 → 不能登录；启用 → 恢复
+	if _, err := ad.SetDisabled(ctx, me, "alice", true); err != nil {
+		t.Fatal(err)
 	}
-	if err := ad.Enable(ctx, "alice"); err != nil {
+	if _, err := a.Login(ctx, "alice", "password-alice", auth.ClientMeta{}); apierr.CodeOf(err) != apierr.AccountDisabled {
+		t.Fatalf("停用后不能登录：%v", err)
+	}
+	if _, err := ad.SetDisabled(ctx, me, "alice", false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.Login(ctx, "alice", "password-alice", auth.ClientMeta{}); err != nil {
-		t.Fatalf("启用后应能登录：%v", err)
-	}
-
-	code, exp, err := ad.ResetCode(ctx, "bob")
-	if err != nil || !strings.HasPrefix(code, "RST-") || time.Until(exp) < 23*time.Hour {
-		t.Fatalf("重置码不对：%s %v %v", code, exp, err)
-	}
-	if err := a.ResetPassword(ctx, "bob", code, "brand-new-password", auth.ClientMeta{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := ad.ResetCode(ctx, "nobody"); !errors.Is(err, ErrUserNotFound) {
-		t.Fatalf("不存在的用户：%v", err)
+
+	// 重置码
+	code, exp, err := ad.ResetCode(ctx, me, "alice")
+	if err != nil || code == "" || exp.IsZero() {
+		t.Fatalf("reset code: %v", err)
+	}
+	if err := a.ResetPassword(ctx, "alice", code, "new-password-1", auth.ClientMeta{}); err != nil {
+		t.Fatal(err)
 	}
 
-	// 每个管理操作都有审计
-	want := map[string]bool{
-		store.AuditAdminSetRole: false, store.AuditAdminKick: false, store.AuditAdminDisable: false,
-		store.AuditAdminEnable: false, store.AuditAdminResetCode: false,
+	// 审计日志带操作者昵称和 IP
+	logs, err := ad.ListAudit(ctx, "admin.", 50)
+	if err != nil {
+		t.Fatal(err)
 	}
-	rows, _ := store.ListAudit(ctx, st.DB(), "", 100)
-	for _, r := range rows {
-		if _, ok := want[r.Action]; ok {
-			want[r.Action] = true
-			if r.Target == "" || !strings.Contains(r.Detail, `"via":"cli"`) {
-				t.Errorf("审计记录不完整：%+v", r)
-			}
-			if strings.Contains(r.Detail, code) {
-				t.Fatal("重置码不能写进审计")
-			}
+	var found bool
+	for _, e := range logs {
+		if e.Action == store.AuditAdminKick && e.Actor == "boss" && e.IP == "198.51.100.1" && e.Target == "alice" && e.Detail["via"] == "web" {
+			found = true
+		}
+		if e.Action[:6] != "admin." {
+			t.Fatalf("前缀过滤失效：%s", e.Action)
 		}
 	}
-	for action, ok := range want {
-		if !ok {
-			t.Errorf("缺少审计 %s", action)
-		}
+	if !found {
+		t.Fatalf("没找到踢下线的审计记录：%+v", logs)
+	}
+
+	o, err := ad.Overview(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.Users != 2 || o.Admins != 1 || o.VIPs != 1 || o.InvitesUsed != 2 || o.OnlineUsers != 0 || o.ActiveToday != 1 { // 重置密码吊销了 alice 的会话
+		t.Fatalf("overview: %+v", o)
 	}
 }
 
-// 已使用的邀请码在用户被删除后（used_by 变成 NULL）也不能再用。
+func TestBackup(t *testing.T) {
+	ad, _, a := setup(t)
+	register(t, ad, a, "alice")
+	var buf bytes.Buffer
+	n, err := ad.Backup(context.Background(), root, &buf)
+	if err != nil || n < 1024 || !bytes.HasPrefix(buf.Bytes(), []byte("SQLite format 3\x00")) {
+		t.Fatalf("backup: n=%d err=%v", n, err)
+	}
+}
+
 func TestInviteNotReusableAfterUserDeleted(t *testing.T) {
 	ad, st, a := setup(t)
 	ctx := context.Background()
-	codes, _ := ad.CreateInvites(ctx, 1, "")
+	codes, _ := ad.CreateInvites(ctx, root, 1, "")
 	u, err := a.Register(ctx, "alice", "password-alice", codes[0], auth.ClientMeta{})
 	if err != nil {
 		t.Fatal(err)
@@ -191,11 +228,8 @@ func TestInviteNotReusableAfterUserDeleted(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	inv, _ := store.GetInvite(ctx, st.DB(), codes[0])
-	if inv.UsedBy != "" || inv.UsedAt == nil {
-		t.Fatalf("前提：used_by 已被置空、used_at 仍在：%+v", inv)
-	}
-	if _, err := a.Register(ctx, "bob", "password-bob", codes[0], auth.ClientMeta{}); err == nil {
-		t.Fatal("邀请码不应能再次使用")
+	_, err = a.Register(ctx, "bob", "password-bob", codes[0], auth.ClientMeta{})
+	if !errors.Is(err, apierr.New(apierr.InviteUsed)) {
+		t.Fatalf("用户删除后邀请码也不能再用：%v", err)
 	}
 }

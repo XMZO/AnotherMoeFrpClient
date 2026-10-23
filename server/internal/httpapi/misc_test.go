@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bufio"
 	"encoding/json"
+	"moefrp/server/internal/admin"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -256,7 +257,7 @@ func TestAccessLogNoSecrets(t *testing.T) {
 	e.me(tok).expect(http.StatusOK)
 	e.do(req{method: "POST", path: api.RouteChangePassword, token: tok,
 		body: api.ChangePasswordRequest{OldPassword: "Sup3r-Secret-PW", NewPassword: "An0ther-Secret-PW"}}).expect(http.StatusNoContent)
-	code, _, _ := e.admin.ResetCode(t.Context(), "alice")
+	code, _, _ := e.admin.ResetCode(t.Context(), admin.Actor{}, "alice")
 	e.do(req{method: "POST", path: api.RouteResetPassword,
 		body: api.ResetPasswordRequest{Nickname: "alice", Code: code, NewPassword: "Th1rd-Secret-PW"}}).expect(http.StatusNoContent)
 	e.do(req{method: "GET", path: api.RouteMe, token: tok + "x"}).apiErr(apierr.Unauthorized)

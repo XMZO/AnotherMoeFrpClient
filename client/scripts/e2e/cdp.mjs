@@ -9,12 +9,14 @@ export async function waitUntil(what, fn, timeout = 15000, interval = 50) {
   const t0 = Date.now()
   let last
   while (Date.now() - t0 < timeout) {
+    let ok
     try {
-      last = await fn()
+      ok = await fn()
+      last = ok
     } catch (e) {
-      last = String(e)
+      last = String(e) // 抛错算"还没好"，不能当成成功
     }
-    if (last) return Date.now() - t0
+    if (ok) return Date.now() - t0
     await sleep(interval)
   }
   throw new Error(`timeout waiting for ${what} (last=${JSON.stringify(last)?.slice(0, 300)})`)

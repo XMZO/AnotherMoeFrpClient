@@ -25,6 +25,12 @@ type Config struct {
 	SessionTTL     Duration `toml:"session_ttl"`     // 滑动过期：这么久没用才失效
 	LogLevel       string   `toml:"log_level"`       // debug / info / warn / error
 
+	// 管理后台（/admin）的初始化：库里还没有任何用户时，用初始化码创建第一个管理员。
+	// AdminSetupCode 为空时启动时随机生成并写进日志；AdminRecovery 为 true 时即使已有用户也开放初始化页面
+	// （管理员密码丢失时用，用完记得关掉）。
+	AdminSetupCode string `toml:"admin_setup_code"`
+	AdminRecovery  bool   `toml:"admin_recovery"`
+
 	Client Client `toml:"client"`
 }
 
@@ -122,6 +128,12 @@ var envVars = []struct {
 	}},
 	{"SESSION_TTL", func(c *Config, v string) error { return c.SessionTTL.UnmarshalText([]byte(v)) }},
 	{"LOG_LEVEL", func(c *Config, v string) error { c.LogLevel = v; return nil }},
+	{"ADMIN_SETUP_CODE", func(c *Config, v string) error { c.AdminSetupCode = v; return nil }},
+	{"ADMIN_RECOVERY", func(c *Config, v string) error {
+		b, err := strconv.ParseBool(v)
+		c.AdminRecovery = b
+		return err
+	}},
 	{"CLIENT_LATEST_VERSION", func(c *Config, v string) error { c.Client.LatestVersion = v; return nil }},
 	{"CLIENT_MIN_VERSION", func(c *Config, v string) error { c.Client.MinVersion = v; return nil }},
 	{"CLIENT_DOWNLOAD_URL", func(c *Config, v string) error { c.Client.DownloadURL = v; return nil }},
@@ -173,6 +185,9 @@ func (c Config) Validate() error {
 	}
 	if _, err := c.TrustedPrefixes(); err != nil {
 		errs = append(errs, err)
+	}
+	if code := c.AdminSetupCode; code != "" && (len(code) < 12 || len(code) > 128) {
+		errs = append(errs, errors.New("admin_setup_code 长度应为 12–128 个字符"))
 	}
 	if c.SessionTTL.D() < time.Hour {
 		errs = append(errs, fmt.Errorf("session_ttl 至少 1h，当前 %s", c.SessionTTL.D()))

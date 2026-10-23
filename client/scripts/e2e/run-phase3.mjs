@@ -20,6 +20,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { connect, sleep, tid, waitUntil } from './cdp.mjs'
+import { ADMIN_SETUP_CODE, adminClient } from './adminapi.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const client = path.resolve(here, '..', '..')
@@ -73,12 +74,11 @@ function serverEnv(opts = {}) {
     MOEFRP_CLIENT_MIN_VERSION: opts.min ?? '3.0.0-dev',
     MOEFRP_CLIENT_DOWNLOAD_URL: 'https://example.invalid/MoeFrp-new.exe',
     MOEFRP_LOG_LEVEL: 'info',
+    MOEFRP_ADMIN_SETUP_CODE: ADMIN_SETUP_CODE,
   }
 }
 let server = null
-let serverOpts = {}
 async function startServer(opts) {
-  serverOpts = opts
   const logFile = fs.openSync(path.join(OUT, 'server.log'), 'a')
   server = spawn(serverExe, ['serve', '--auto-migrate'], { env: serverEnv(opts), stdio: ['ignore', logFile, logFile] })
   await waitUntil('server healthz', async () => (await fetch(`${API}/healthz`)).ok, 15000, 100)
@@ -93,9 +93,7 @@ async function stopServer() {
   await waitUntil('server port free', () => portFree(SERVER_PORT), 10000, 100)
   log('server down')
 }
-function admin(...args) {
-  return execFileSync(serverExe, ['admin', ...args], { env: serverEnv(serverOpts), encoding: 'utf8' })
-}
+const admin = adminClient(API)
 function portFree(port) {
   return new Promise((resolve) => {
     const s = net.createServer()
@@ -300,9 +298,9 @@ async function main() {
   if (creds().length) throw new Error('leftover test credentials found: ' + JSON.stringify(creds()))
 
   execFileSync(serverExe, ['migrate'], { env: serverEnv(), stdio: 'ignore' })
-  const invites = admin('invite', 'create', '-n', '2').trim().split(/\r?\n/).filter((l) => /^FRPT-/.test(l))
-  check('admin_invite_created', invites.length === 2, { count: invites.length })
   await startServer({ single: false })
+  const invites = await admin.createInvites(2)
+  check('admin_invite_created', invites.length === 2, { count: invites.length })
 
   frps = spawn(localfrps, ['-port', String(FRPS_PORT), '-token', 'e2e-token', '-echo', `127.0.0.1:${ECHO_PORT}`], { stdio: 'ignore' })
   await waitUntil('localfrps', async () => !(await portFree(FRPS_PORT)), 10000, 100)
@@ -523,7 +521,7 @@ async function main() {
   check('no_auto_login_after_logout', !(await loggedIn(B3)) && (await B3.exists(tid('account-login'))) && (await B3.exists(tid('profile-item-B的本地配置'))))
 
   // ---- 重置密码 ----
-  const resetCode = admin('user', 'reset-code', NICK).split(/\r?\n/).map((l) => l.trim()).find((l) => /^RST-/.test(l)) ?? ''
+  const resetCode = await admin.resetCode(NICK)
   await openAuth(B3, '重置密码')
   await B3.type(tid('reset-nickname'), NICK)
   await B3.type(tid('reset-code'), resetCode)

@@ -223,7 +223,11 @@ func copyExec(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, b, 0o700)
+	if err := os.WriteFile(dst, b, 0o700); err != nil {
+		return err
+	}
+	// dst 可能是 CreateTemp 建的（0600），WriteFile 不会改已有文件的权限
+	return os.Chmod(dst, 0o700)
 }
 
 func systemctl(ctx context.Context, args ...string) error {

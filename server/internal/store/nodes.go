@@ -110,7 +110,7 @@ func UpdateNodeMeta(ctx context.Context, q Querier, id, name, publicAddr string,
 // SetNodeConfig 保存新的期望配置，版本号 +1，返回新版本号。
 func SetNodeConfig(ctx context.Context, q Querier, id, config string, now int64) (int64, error) {
 	var rev int64
-	err := q.QueryRowContext(ctx, `UPDATE nodes SET frps_config = ?, config_rev = config_rev + 1, updated_at = ?
+	err := q.QueryRowContext(ctx, `UPDATE nodes SET frps_config = ?, config_rev = config_rev + 1, apply_error = '', updated_at = ?
 		WHERE id = ? RETURNING config_rev`, config, now, id).Scan(&rev)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, ErrNotFound

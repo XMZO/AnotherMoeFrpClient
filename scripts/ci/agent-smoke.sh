@@ -32,6 +32,7 @@ leftovers() {
 }
 cleanup() {
   sudo journalctl -u moefrp-agent --no-pager -n 80 || true
+  sudo journalctl -u moefrp-agent-uninstall --no-pager -n 40 || true
   docker logs smoke-panel 2>&1 | tail -n 40 || true
   docker rm -f smoke-panel >/dev/null 2>&1 || true
 }

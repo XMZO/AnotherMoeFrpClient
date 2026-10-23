@@ -238,7 +238,9 @@ func (s *Service) afterHello(id string, h agentproto.Hello) {
 		}
 		return
 	}
-	if n.FrpsConfig != "" && n.ConfigRev != h.AppliedRev {
+	// 节点已经拒绝过的版本（apply_error 不为空）不自动重发：每次重发都会让 frps 重启再回滚。
+	// 管理员保存新配置时 apply_error 会被清空
+	if n.FrpsConfig != "" && n.ConfigRev != h.AppliedRev && n.ApplyError == "" {
 		res, err := s.push(ctx, id, n.ConfigRev, n.FrpsConfig)
 		switch {
 		case err != nil:

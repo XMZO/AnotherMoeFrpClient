@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -123,8 +124,14 @@ func (s *Server) publicURL(r *http.Request) (string, bool) {
 	return scheme + "://" + r.Host, true
 }
 
-func installCommand(base, code string) string {
-	return fmt.Sprintf("curl -fsSL %s%s | sudo sh -s -- %s", base, agentproto.RouteInstallScript, code)
+// installCommand 生成安装命令。节点设置了下载代理时，安装脚本的地址带上 mirror 参数，
+// 脚本里的下载地址就会加上代理前缀。地址用单引号包起来（里面有 ? 和 &）。
+func installCommand(base, code, mirror string) string {
+	u := base + agentproto.RouteInstallScript
+	if mirror != "" {
+		u += "?mirror=" + url.QueryEscape(mirror)
+	}
+	return fmt.Sprintf("curl -fsSL '%s' | sudo sh -s -- %s", u, code)
 }
 
 // ---- agent 接口 ----
@@ -179,7 +186,10 @@ func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
 	// 查不到时仍然返回脚本，卸载照常可用，安装时报出原因
 	var build *nodes.Build
 	unavailable := ""
-	if src := s.nodes.Source(); src == nil {
+	mirror, err := nodes.NormalizeMirror(r.URL.Query().Get("mirror"))
+	if err != nil {
+		unavailable = "安装命令里的下载代理不正确：" + err.Error()
+	} else if src := s.nodes.Source(); src == nil {
 		unavailable = "面板没有配置 agent 来源（agent_repo / agent_dist_dir）"
 	} else {
 		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
@@ -192,7 +202,7 @@ func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write([]byte(nodes.InstallScript(base, build, unavailable)))
+	_, _ = w.Write([]byte(nodes.InstallScript(base, build, unavailable, mirror)))
 }
 
 // agentStatus 是列表页和新建节点时显示的 agent 来源和版本（不等网络）。
@@ -277,12 +287,22 @@ func (s *Server) handleElevate(w http.ResponseWriter, r *http.Request) {
 // ---- 节点 ----
 
 type createNodeRequest struct {
-	Name string `json:"name"`
+	Name           string `json:"name"`
+	DownloadMirror string `json:"downloadMirror"`
 }
 
 type updateNodeRequest struct {
-	Name       string `json:"name"`
-	PublicAddr string `json:"publicAddr"`
+	Name           string  `json:"name"`
+	PublicAddr     string  `json:"publicAddr"`
+	DownloadMirror *string `json:"downloadMirror,omitempty"` // 不传表示不改
+}
+
+func mirrorsOf(list []nodes.View) []string {
+	out := make([]string, 0, len(list))
+	for _, n := range list {
+		out = append(out, n.DownloadMirror)
+	}
+	return out
 }
 
 type nodeConfigRequest struct {
@@ -301,7 +321,17 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	resp := map[string]any{"nodes": list, "agent": s.agentStatus()}
+	resp := map[string]any{"nodes": list, "agent": s.agentStatus(), "defaultMirror": s.cfg.AgentMirror}
+	// 用过的下载代理，添加节点时可以直接选
+	seen := map[string]bool{}
+	mirrors := []string{}
+	for _, m := range append([]string{s.cfg.AgentMirror}, mirrorsOf(list)...) {
+		if m != "" && !seen[m] {
+			seen[m] = true
+			mirrors = append(mirrors, m)
+		}
+	}
+	resp["mirrors"] = mirrors
 	if base, ok := s.publicURL(r); ok {
 		resp["publicUrl"] = base
 	}
@@ -311,7 +341,7 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 func (s *Server) createdResponse(r *http.Request, c nodes.Created) map[string]any {
 	resp := map[string]any{"node": c.Node, "enrollCode": c.EnrollCode, "expiresAt": c.ExpiresAt}
 	if base, ok := s.publicURL(r); ok {
-		resp["installCommand"] = installCommand(base, c.EnrollCode)
+		resp["installCommand"] = installCommand(base, c.EnrollCode, c.Node.DownloadMirror)
 	}
 	if st := s.agentStatus(); st["error"] != nil && st["version"] == nil {
 		resp["warning"] = fmt.Sprintf("暂时拿不到 agent 程序：%v。安装命令现在执行会失败", st["error"])
@@ -325,7 +355,7 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	c, err := s.nodes.Create(r.Context(), nodeActor(r), req.Name)
+	c, err := s.nodes.Create(r.Context(), nodeActor(r), req.Name, req.DownloadMirror)
 	if err != nil {
 		s.writeError(w, r, err)
 		return
@@ -348,7 +378,7 @@ func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	if err := s.nodes.Update(r.Context(), nodeActor(r), r.PathValue("id"), req.Name, req.PublicAddr); err != nil {
+	if err := s.nodes.Update(r.Context(), nodeActor(r), r.PathValue("id"), req.Name, req.PublicAddr, req.DownloadMirror); err != nil {
 		s.writeError(w, r, err)
 		return
 	}

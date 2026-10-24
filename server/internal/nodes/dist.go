@@ -106,14 +106,15 @@ func (d *Dist) ArchList() []string {
 var installScript string
 
 // InstallScript 返回安装脚本：写好面板地址和各架构的下载地址、校验和。
-// server 必须已经校验过；b 为 nil 时脚本只能用来卸载，安装会报 unavailable 里的原因。
-// 本地目录的相对地址补全成面板地址。所有值都在脚本里用单引号包起来，调用方保证不含单引号。
-func InstallScript(server string, b *Build, unavailable string) string {
+// server 和 mirror 必须已经校验过；b 为 nil 时脚本只能用来卸载，安装会报 unavailable 里的原因。
+// GitHub 的地址加上下载代理 mirror，本地目录的相对地址补全成面板地址。
+// 所有值都在脚本里用单引号包起来，单引号会被去掉。
+func InstallScript(server string, b *Build, unavailable, mirror string) string {
 	vals := map[string]string{"__SERVER__": server, "__VERSION__": "", "__UNAVAILABLE__": unavailable}
 	for _, arch := range Arches {
 		u, sum := "", ""
 		if f, ok := b.file(arch); ok {
-			u, sum = f.URL, f.SHA256
+			u, sum = WithMirror(f.URL, mirror), f.SHA256
 			if strings.HasPrefix(u, "/") {
 				u = server + u
 			}

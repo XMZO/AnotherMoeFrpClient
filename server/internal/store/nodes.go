@@ -11,7 +11,8 @@ type Node struct {
 	ID               string
 	Name             string
 	PublicAddr       string
-	Enrolled         bool // token_hash 不为空
+	DownloadMirror   string // 下载 agent 用的代理前缀，空表示直连
+	Enrolled         bool   // token_hash 不为空
 	EnrollExpiresAt  *int64
 	FrpsConfig       string
 	ConfigRev        int64
@@ -25,12 +26,12 @@ type Node struct {
 	UpdatedAt        int64
 }
 
-const nodeColumns = `id, name, public_addr, token_hash IS NOT NULL, enroll_expires_at, frps_config, config_rev,
+const nodeColumns = `id, name, public_addr, download_mirror, token_hash IS NOT NULL, enroll_expires_at, frps_config, config_rev,
 	applied_rev, apply_error, pending_uninstall, info, last_ip, last_seen_at, created_at, updated_at`
 
 func scanNode(row interface{ Scan(...any) error }) (Node, error) {
 	var n Node
-	err := row.Scan(&n.ID, &n.Name, &n.PublicAddr, &n.Enrolled, &n.EnrollExpiresAt, &n.FrpsConfig, &n.ConfigRev,
+	err := row.Scan(&n.ID, &n.Name, &n.PublicAddr, &n.DownloadMirror, &n.Enrolled, &n.EnrollExpiresAt, &n.FrpsConfig, &n.ConfigRev,
 		&n.AppliedRev, &n.ApplyError, &n.PendingUninstall, &n.Info, &n.LastIP, &n.LastSeenAt, &n.CreatedAt, &n.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Node{}, ErrNotFound
@@ -40,9 +41,9 @@ func scanNode(row interface{ Scan(...any) error }) (Node, error) {
 
 // InsertNode 新建节点，同时写入安装码的哈希。
 func InsertNode(ctx context.Context, q Querier, n Node, enrollHash []byte, enrollExpires int64) error {
-	_, err := q.ExecContext(ctx, `INSERT INTO nodes (id, name, public_addr, enroll_hash, enroll_expires_at, frps_config,
-		config_rev, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		n.ID, n.Name, n.PublicAddr, enrollHash, enrollExpires, n.FrpsConfig, n.ConfigRev, n.CreatedAt, n.UpdatedAt)
+	_, err := q.ExecContext(ctx, `INSERT INTO nodes (id, name, public_addr, download_mirror, enroll_hash, enroll_expires_at,
+		frps_config, config_rev, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		n.ID, n.Name, n.PublicAddr, n.DownloadMirror, enrollHash, enrollExpires, n.FrpsConfig, n.ConfigRev, n.CreatedAt, n.UpdatedAt)
 	return err
 }
 
@@ -102,9 +103,10 @@ func ResetNodeEnrollment(ctx context.Context, q Querier, id string, enrollHash [
 		WHERE id = ?`, enrollHash, expires, now, id)
 }
 
-// UpdateNodeMeta 修改名称和客户端连接地址。
-func UpdateNodeMeta(ctx context.Context, q Querier, id, name, publicAddr string, now int64) error {
-	return execOne(ctx, q, `UPDATE nodes SET name = ?, public_addr = ?, updated_at = ? WHERE id = ?`, name, publicAddr, now, id)
+// UpdateNodeMeta 修改名称、客户端连接地址和下载代理。
+func UpdateNodeMeta(ctx context.Context, q Querier, id, name, publicAddr, mirror string, now int64) error {
+	return execOne(ctx, q, `UPDATE nodes SET name = ?, public_addr = ?, download_mirror = ?, updated_at = ? WHERE id = ?`,
+		name, publicAddr, mirror, now, id)
 }
 
 // SetNodeConfig 保存新的期望配置，版本号 +1，返回新版本号。

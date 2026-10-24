@@ -43,7 +43,7 @@ moefrp-agent（节点上，root，systemd 服务）←── 程序从 GitHub Re
 - **只由 agent 主动连面板**，节点不需要开放额外端口。断线后指数退避重连（1s → 60s，带抖动）。
 - **agent 程序发布在 GitHub Release**，和面板分开发版：推送 `agent-v1.2.3` 标签时，`.github/workflows/agent-release.yml` 测试、编译 linux-amd64 / linux-arm64，连同 `SHA256SUMS` 发布到 Release（不标记为 Latest，`releases/latest` 留给客户端）。
 - 面板查询仓库里标签以 `agent-v` 开头、版本号最大的正式 Release（草稿和预发布不算），结果缓存 10 分钟；查询失败时继续用上次的结果，1 分钟后重试。校验和取自同一个 Release 的 `SHA256SUMS`，由面板写进安装脚本和升级请求，节点下载后核对。
-- 连不上 GitHub 的机器：配置 `agent_mirror`（下载地址前缀，例如 `https://ghproxy.example.com/`），下载地址变成"前缀 + GitHub 地址"。校验和仍由面板从 GitHub 获取，镜像改不了内容。
+- 连不上 GitHub 的机器：**每个节点可以设自己的下载代理**（例如 `https://ghproxy.example.com/`），下载地址变成"代理 + GitHub 地址"。添加节点时填写，安装命令变成 `curl -fsSL 'https://面板/agent/install.sh?mirror=<代理>' | sudo sh -s -- <安装码>`，脚本里的下载地址带上代理；之后升级也经过它。节点"设置"里可以改掉或清空（直连）。配置里的 `agent_mirror` 只是添加节点时的默认值。校验和仍由面板从 GitHub 获取，代理改不了内容。
 - 完全离线：配置 `agent_dist_dir`，把 `moefrp-agent-linux-amd64`、`moefrp-agent-linux-arm64` 和 `VERSION` 放进去，面板改从 `/agent/download/*` 提供程序（CI 冒烟测试就是这样用的）。
 
 ## 2. 添加节点和认证

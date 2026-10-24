@@ -99,7 +99,9 @@ func agentSource(cfg config.Config, version string, log *slog.Logger) (nodes.Sou
 		return nil, nil
 	}
 	log.Info("node agent source: GitHub releases", "repo", cfg.AgentRepo, "mirror", cfg.AgentMirror)
-	return &nodes.GitHub{Repo: cfg.AgentRepo, Mirror: cfg.AgentMirror, Log: log}, nil
+	g := &nodes.GitHub{Repo: cfg.AgentRepo, Log: log}
+	g.Cached() // 启动时就在后台查一次，打开节点页时不用等
+	return g, nil
 }
 
 // New 创建 Server 并注册路由。

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -108,7 +109,6 @@ const (
 // 校验和来自同一个发布里的 SHA256SUMS。
 type GitHub struct {
 	Repo   string       // owner/name
-	Mirror string       // 下载地址前缀，例如 https://ghproxy.example.com/；空表示直连
 	API    string       // 默认 https://api.github.com，测试时替换
 	Client *http.Client // nil 时用 30 秒超时的默认客户端
 	Log    *slog.Logger
@@ -190,7 +190,7 @@ func (g *GitHub) result() (*Build, error) {
 	if g.err != nil {
 		return nil, g.err
 	}
-	return nil, errors.New("还没有查询过")
+	return nil, nil // 还没查过（Cached 刚触发了后台查询）
 }
 
 type ghRelease struct {
@@ -285,7 +285,6 @@ func (g *GitHub) fetch(ctx context.Context) (*Build, error) {
 		if !ok || sum == "" {
 			continue
 		}
-		u = g.Mirror + u
 		if !safeURL.MatchString(u) {
 			return nil, fmt.Errorf("下载地址 %q 含有不支持的字符", u)
 		}
@@ -295,6 +294,32 @@ func (g *GitHub) fetch(ctx context.Context) (*Build, error) {
 		return nil, fmt.Errorf("%s 里没有可用的 agent 程序", best.Tag)
 	}
 	return b, nil
+}
+
+// NormalizeMirror 检查下载代理前缀（gh-proxy 这类"代理地址 + GitHub 地址"的服务）：
+// 空表示直连；必须是 https，自动补上末尾的 /。
+func NormalizeMirror(m string) (string, error) {
+	m = strings.TrimSpace(m)
+	if m == "" {
+		return "", nil
+	}
+	if !strings.HasSuffix(m, "/") {
+		m += "/"
+	}
+	u, err := url.Parse(m)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.RawQuery != "" || u.Fragment != "" ||
+		len(m) > 200 || !safeURL.MatchString(m) {
+		return "", errors.New("下载代理应是 https 地址，例如 https://ghproxy.example.com/")
+	}
+	return m, nil
+}
+
+// WithMirror 给 GitHub 的完整下载地址加上代理前缀；面板上的相对地址（本地目录）不需要代理。
+func WithMirror(u, mirror string) string {
+	if mirror == "" || strings.HasPrefix(u, "/") {
+		return u
+	}
+	return mirror + u
 }
 
 var hexRe = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)

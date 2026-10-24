@@ -17,6 +17,7 @@ import (
 	"github.com/coder/websocket"
 
 	"moefrp/server/internal/config"
+	"moefrp/server/internal/nodes"
 	"moefrp/shared/agentproto"
 	"moefrp/shared/apierr"
 )
@@ -132,7 +133,7 @@ func (n *nodeEnv) createNode(name string) (id, code string) {
 		InstallCommand string
 	}
 	n.admin("POST", "/nodes", createNodeRequest{Name: name}).expect(http.StatusCreated).decode(&c)
-	if !strings.HasPrefix(c.EnrollCode, "MFN-") || !strings.Contains(c.InstallCommand, "/agent/install.sh | sudo sh -s -- "+c.EnrollCode) {
+	if !strings.HasPrefix(c.EnrollCode, "MFN-") || !strings.Contains(c.InstallCommand, "/agent/install.sh' | sudo sh -s -- "+c.EnrollCode) {
 		n.t.Fatalf("创建节点：%+v", c)
 	}
 	return c.Node.ID, c.EnrollCode
@@ -346,6 +347,90 @@ func TestNodeOfflineUninstallAndUpgrade(t *testing.T) {
 		t.Fatal("在线时应直接卸载")
 	}
 	n.admin("GET", "/nodes/"+id, nil).apiErr(apierr.NotFound)
+}
+
+// stubSource 是测试用的 GitHub 来源：固定返回一个版本。
+type stubSource struct{ b *nodes.Build }
+
+func (s stubSource) Latest(context.Context) (*nodes.Build, error) { return s.b, nil }
+func (s stubSource) Cached() (*nodes.Build, error)                { return s.b, nil }
+func (s stubSource) Kind() string                                 { return "github" }
+
+func TestNodeDownloadMirror(t *testing.T) {
+	const gh = "https://github.com/o/r/releases/download/agent-v2.0.0/moefrp-agent-linux-amd64"
+	sum := strings.Repeat("ab", 32)
+	n := newNodeEnv(t, withConfig(func(c *config.Config) { c.AgentMirror = "https://default.example.com/" }))
+	n.srv.nodes = nodes.New(nodes.Options{Store: n.st, Now: n.clock.Now, Source: stubSource{&nodes.Build{
+		Version: "2.0.0", Source: "github", Files: map[string]nodes.BuildFile{"amd64": {URL: gh, SHA256: sum}}}}})
+
+	// 添加节点时指定下载代理：安装命令带上它，脚本里的下载地址加前缀
+	var c struct {
+		Node           struct{ ID, DownloadMirror string }
+		EnrollCode     string
+		InstallCommand string
+	}
+	n.admin("POST", "/nodes", createNodeRequest{Name: "国内", DownloadMirror: "https://gh.example.com"}).expect(http.StatusCreated).decode(&c)
+	if c.Node.DownloadMirror != "https://gh.example.com/" {
+		t.Fatalf("应补上末尾的 /：%q", c.Node.DownloadMirror)
+	}
+	want := "curl -fsSL 'http://example.com/agent/install.sh?mirror=https%3A%2F%2Fgh.example.com%2F' | sudo sh -s -- " + c.EnrollCode
+	if c.InstallCommand != want {
+		t.Fatalf("安装命令：\n%s\n%s", c.InstallCommand, want)
+	}
+	r := n.do(req{method: "GET", path: "/agent/install.sh?mirror=https%3A%2F%2Fgh.example.com%2F"}).expect(http.StatusOK)
+	if !strings.Contains(r.Body.String(), "URL_AMD64='https://gh.example.com/"+gh+"'") || !strings.Contains(r.Body.String(), "SHA_AMD64='"+sum+"'") {
+		t.Fatal("脚本里的下载地址应加上代理")
+	}
+	r = n.do(req{method: "GET", path: "/agent/install.sh?mirror=http%3A%2F%2Fbad"}).expect(http.StatusOK)
+	if !strings.Contains(r.Body.String(), "UNAVAILABLE='安装命令里的下载代理不正确") {
+		t.Fatal("代理不正确时脚本应报错")
+	}
+	n.admin("POST", "/nodes", createNodeRequest{Name: "x", DownloadMirror: "http://insecure.example.com/"}).apiErr(apierr.ValidationFailed)
+
+	// 列表里给出默认代理和用过的代理
+	var list struct {
+		DefaultMirror string
+		Mirrors       []string
+	}
+	n.admin("GET", "/nodes", nil).expect(http.StatusOK).decode(&list)
+	if list.DefaultMirror != "https://default.example.com/" || len(list.Mirrors) != 2 {
+		t.Fatalf("代理列表：%+v", list)
+	}
+
+	// 升级用节点的下载代理；在设置里改掉后升级直连
+	en := n.enroll(c.EnrollCode)
+	a, _, err := dialAgent(t, n.http.URL, en.Token, agentproto.Hello{AgentVersion: "1.0.0", OS: "linux", Arch: "amd64", AppliedRev: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upgrade := func() agentproto.UpgradeRequest {
+		t.Helper()
+		var tk struct{ ID string }
+		n.admin("POST", "/nodes/"+c.Node.ID+"/upgrade", nil).expect(http.StatusAccepted).decode(&tk)
+		m := a.expect(agentproto.MethodUpgrade)
+		var up agentproto.UpgradeRequest
+		json.Unmarshal(m.Data, &up)
+		a.send(agentproto.Message{ID: m.ID, Type: agentproto.TypeResponse, Error: &agentproto.Error{Code: "failed", Message: "测试"}})
+		eventually(t, "任务结束", func() bool {
+			var x map[string]any
+			n.admin("GET", "/tasks/"+tk.ID, nil).expect(http.StatusOK).decode(&x)
+			return x["status"] == "failed"
+		})
+		return up
+	}
+	if up := upgrade(); up.URL != "https://gh.example.com/"+gh || up.SHA256 != sum {
+		t.Fatalf("升级应经过代理：%+v", up)
+	}
+	empty := ""
+	n.admin("PATCH", "/nodes/"+c.Node.ID, updateNodeRequest{Name: "国内", DownloadMirror: &empty}).expect(http.StatusNoContent)
+	if up := upgrade(); up.URL != gh {
+		t.Fatalf("去掉代理后直连：%+v", up)
+	}
+	// 不传 downloadMirror 时不改
+	n.admin("PATCH", "/nodes/"+c.Node.ID, updateNodeRequest{Name: "国内 2"}).expect(http.StatusNoContent)
+	if n.node(c.Node.ID)["downloadMirror"] != "" {
+		t.Fatal("没传 downloadMirror 时不应改动")
+	}
 }
 
 func TestNodeResetToken(t *testing.T) {

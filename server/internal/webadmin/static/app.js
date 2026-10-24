@@ -1097,19 +1097,32 @@
     return parts;
   }
 
-  function createNodeDialog(onDone) {
+  // mirrorInput 是下载代理输入框，suggestions 作为下拉候选（默认代理和其他节点用过的）。
+  function mirrorInput(value, suggestions) {
+    const listId = 'mirrors-' + Math.random().toString(36).slice(2);
+    const el = input({ value: value || '', placeholder: '留空直连 GitHub，例如 https://ghproxy.example.com/', maxlength: 200, list: listId, inputmode: 'url' });
+    return [el, h('datalist', { id: listId }, (suggestions || []).map((m) => h('option', { value: m })))];
+  }
+
+  const MIRROR_HINT = '节点连不上 GitHub（国内机器常见）时填一个 GitHub 下载代理，下载地址变成"代理 + GitHub 地址"。以后升级也用它，可以在节点的"设置"里改。校验和由面板从 GitHub 获取，代理改不了文件内容。';
+
+  function createNodeDialog(onDone, data) {
     const name = input({ maxlength: 40, placeholder: '例如：东京 1', required: true });
+    const ag = (data && data.agent) || {};
+    const [mirror, mirrorList] = mirrorInput(data && data.defaultMirror, data && data.mirrors);
     const err = h('div', { class: 'form-error', role: 'alert' });
     const submit = button('添加', { kind: 'primary', type: 'submit' });
     const d = openDialog({
       title: '添加节点',
       titleIcon: 'server',
-      body: [field('名称', name, '只在面板上显示，之后可以改'), err],
+      wide: true,
+      body: [field('名称', name, '只在面板上显示，之后可以改'),
+        ag.source === 'local' ? null : field('下载代理（可选）', h('div', null, mirror, mirrorList), MIRROR_HINT), err],
       actions: [button('取消', { onclick: () => d.close() }), submit],
       onSubmit: () => busy(submit, async () => {
         err.classList.remove('show');
         try {
-          const res = await api('POST', '/nodes', { name: name.value });
+          const res = await api('POST', '/nodes', { name: name.value, downloadMirror: mirror.value });
           d.close();
           showInstall(res, '节点「' + res.node.name + '」已添加');
           if (onDone) onDone(res.node);
@@ -1140,7 +1153,7 @@
     p.actions.append(
       button('刷新', { icon: 'refresh', onclick: () => load() }),
       button('执行命令', { icon: 'terminal', onclick: () => data && execDialog(data.nodes) }),
-      button('添加节点', { kind: 'primary', icon: 'plus', onclick: () => createNodeDialog(() => load()) }));
+      button('添加节点', { kind: 'primary', icon: 'plus', onclick: () => createNodeDialog(() => load(), data) }));
     p.body.append(notice, box);
     box.append(loadingBox());
 
@@ -1163,7 +1176,7 @@
       const list = data.nodes || [];
       if (!list.length) {
         box.replaceChildren(stateBox('server', '还没有节点', '添加一台 VPS，面板会在上面运行 frps，并负责配置、监控、升级和卸载。',
-          button('添加节点', { kind: 'primary', icon: 'plus', onclick: () => createNodeDialog(() => load()) })));
+          button('添加节点', { kind: 'primary', icon: 'plus', onclick: () => createNodeDialog(() => load(), data) })));
         return;
       }
       box.replaceChildren(
@@ -1363,6 +1376,7 @@
           ['系统', info.distro], ['内核', info.kernel], ['架构', info.arch ? info.os + '/' + info.arch : null], ['主机名', info.hostname],
           ['IP', n.lastIp], ['agent', info.agentVersion ? [h('code', null, info.agentVersion), n.upgradeTo ? [' ', badge('可升级到 ' + n.upgradeTo, 'info')] : null] : null],
           ['远程命令', info.agentVersion ? (info.execEnabled ? '允许' : '已关闭（--no-exec）') : null],
+          ['下载代理', n.downloadMirror ? h('code', null, n.downloadMirror) : '直连 GitHub'],
           ['上线时间', n.connectedAt ? timeEl(n.connectedAt) : null], ['最后在线', n.lastSeen ? timeEl(n.lastSeen) : null], ['添加于', fmtTime(n.createdAt)],
         ]))));
       return h('div', { class: 'grid-2' }, cards);
@@ -1499,11 +1513,12 @@
     function tabSettings() {
       const name = input({ value: n.name, maxlength: 40 });
       const addr = input({ value: n.publicAddr, placeholder: n.lastIp || 'frp.example.com', maxlength: 253 });
+      const [mirror, mirrorList] = mirrorInput(n.downloadMirror, []);
       const save = button('保存', {
         kind: 'primary',
         onclick: () => busy(save, async () => {
           try {
-            await api('PATCH', '/nodes/' + encodeURIComponent(id), { name: name.value, publicAddr: addr.value });
+            await api('PATCH', '/nodes/' + encodeURIComponent(id), { name: name.value, publicAddr: addr.value, downloadMirror: mirror.value });
             toast('已保存');
             load(true);
           } catch (e) {
@@ -1572,7 +1587,11 @@
       return h('div', null,
         h('section', { class: 'card mb' }, h('div', { class: 'card-head' }, h('h2', null, '基本信息')),
           h('div', { class: 'card-body' }, h('div', { class: 'form-grid' },
-            field('名称', name), field('客户端连接地址', addr, '填域名或 IP；留空时用节点上报的 IP')), h('div', { class: 'row-end' }, save))),
+            field('名称', name), field('客户端连接地址', addr, '填域名或 IP；留空时用节点上报的 IP')),
+            h('div', { class: 'gap' }),
+            field('下载代理', h('div', null, mirror, mirrorList), '升级 agent 和重新生成安装命令时下载用的地址前缀，留空直连 GitHub。' +
+              '面板改用本地目录提供 agent 时不需要。'),
+            h('div', { class: 'row-end' }, save))),
         h('section', { class: 'card mb' }, h('div', { class: 'card-head' }, h('h2', null, '维护')), h('div', { class: 'card-body' },
           setting('重启 frps', '用当前配置重启，客户端会短暂断开', op('重启', '/restart', 'frps 已重启')),
           setting('升级 agent', n.upgradeTo ? '当前 ' + n.info.agentVersion + '，可升级到 ' + n.upgradeTo + '。升级失败会自动回滚。' : '已是最新版本',

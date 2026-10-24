@@ -109,7 +109,8 @@ type View struct {
 	ID               string             `json:"id"`
 	Name             string             `json:"name"`
 	PublicAddr       string             `json:"publicAddr"`
-	Status           string             `json:"status"` // pending / online / offline
+	DownloadMirror   string             `json:"downloadMirror"` // 安装和升级下载 agent 用的代理前缀，空表示直连
+	Status           string             `json:"status"`         // pending / online / offline
 	Enrolled         bool               `json:"enrolled"`
 	EnrollExpiresAt  *time.Time         `json:"enrollExpiresAt,omitempty"`
 	ConfigRev        int64              `json:"configRev"`
@@ -146,7 +147,7 @@ func unixTime(p *int64) *time.Time {
 
 func (s *Service) view(n store.Node, withConfig bool) View {
 	v := View{
-		ID: n.ID, Name: n.Name, PublicAddr: n.PublicAddr, Enrolled: n.Enrolled,
+		ID: n.ID, Name: n.Name, PublicAddr: n.PublicAddr, DownloadMirror: n.DownloadMirror, Enrolled: n.Enrolled,
 		EnrollExpiresAt: unixTime(n.EnrollExpiresAt), ConfigRev: n.ConfigRev, AppliedRev: n.AppliedRev,
 		ApplyError: n.ApplyError, PendingUninstall: n.PendingUninstall, LastIP: n.LastIP,
 		LastSeen: unixTime(n.LastSeenAt), CreatedAt: time.Unix(n.CreatedAt, 0).UTC(),
@@ -288,22 +289,25 @@ type Created struct {
 	ExpiresAt  time.Time `json:"expiresAt"`
 }
 
-// Create 新建节点并生成安装码。
-func (s *Service) Create(ctx context.Context, by Actor, name string) (Created, error) {
+// Create 新建节点并生成安装码。mirror 是这个节点下载 agent 用的代理前缀（安装和以后升级都用），空表示直连。
+func (s *Service) Create(ctx context.Context, by Actor, name, mirror string) (Created, error) {
 	name, err := checkName(name)
 	if err != nil {
 		return Created{}, err
 	}
+	if mirror, err = NormalizeMirror(mirror); err != nil {
+		return Created{}, badRequest("downloadMirror", err.Error())
+	}
 	now := s.now()
 	code := newEnrollCode()
 	exp := now.Add(enrollTTL)
-	n := store.Node{ID: model.NewID(), Name: name, FrpsConfig: DefaultFrpsConfig(), ConfigRev: 1,
+	n := store.Node{ID: model.NewID(), Name: name, DownloadMirror: mirror, FrpsConfig: DefaultFrpsConfig(), ConfigRev: 1,
 		CreatedAt: now.Unix(), UpdatedAt: now.Unix()}
 	err = s.st.Tx(ctx, func(tx *sql.Tx) error {
 		if err := store.InsertNode(ctx, tx, n, hashSecret("enroll", code), exp.Unix()); err != nil {
 			return err
 		}
-		return s.audit(ctx, tx, by, store.AuditNodeCreate, name, map[string]any{"node": n.ID})
+		return s.audit(ctx, tx, by, store.AuditNodeCreate, name, map[string]any{"node": n.ID, "mirror": mirror})
 	})
 	if err != nil {
 		return Created{}, err
@@ -337,8 +341,8 @@ func (s *Service) Get(ctx context.Context, id string) (View, error) {
 	return s.view(n, true), nil
 }
 
-// Update 修改名称和客户端连接地址。
-func (s *Service) Update(ctx context.Context, by Actor, id, name, publicAddr string) error {
+// Update 修改名称、客户端连接地址和下载代理。mirror 为 nil 时不改下载代理。
+func (s *Service) Update(ctx context.Context, by Actor, id, name, publicAddr string, mirror *string) error {
 	name, err := checkName(name)
 	if err != nil {
 		return err
@@ -348,10 +352,20 @@ func (s *Service) Update(ctx context.Context, by Actor, id, name, publicAddr str
 		return badRequest("publicAddr", "地址只填域名或 IP，不要带协议和端口")
 	}
 	return notFound(s.st.Tx(ctx, func(tx *sql.Tx) error {
-		if err := store.UpdateNodeMeta(ctx, tx, id, name, publicAddr, s.now().Unix()); err != nil {
+		n, err := store.GetNode(ctx, tx, id)
+		if err != nil {
 			return err
 		}
-		return s.audit(ctx, tx, by, store.AuditNodeUpdate, name, map[string]any{"node": id, "publicAddr": publicAddr})
+		m := n.DownloadMirror
+		if mirror != nil {
+			if m, err = NormalizeMirror(*mirror); err != nil {
+				return badRequest("downloadMirror", err.Error())
+			}
+		}
+		if err := store.UpdateNodeMeta(ctx, tx, id, name, publicAddr, m, s.now().Unix()); err != nil {
+			return err
+		}
+		return s.audit(ctx, tx, by, store.AuditNodeUpdate, name, map[string]any{"node": id, "publicAddr": publicAddr, "mirror": m})
 	}))
 }
 
@@ -656,6 +670,9 @@ func (s *Service) Upgrade(ctx context.Context, by Actor, id string) (Task, error
 	lctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	b, err := s.src.Latest(lctx)
 	cancel()
+	if err == nil && b == nil {
+		err = errors.New("还没有查到")
+	}
 	if err != nil {
 		return Task{}, apierr.Newf(apierr.NodeFailed, "获取 agent 最新版本失败：%v", err)
 	}
@@ -677,13 +694,14 @@ func (s *Service) Upgrade(ctx context.Context, by Actor, id string) (Task, error
 		if err := store.InsertNodeTask(ctx, tx, t); err != nil {
 			return err
 		}
-		return s.audit(ctx, tx, by, store.AuditNodeUpgrade, n.Name, map[string]any{"node": id, "from": v.Info.AgentVersion, "to": b.Version, "source": b.Source})
+		return s.audit(ctx, tx, by, store.AuditNodeUpgrade, n.Name, map[string]any{"node": id, "from": v.Info.AgentVersion, "to": b.Version, "source": b.Source, "mirror": n.DownloadMirror})
 	}); err != nil {
 		return Task{}, err
 	}
 	// agent 下载、校验、预检都通过后才响应，可能要几分钟，所以在后台等。
 	// URL 是 GitHub 的完整地址；本地目录时是相对路径，agent 用自己配置的面板地址补全
-	req := agentproto.UpgradeRequest{Version: b.Version, URL: f.URL, SHA256: f.SHA256}
+	// 节点设置了下载代理时经代理下载；校验和来自面板，代理改不了内容
+	req := agentproto.UpgradeRequest{Version: b.Version, URL: WithMirror(f.URL, n.DownloadMirror), SHA256: f.SHA256}
 	go func() {
 		bg := context.Background()
 		if err := s.Call(bg, id, agentproto.MethodUpgrade, req, nil, 11*time.Minute); err != nil {

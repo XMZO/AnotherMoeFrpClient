@@ -82,17 +82,36 @@ func TestGitHubSource(t *testing.T) {
 		t.Fatalf("应使用缓存，查询了 %d 次", calls.Load())
 	}
 
-	// 下载地址前缀（镜像）
-	g2 := &GitHub{Repo: "o/r", API: srv.URL, Client: srv.Client(), Mirror: "https://mirror.example.com/"}
-	b2, err := g2.Latest(context.Background())
-	if err != nil || !strings.HasPrefix(b2.Files["amd64"].URL, "https://mirror.example.com/https://") {
-		t.Fatalf("镜像前缀：%+v %v", b2, err)
-	}
-
 	// 仓库里没有 agent 发布
 	g3 := &GitHub{Repo: "x/y", API: srv.URL, Client: srv.Client()}
 	if _, err := g3.Latest(context.Background()); err == nil {
 		t.Fatal("没有发布时应报错")
+	}
+}
+
+func TestMirror(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                             "",
+		"  ":                           "",
+		"https://gh.example.com":       "https://gh.example.com/",
+		"https://gh.example.com/":      "https://gh.example.com/",
+		" https://a.example.com/gh/  ": "https://a.example.com/gh/",
+	} {
+		if got, err := NormalizeMirror(in); err != nil || got != want {
+			t.Errorf("NormalizeMirror(%q) = %q, %v", in, got, err)
+		}
+	}
+	for _, bad := range []string{"http://gh.example.com/", "gh.example.com", "https://x.com/?a=1", "https://x.com/'; rm -rf /", "https:///"} {
+		if _, err := NormalizeMirror(bad); err == nil {
+			t.Errorf("NormalizeMirror(%q) 应报错", bad)
+		}
+	}
+	gh := "https://github.com/o/r/releases/download/agent-v1.0.0/moefrp-agent-linux-amd64"
+	if WithMirror(gh, "https://p.example.com/") != "https://p.example.com/"+gh || WithMirror(gh, "") != gh {
+		t.Error("GitHub 地址加代理前缀")
+	}
+	if WithMirror("/agent/download/linux-amd64", "https://p.example.com/") != "/agent/download/linux-amd64" {
+		t.Error("本地目录的相对地址不加代理")
 	}
 }
 
@@ -101,7 +120,7 @@ func TestInstallScriptValues(t *testing.T) {
 		"amd64": {URL: "https://github.com/o/r/releases/download/agent-v1.2.0/moefrp-agent-linux-amd64", SHA256: sumA},
 		"arm64": {URL: "/agent/download/linux-arm64", SHA256: sumA},
 	}}
-	s := InstallScript("https://frp.example.com", b, "")
+	s := InstallScript("https://frp.example.com", b, "", "")
 	for _, want := range []string{
 		"SERVER='https://frp.example.com'",
 		"VERSION='1.2.0'",
@@ -117,7 +136,11 @@ func TestInstallScriptValues(t *testing.T) {
 	if strings.Contains(s, "__") {
 		t.Error("还有没替换的占位符")
 	}
-	s = InstallScript("https://frp.example.com", nil, "查不到 it's broken")
+	if m := InstallScript("https://frp.example.com", b, "", "https://p.example.com/"); !strings.Contains(m,
+		"URL_AMD64='https://p.example.com/https://github.com/") || !strings.Contains(m, "URL_ARM64='https://frp.example.com/agent/download/linux-arm64'") {
+		t.Error("下载代理只加在 GitHub 地址上")
+	}
+	s = InstallScript("https://frp.example.com", nil, "查不到 it's broken", "")
 	if !strings.Contains(s, "UNAVAILABLE='查不到 its broken'") || !strings.Contains(s, "URL_AMD64=''") {
 		t.Error("拿不到版本时脚本仍可用于卸载，安装报原因（单引号被去掉）")
 	}

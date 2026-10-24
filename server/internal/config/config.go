@@ -36,8 +36,8 @@ type Config struct {
 	// 节点 agent（docs/node-agent.md）：
 	// PublicURL 是节点访问面板用的地址（例如 https://frp.example.com），写进安装命令；
 	// 为空时按管理员访问后台时的地址生成。
-	// agent 程序默认从 GitHub 仓库 AgentRepo 的 Release（标签 agent-v*）下载，AgentMirror 是下载地址前缀
-	// （例如 https://ghproxy.example.com/，给连不上 GitHub 的机器用）；AgentDistDir 不为空时改用本地目录。
+	// agent 程序默认从 GitHub 仓库 AgentRepo 的 Release（标签 agent-v*）下载；AgentMirror 是添加节点时
+	// 下载代理的默认值（每个节点自己存一份，安装和升级都用）；AgentDistDir 不为空时改用本地目录。
 	PublicURL    string `toml:"public_url"`
 	AgentDistDir string `toml:"agent_dist_dir"`
 	AgentRepo    string `toml:"agent_repo"`

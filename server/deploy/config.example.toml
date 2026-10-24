@@ -24,7 +24,7 @@ log_level       = "info"
 # public_url = "https://frplus.loli-con.cn"
 # 节点 agent 从这个仓库的 GitHub Release（agent-v* 标签）下载
 # agent_repo = "XMZO/AnotherMoeFrpClient"
-# 节点连不上 GitHub 时用的下载地址前缀
+# 添加节点时"下载代理"的默认值（每个节点可以在后台单独改，安装和升级都用它）
 # agent_mirror = "https://ghproxy.example.com/"
 # 离线环境改用本地目录：放 moefrp-agent-linux-amd64 / -arm64 和 VERSION
 # agent_dist_dir = "/var/lib/moefrp/agent"

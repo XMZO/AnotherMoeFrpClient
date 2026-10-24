@@ -61,7 +61,9 @@ docker compose logs moefrp | grep 初始化码
 
 管理后台的"节点"页可以管理 frps 节点：添加节点 → 复制安装命令到 VPS 上用 root 执行 → 之后在网页上改 frps 配置、看状态、执行命令、升级和卸载。节点 agent 程序从本仓库的 GitHub Release（`agent-v*` 标签）下载，面板负责查最新版本和校验和。
 
-节点连不上 GitHub（国内机器常见）时，在 `data/config.toml` 里配一个 GitHub 下载代理，下载地址会变成"代理前缀 + GitHub 地址"：
+节点连不上 GitHub（国内机器常见）时，添加节点时在"下载代理"里填一个 GitHub 下载代理（gh-proxy 这类"代理地址 + GitHub 地址"的服务），安装命令和以后的升级都会经过它；在节点的"设置"里可以随时改掉或清空（清空就是直连）。校验和仍由面板从 GitHub 获取，代理改不了文件内容。
+
+大部分节点都要用同一个代理时，可以在 `data/config.toml` 里设个默认值，添加节点时会自动填上：
 
 ```toml
 agent_mirror = "https://ghproxy.example.com/"

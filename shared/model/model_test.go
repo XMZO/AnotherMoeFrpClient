@@ -176,7 +176,7 @@ func TestTypeHelpers(t *testing.T) {
 	if len(ProxyTypes) != 8 || len(VisitorTypes) != 3 {
 		t.Fatal("类型数量不对")
 	}
-	if !ValidRole(RoleVIP) || ValidRole("root") {
+	if !ValidRole(RoleAdmin) || !ValidRole(RoleUser) || ValidRole("vip") || ValidRole("root") {
 		t.Fatal("ValidRole 不对")
 	}
 }

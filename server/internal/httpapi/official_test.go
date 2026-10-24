@@ -104,8 +104,8 @@ func TestOfficialNodes(t *testing.T) {
 	aliceTok := n.user("alice")
 	bobTok := n.user("bob")
 	n.user("carol")
-	vip := "vip"
-	n.admin("PATCH", "/users/bob", updateUserRequest{Role: &vip}).expect(http.StatusNoContent)
+	adm := "admin"
+	n.admin("PATCH", "/users/bob", updateUserRequest{Role: &adm}).expect(http.StatusNoContent)
 
 	official := func(nick, tok string) []api.OfficialNode {
 		t.Helper()
@@ -130,19 +130,19 @@ func TestOfficialNodes(t *testing.T) {
 		t.Fatal("没开官方节点时不下发")
 	}
 
-	// 只开放给 VIP
-	n.admin("PUT", "/nodes/"+id+"/official", nodeOfficialRequest{Official: true, Roles: []string{"vip"}, Description: "VIP 专用"}).expect(http.StatusNoContent)
-	eventually(t, "VIP 可用", func() bool { u := a.users(); _, ok := u["bob"]; return a.enabled() && ok && len(u) == 1 })
+	// 只开放给管理员
+	n.admin("PUT", "/nodes/"+id+"/official", nodeOfficialRequest{Official: true, Roles: []string{"admin"}, Description: "管理员专用"}).expect(http.StatusNoContent)
+	eventually(t, "管理员可用", func() bool { u := a.users(); _, ok := u["bob"]; _, al := u["alice"]; return a.enabled() && ok && !al })
 	if len(official("alice", aliceTok)) != 0 {
-		t.Fatal("普通用户不能用 VIP 节点")
+		t.Fatal("普通用户不能用只开放给管理员的节点")
 	}
 	bobNodes := official("bob", bobTok)
 	if len(bobNodes) != 1 {
 		t.Fatalf("bob: %+v", bobNodes)
 	}
 	b := bobNodes[0]
-	if b.ServerAddr != "tokyo.example.com" || b.ServerPort != 7000 || b.Token == "" || b.User != "bob" || b.Description != "VIP 专用" ||
-		!b.Online || b.Quota.MaxProxies != 20 {
+	if b.ServerAddr != "tokyo.example.com" || b.ServerPort != 7000 || b.Token == "" || b.User != "bob" || b.Description != "管理员专用" ||
+		!b.Online || b.Quota.MaxProxies != 0 {
 		t.Fatalf("下发的节点：%+v", b)
 	}
 	if nd := b.ToNode(); nd.ID != api.OfficialNodePrefix+id || len(nd.Metadatas) != 0 {
@@ -209,7 +209,7 @@ func TestOfficialNodes(t *testing.T) {
 	n.admin("PUT", "/quotas", roles).expect(http.StatusNoContent)
 	eventually(t, "角色限额推送", func() bool { return a.users()["alice"].Quota.Ports == "20000-21000" })
 	bad := roles
-	bad.VIP.Ports = "70000"
+	bad.Admin.Ports = "70000"
 	n.admin("PUT", "/quotas", bad).apiErr(apierr.ValidationFailed)
 
 	// 重置凭证：代数 +1，节点上旧票据失效，新票据带新代数
@@ -230,12 +230,13 @@ func TestOfficialNodes(t *testing.T) {
 	eventually(t, "停用后撤销", func() bool { _, ok := a.users()["alice"]; return !ok })
 
 	// 关闭官方节点
-	n.admin("PUT", "/nodes/"+id+"/official", nodeOfficialRequest{Official: false, Roles: []string{"vip"}}).expect(http.StatusNoContent)
+	n.admin("PUT", "/nodes/"+id+"/official", nodeOfficialRequest{Official: false, Roles: []string{"admin"}}).expect(http.StatusNoContent)
 	eventually(t, "关闭", func() bool { return !a.enabled() })
 	if len(official("bob", bobTok)) != 0 {
 		t.Fatal("关闭后不下发")
 	}
 	n.admin("PUT", "/nodes/"+id+"/official", nodeOfficialRequest{Official: true, Roles: []string{"god"}}).apiErr(apierr.ValidationFailed)
+	n.admin("PUT", "/nodes/"+id+"/official", nodeOfficialRequest{Official: true, Roles: []string{"vip"}}).apiErr(apierr.ValidationFailed) // 已经没有 VIP 了
 }
 
 func TestOfficialNeedsNewAgent(t *testing.T) {

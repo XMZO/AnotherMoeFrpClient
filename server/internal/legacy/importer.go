@@ -270,7 +270,9 @@ func importUser(ctx context.Context, tx *sql.Tx, rep *Report, u legacyUser, ts i
 	}
 	role := u.Role
 	switch role {
-	case "user", "vip", "admin":
+	case "user", "admin":
+	case "vip":
+		role = "user" // 新版没有 VIP 了
 	default:
 		rep.problem("users", key, false, "未知角色 %q，已改为 user", role)
 		role = "user"

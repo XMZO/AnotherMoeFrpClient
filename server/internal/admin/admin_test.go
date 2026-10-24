@@ -110,10 +110,12 @@ func TestUsersAndSelfProtection(t *testing.T) {
 	if _, err := ad.SetDisabled(ctx, me, "boss", true); apierr.CodeOf(err) != apierr.Forbidden {
 		t.Fatalf("不能停用自己：%v", err)
 	}
-	if err := ad.SetRole(ctx, me, "alice", "god"); apierr.CodeOf(err) != apierr.ValidationFailed {
-		t.Fatal("非法角色")
+	for _, bad := range []string{"god", "vip"} { // 已经没有 VIP 了
+		if err := ad.SetRole(ctx, me, "alice", bad); apierr.CodeOf(err) != apierr.ValidationFailed {
+			t.Fatalf("非法角色 %s", bad)
+		}
 	}
-	if err := ad.SetRole(ctx, me, "nobody", model.RoleVIP); apierr.CodeOf(err) != apierr.NotFound {
+	if err := ad.SetRole(ctx, me, "nobody", model.RoleAdmin); apierr.CodeOf(err) != apierr.NotFound {
 		t.Fatal("不存在的用户")
 	}
 
@@ -128,8 +130,8 @@ func TestUsersAndSelfProtection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 降为 vip：管理后台会话立即失效，客户端会话保留
-	if err := ad.SetRole(ctx, me, "alice", model.RoleVIP); err != nil {
+	// 降为普通用户：管理后台会话立即失效，客户端会话保留
+	if err := ad.SetRole(ctx, me, "alice", model.RoleUser); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.AuthenticateAdmin(ctx, web.Token); err == nil {
@@ -145,7 +147,7 @@ func TestUsersAndSelfProtection(t *testing.T) {
 			alice = u
 		}
 	}
-	if alice.Role != model.RoleVIP || alice.ActiveSessions != 1 || alice.LastSeen == nil {
+	if alice.Role != model.RoleUser || alice.ActiveSessions != 1 || alice.LastSeen == nil {
 		t.Fatalf("alice: %+v", alice)
 	}
 
@@ -199,7 +201,7 @@ func TestUsersAndSelfProtection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o.Users != 2 || o.Admins != 1 || o.VIPs != 1 || o.InvitesUsed != 2 || o.OnlineUsers != 0 || o.ActiveToday != 1 { // 重置密码吊销了 alice 的会话
+	if o.Users != 2 || o.Admins != 1 || o.InvitesUsed != 2 || o.OnlineUsers != 0 || o.ActiveToday != 1 { // 重置密码吊销了 alice 的会话
 		t.Fatalf("overview: %+v", o)
 	}
 }

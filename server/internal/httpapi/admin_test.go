@@ -200,8 +200,10 @@ func TestAdminInvitesAndUsers(t *testing.T) {
 	}
 
 	// 改角色、停用、启用
+	adm := "admin"
+	e.adminReq("PATCH", "/users/alice", boss, updateUserRequest{Role: &adm}).expect(http.StatusNoContent)
 	vip := "vip"
-	e.adminReq("PATCH", "/users/alice", boss, updateUserRequest{Role: &vip}).expect(http.StatusNoContent)
+	e.adminReq("PATCH", "/users/alice", boss, updateUserRequest{Role: &vip}).apiErr(apierr.ValidationFailed) // 已经没有 VIP 了
 	yes, no := true, false
 	e.adminReq("PATCH", "/users/alice", boss, updateUserRequest{Disabled: &yes}).expect(http.StatusNoContent)
 	e.me(aliceTok).expect(http.StatusUnauthorized)
@@ -212,7 +214,7 @@ func TestAdminInvitesAndUsers(t *testing.T) {
 	user := "user"
 	e.adminReq("PATCH", "/users/boss", boss, updateUserRequest{Role: &user}).apiErr(apierr.Forbidden)
 	e.adminReq("PATCH", "/users/boss", boss, updateUserRequest{Disabled: &yes}).apiErr(apierr.Forbidden)
-	e.adminReq("PATCH", "/users/nobody", boss, updateUserRequest{Role: &vip}).apiErr(apierr.NotFound)
+	e.adminReq("PATCH", "/users/nobody", boss, updateUserRequest{Role: &user}).apiErr(apierr.NotFound)
 
 	// 踢下线
 	var kicked map[string]int
@@ -233,7 +235,7 @@ func TestAdminInvitesAndUsers(t *testing.T) {
 	e.adminReq("PATCH", "/users/alice", boss, updateUserRequest{Role: &admin}).expect(http.StatusNoContent)
 	r := e.adminReq("POST", "/login", "", adminLoginRequest{Nickname: "alice", Password: "new-password-1"}).expect(http.StatusOK)
 	aliceWeb := adminCookieFrom(t, r).Value
-	e.adminReq("PATCH", "/users/alice", boss, updateUserRequest{Role: &vip}).expect(http.StatusNoContent)
+	e.adminReq("PATCH", "/users/alice", boss, updateUserRequest{Role: &user}).expect(http.StatusNoContent)
 	e.adminReq("GET", "/me", aliceWeb, nil).expect(http.StatusUnauthorized)
 
 	// 审计日志能按前缀过滤，带操作者

@@ -80,7 +80,6 @@ func unixTime(v int64) *time.Time {
 type Overview struct {
 	Users          int `json:"users"`
 	Admins         int `json:"admins"`
-	VIPs           int `json:"vips"`
 	DisabledUsers  int `json:"disabledUsers"`
 	OnlineUsers    int `json:"onlineUsers"` // 有未过期会话的用户
 	ActiveToday    int `json:"activeToday"` // 24 小时内用过的用户
@@ -104,7 +103,6 @@ func (a *Admin) Overview(ctx context.Context) (Overview, error) {
 		}{
 			{&o.Users, `SELECT count(*) FROM users`, nil},
 			{&o.Admins, `SELECT count(*) FROM users WHERE role = 'admin'`, nil},
-			{&o.VIPs, `SELECT count(*) FROM users WHERE role = 'vip'`, nil},
 			{&o.DisabledUsers, `SELECT count(*) FROM users WHERE status = 'disabled'`, nil},
 			{&o.OnlineUsers, `SELECT count(DISTINCT user_id) FROM sessions WHERE revoked_at IS NULL AND expires_at > ? AND kind = 'client'`, []any{now}},
 			{&o.ActiveToday, `SELECT count(DISTINCT user_id) FROM sessions WHERE last_seen_at > ? AND kind = 'client'`, []any{now - 86400}},

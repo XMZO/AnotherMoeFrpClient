@@ -791,15 +791,15 @@
       h('div', { class: 'stat-value' }, String(value)),
       h('div', { class: 'stat-sub' }, sub));
 
-    const normal = Math.max(0, s.users - s.admins - s.vips);
+    const normal = Math.max(0, s.users - s.admins);
     const bar = (label, n, kind) => h('div', { class: 'bar-row' },
       h('span', { class: 'label' }, label),
       h('div', { class: 'bar' + (kind ? ' ' + kind : '') }, h('i')),
       h('span', { class: 'num' }, String(n)));
     const bars = h('div', { class: 'bars' },
-      bar('普通用户', normal), bar('VIP', s.vips, 'violet'), bar('管理员', s.admins, 'accent'), bar('已停用', s.disabledUsers, 'danger'));
+      bar('普通用户', normal), bar('管理员', s.admins, 'accent'), bar('已停用', s.disabledUsers, 'danger'));
     // 宽度用 style 属性设置，CSP 允许（style-src 只限制样式表来源和 <style>，CSSOM 不受影响）
-    const counts = [normal, s.vips, s.admins, s.disabledUsers];
+    const counts = [normal, s.admins, s.disabledUsers];
     bars.querySelectorAll('.bar > i').forEach((el, i) => {
       el.style.width = s.users ? (counts[i] / s.users * 100).toFixed(1) + '%' : '0';
     });
@@ -974,7 +974,7 @@
 
   // ---------- 用户 ----------
 
-  const ROLES = { admin: ['管理员', 'accent'], vip: ['VIP', 'violet'], user: ['普通用户', null] };
+  const ROLES = { admin: ['管理员', 'accent'], user: ['普通用户', null] };
 
   async function pageUsers(p) {
     let filter = 'all';
@@ -986,7 +986,7 @@
     p.actions.append(button('刷新', { icon: 'refresh', onclick: () => load() }));
     p.body.append(h('div', { class: 'fill' },
       h('div', { class: 'toolbar' },
-        segmented([['all', '全部'], ['admin', '管理员'], ['vip', 'VIP'], ['user', '普通用户'], ['disabled', '已停用']], filter, (v, set) => {
+        segmented([['all', '全部'], ['user', '普通用户'], ['admin', '管理员'], ['disabled', '已停用']], filter, (v, set) => {
           filter = v;
           set(v);
           draw();
@@ -1056,7 +1056,7 @@
     let changed = false;
 
     // 角色
-    const roleSeg = segmented([['user', '普通用户'], ['vip', 'VIP'], ['admin', '管理员']], u.role, async (v, set) => {
+    const roleSeg = segmented([['user', '普通用户'], ['admin', '管理员']], u.role, async (v, set) => {
       let message = '把 ' + u.nickname + ' 的角色改为「' + ROLES[v][0] + '」？';
       if (v === 'admin') message = '管理员可以登录这个后台，管理所有用户和邀请码。确定把 ' + u.nickname + ' 设为管理员？';
       else if (u.role === 'admin') message = '降级后 ' + u.nickname + ' 的管理后台登录会立即失效。确定继续？';
@@ -1295,7 +1295,7 @@
 
   // ---------- 官方节点：限额和用户权限 ----------
 
-  const ROLE_OPTIONS = [['user', '普通用户'], ['vip', 'VIP'], ['admin', '管理员']];
+  const ROLE_OPTIONS = [['user', '普通用户'], ['admin', '管理员']];
   const PROXY_TYPES = ['tcp', 'udp', 'http', 'https', 'tcpmux', 'stcp', 'xtcp', 'sudp'];
 
   function quotaText(q) {

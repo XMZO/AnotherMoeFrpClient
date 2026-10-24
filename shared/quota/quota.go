@@ -140,16 +140,15 @@ func (r Ranges) String() string {
 	return strings.Join(parts, ",")
 }
 
-// Roles 是三个角色的默认限额。
+// Roles 是各角色的默认限额。
 type Roles struct {
 	User  Quota `json:"user"`
-	VIP   Quota `json:"vip"`
 	Admin Quota `json:"admin"`
 }
 
-// DefaultRoles 是没有设置过时的默认值：普通用户 5 个代理，VIP 20 个，管理员不限。
+// DefaultRoles 是没有设置过时的默认值：普通用户 5 个代理，管理员不限。
 func DefaultRoles() Roles {
-	return Roles{User: Quota{MaxProxies: 5}, VIP: Quota{MaxProxies: 20}, Admin: Quota{}}
+	return Roles{User: Quota{MaxProxies: 5}, Admin: Quota{}}
 }
 
 // For 返回某个角色的限额。
@@ -157,16 +156,14 @@ func (r Roles) For(role string) Quota {
 	switch role {
 	case model.RoleAdmin:
 		return r.Admin
-	case model.RoleVIP:
-		return r.VIP
 	default:
 		return r.User
 	}
 }
 
-// Validate 检查三个角色的限额。
+// Validate 检查各角色的限额。
 func (r Roles) Validate() error {
-	for name, q := range map[string]Quota{"普通用户": r.User, "VIP": r.VIP, "管理员": r.Admin} {
+	for name, q := range map[string]Quota{"普通用户": r.User, "管理员": r.Admin} {
 		if err := q.Validate(); err != nil {
 			return fmt.Errorf("%s：%w", name, err)
 		}

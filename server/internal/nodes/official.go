@@ -42,18 +42,19 @@ const (
 	TicketTTL = 15 * time.Minute
 )
 
-var allRoles = []string{model.RoleUser, model.RoleVIP, model.RoleAdmin}
+var allRoles = []string{model.RoleUser, model.RoleAdmin}
 
 func hasFeature(h *agentproto.Hello, f string) bool {
 	return h != nil && slices.Contains(h.Features, f)
 }
 
+// parseRoles 解析节点开放给哪些角色，去掉已经不存在的角色（例如 nodes.roles 列默认值里的 vip）。
 func parseRoles(s string) []string {
 	var r []string
 	if json.Unmarshal([]byte(s), &r) != nil {
 		return nil
 	}
-	return r
+	return slices.DeleteFunc(r, func(role string) bool { return !slices.Contains(allRoles, role) })
 }
 
 // ---- 密钥 ----

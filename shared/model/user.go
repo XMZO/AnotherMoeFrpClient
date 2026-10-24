@@ -1,9 +1,8 @@
 package model
 
-// 用户角色。
+// 用户角色。原来还有 VIP，已经去掉（迁移 0006 把 VIP 用户改成了普通用户）。
 const (
 	RoleUser  = "user"
-	RoleVIP   = "vip"
 	RoleAdmin = "admin"
 )
 
@@ -23,7 +22,7 @@ const (
 // ValidRole 判断角色名是否合法。
 func ValidRole(role string) bool {
 	switch role {
-	case RoleUser, RoleVIP, RoleAdmin:
+	case RoleUser, RoleAdmin:
 		return true
 	}
 	return false

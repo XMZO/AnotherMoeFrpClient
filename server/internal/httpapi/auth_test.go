@@ -541,7 +541,7 @@ func insertLegacyUser(t *testing.T, e *env, nick, hash string) {
 	now := e.clock.Now().Unix()
 	err := store.InsertUser(context.Background(), e.st.DB(), store.User{
 		ID: "3f2b1c9e-0000-4000-8000-000000000001", Nickname: nick, PasswordHash: hash,
-		Role: model.RoleVIP, Status: model.StatusActive, CreatedAt: now, UpdatedAt: now,
+		Role: model.RoleAdmin, Status: model.StatusActive, CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -565,7 +565,7 @@ func TestLegacyHashLogin(t *testing.T) {
 	var out api.LoginResponse
 	e.do(req{method: "POST", path: api.RouteLogin, body: api.LoginRequest{Nickname: "olduser", Password: legacyPassword}}).
 		expect(http.StatusOK).decode(&out)
-	if out.User.Role != model.RoleVIP || out.User.Nickname != "OldUser" {
+	if out.User.Role != model.RoleAdmin || out.User.Nickname != "OldUser" {
 		t.Fatalf("角色和昵称应原样保留：%+v", out.User)
 	}
 	if storedHash(t, e, "OldUser") != legacyHash {

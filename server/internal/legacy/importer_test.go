@@ -144,7 +144,7 @@ func TestImport(t *testing.T) {
 		t.Errorf("users = %d, want 2", rep.Users)
 	}
 	u, err := store.GetUserByNickname(ctx, st.DB(), "Alice")
-	if err != nil || u.ID != aliceID || u.Role != "vip" {
+	if err != nil || u.ID != aliceID || u.Role != "user" {
 		t.Fatalf("alice = %+v, %v", u, err)
 	}
 	ok, _, err := auth.VerifyPassword("correct horse", u.PasswordHash, auth.DefaultParams)

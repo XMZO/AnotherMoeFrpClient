@@ -35,7 +35,7 @@ func TestApplyAndValidate(t *testing.T) {
 	if (Quota{Types: []string{"nope"}}).Validate() == nil || (Quota{MaxProxies: -1}).Validate() == nil {
 		t.Fatal("非法限额应报错")
 	}
-	if DefaultRoles().Validate() != nil || DefaultRoles().For("vip").MaxProxies != 20 {
+	if DefaultRoles().Validate() != nil || DefaultRoles().For("admin").MaxProxies != 0 || DefaultRoles().For("user").MaxProxies != 5 || DefaultRoles().For("vip").MaxProxies != 5 {
 		t.Fatal("默认值")
 	}
 	if !(&Override{}).Empty() || (&Override{Ports: &p}).Empty() {

@@ -110,6 +110,9 @@
     terminal: 'M4 17l6-6-6-6M12 19h8',
     back: 'M19 12H5M12 19l-7-7 7-7',
     upgrade: 'M12 19V5M5 12l7-7 7 7',
+    down: 'M12 5v14M19 12l-7 7-7-7',
+    sort: 'M7 20V4M3 8l4-4 4 4M17 4v16M13 16l4 4 4-4',
+    grip: 'M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01',
     trash: 'M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6',
     play: 'M6 4l14 8-14 8z',
     eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
@@ -1943,6 +1946,113 @@
     return { el, read: f.read };
   }
 
+  // upgradeNodesDialog 批量升级 agent：默认勾上所有在线、有新版本的节点，依次发起升级（每个节点自己下载、重启，失败自动回滚）
+  function upgradeNodesDialog(data, done) {
+    const latest = (data.agent && data.agent.version) || '';
+    const nodes = data.nodes || [];
+    const can = (n) => n.status === 'online' && !!n.upgradeTo;
+    const picks = new Map();
+    const save = button('升级', { kind: 'primary', type: 'submit' });
+    const count = () => {
+      const k = [...picks.values()].filter((cb) => cb.checked).length;
+      save.textContent = k ? '升级 ' + k + ' 个节点' : '升级';
+      save.disabled = !k;
+    };
+    const rows = nodes.map((n) => {
+      const cb = h('input', { type: 'checkbox', disabled: !can(n) });
+      cb.checked = can(n);
+      cb.addEventListener('change', count);
+      picks.set(n.id, cb);
+      const ver = n.info && n.info.agentVersion;
+      const state = n.status !== 'online' ? h('span', { class: 'faint' }, '离线')
+        : n.upgradeTo ? h('span', { class: 'nowrap' }, h('code', null, ver || '?'), ' → ', h('code', null, n.upgradeTo))
+          : h('span', { class: 'faint nowrap' }, '已是最新' + (ver ? ' ' + ver : ''));
+      return h('label', { class: 'upg-item' + (can(n) ? '' : ' off') }, cb, h('b', null, n.name), regionBadge(n.region), h('span', { class: 'grow' }), state);
+    });
+    const all = button('全选 / 全不选', {
+      small: true,
+      onclick: () => {
+        const on = [...picks.values()].some((cb) => !cb.disabled && !cb.checked);
+        for (const cb of picks.values()) if (!cb.disabled) cb.checked = on;
+        count();
+      },
+    });
+    count();
+    const d = openDialog({
+      title: '升级 agent', titleIcon: 'upgrade', wide: true,
+      body: [h('p', { class: 'dialog-text' }, latest
+        ? '最新版本 ' + latest + '。每个节点自己下载新版本并重启，frps 会断开几秒；升级失败会自动回滚。结果在各节点"命令"页的历史里。'
+        : '还没查到 agent 最新版本，稍后再试。'),
+      h('div', { class: 'upg-head' }, all), h('div', { class: 'upg-list' }, rows)],
+      actions: [button('取消', { onclick: () => d.close() }), save],
+      onSubmit: () => busy(save, async () => {
+        const ids = [...picks.entries()].filter(([, cb]) => cb.checked).map(([id]) => id);
+        const failed = [];
+        for (const id of ids) {
+          try {
+            await api('POST', '/nodes/' + encodeURIComponent(id) + '/upgrade');
+          } catch (e) {
+            if (e.handled) return;
+            failed.push((nodes.find((n) => n.id === id) || {}).name + '：' + errText(e));
+          }
+        }
+        d.close();
+        if (failed.length) fail(new Error('有 ' + failed.length + ' 个节点没能开始升级：' + failed.join('；')));
+        else toast('已开始升级 ' + ids.length + ' 个节点');
+        done();
+      }),
+    });
+  }
+
+  // nodeOrderDialog 调整节点顺序：拖动或点上移 / 下移。管理后台的列表和客户端的官方节点列表都按这个顺序。
+  function nodeOrderDialog(nodes, done) {
+    const order = nodes.slice();
+    const list = h('ol', { class: 'order-list' });
+    let from = -1;
+    const move = (a, b) => {
+      if (b < 0 || b >= order.length || a === b) return;
+      const [x] = order.splice(a, 1);
+      order.splice(b, 0, x);
+      draw();
+      list.children[b]?.querySelector(b > a ? '[data-dir=down]' : '[data-dir=up]')?.focus();
+    };
+    const draw = () => list.replaceChildren(...order.map((n, i) => {
+      const up = iconButton('upgrade', '上移', () => move(i, i - 1));
+      const down = iconButton('down', '下移', () => move(i, i + 1));
+      up.dataset.dir = 'up';
+      down.dataset.dir = 'down';
+      up.disabled = i === 0;
+      down.disabled = i === order.length - 1;
+      const li = h('li', { class: 'order-item', draggable: 'true' },
+        h('span', { class: 'order-grip', 'aria-hidden': 'true' }, icon('grip', 16)),
+        h('span', { class: 'order-n' }, String(i + 1)),
+        h('span', { class: 'order-name' }, h('b', null, n.name), regionBadge(n.region), n.official ? badge('开放', 'accent') : null),
+        up, down);
+      li.addEventListener('dragstart', (e) => { from = i; li.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
+      li.addEventListener('dragend', () => { from = -1; li.classList.remove('dragging'); });
+      li.addEventListener('dragover', (e) => { if (from >= 0) e.preventDefault(); });
+      li.addEventListener('drop', (e) => { e.preventDefault(); if (from >= 0) move(from, i); });
+      return li;
+    }));
+    draw();
+    const save = button('保存顺序', { kind: 'primary', type: 'submit' });
+    const d = openDialog({
+      title: '节点顺序', titleIcon: 'sort',
+      body: [h('p', { class: 'dialog-text' }, '拖动或点箭头调整顺序。这里的列表和客户端里的官方节点都按这个顺序排（客户端先按地区分组，组内按这个顺序），保存后马上推给在线客户端。'), list],
+      actions: [button('取消', { onclick: () => d.close() }), save],
+      onSubmit: () => busy(save, async () => {
+        try {
+          await api('PUT', '/nodes-order', { ids: order.map((n) => n.id) });
+          toast('已保存节点顺序');
+          d.close();
+          done();
+        } catch (e) {
+          fail(e);
+        }
+      }),
+    });
+  }
+
   async function quotasDialog() {
     let roles;
     try {
@@ -2260,8 +2370,19 @@
 
   const MIRROR_HINT = '节点连不上 GitHub 时填，下载地址变成"代理 + GitHub 地址"，以后升级也用它。校验和由面板核对，代理改不了文件。';
 
+  // 节点的地区分类：客户端的官方节点按它分组（顺序固定），必须选
+  const REGIONS = [['cn', '中国大陆'], ['hmt', '港澳台'], ['intl', '境外']];
+  const regionLabel = (r) => (REGIONS.find((x) => x[0] === r) || [])[1];
+  const regionBadge = (r) => (regionLabel(r) ? badge(regionLabel(r), 'outline') : badge('未分类', 'warn'));
+  function regionPicker(value) {
+    let cur = value || '';
+    const el = segmented(REGIONS, cur, (v, set) => { cur = v; set(v); }, { label: '地区' });
+    return { el, value: () => cur };
+  }
+
   function createNodeDialog(onDone, data) {
     const name = input({ maxlength: 40, placeholder: '例如：东京 1', required: true });
+    const region = regionPicker('');
     const ag = (data && data.agent) || {};
     const [mirror, mirrorList] = mirrorInput(data && data.defaultMirror, data && data.mirrors);
     const err = h('div', { class: 'form-error', role: 'alert' });
@@ -2271,12 +2392,14 @@
       titleIcon: 'server',
       wide: true,
       body: [field('名称', name, '只在面板上显示，之后可以改'),
+        field('地区', region.el, '客户端里的官方节点按地区分组：中国大陆、港澳台、境外'),
         ag.source === 'local' ? null : field('下载代理（可选）', h('div', null, mirror, mirrorList), MIRROR_HINT), err],
       actions: [button('取消', { onclick: () => d.close() }), submit],
       onSubmit: () => busy(submit, async () => {
         err.classList.remove('show');
         try {
-          const res = await api('POST', '/nodes', { name: name.value, downloadMirror: mirror.value });
+          if (!region.value()) throw new Error('请选择节点所在地区');
+          const res = await api('POST', '/nodes', { name: name.value, downloadMirror: mirror.value, region: region.value() });
           d.close();
           showInstall(res, '节点「' + res.node.name + '」已添加');
           if (onDone) onDone(res.node);
@@ -2306,6 +2429,8 @@
     let data = null;
     p.actions.append(
       button('刷新', { icon: 'refresh', onclick: () => load() }),
+      button('排序', { icon: 'sort', onclick: () => data && (data.nodes || []).length > 1 && nodeOrderDialog(data.nodes, () => load()) }),
+      button('升级', { icon: 'upgrade', onclick: () => data && upgradeNodesDialog(data, () => load()) }),
       button('限额', { icon: 'layers', onclick: () => quotasDialog() }),
       button('密钥', { icon: 'key', onclick: () => secretDialog() }),
       button('执行命令', { icon: 'terminal', onclick: () => data && execDialog(data.nodes) }),
@@ -2346,7 +2471,7 @@
             const [fl, fk] = fs ? (FRPS_STATE[fs.state] || [fs.state]) : [null];
             const href = '#/nodes/' + encodeURIComponent(n.id);
             return [
-              h('td', null, h('a', { class: 'node-link', href }, n.name), n.official ? [' ', badge('开放', 'accent')] : null,
+              h('td', null, h('a', { class: 'node-link', href }, n.name), ' ', regionBadge(n.region), n.official ? [' ', badge('开放', 'accent')] : null,
                 h('div', { class: 'cell-sub' }, [info.hostname, n.client && n.client.addr].filter(Boolean).join(' · ') || '—')),
               h('td', null, nodeStatusBadge(n),
                 h('div', { class: 'cell-sub' }, n.status === 'online' ? dropsText(n) : n.lastSeen ? ['最后在线 ', timeEl(n.lastSeen)] : '')),
@@ -2366,7 +2491,7 @@
             const [fl] = fs ? (FRPS_STATE[fs.state] || [fs.state]) : [null];
             return {
               href: '#/nodes/' + encodeURIComponent(n.id),
-              title: [n.name, n.official ? badge('开放', 'accent') : null],
+              title: [n.name, regionBadge(n.region), n.official ? badge('开放', 'accent') : null],
               trail: [nodeStatusBadge(n), icon('chevron', 16)],
               meta: [
                 fs ? 'frps ' + fl + (fs.state === 'running' ? ' :' + fs.bindPort + ' · ' + fs.clients + ' 个客户端' : '') : null,
@@ -2816,6 +2941,7 @@
     // 设置：基本信息和官方节点是一张表单、一个保存按钮；维护操作是一组带说明的按钮
     function tabSettings() {
       const name = input({ value: n.name, maxlength: 40 });
+      const region = regionPicker(n.region);
       const addr = input({ value: n.publicAddr, placeholder: n.lastIp || 'frp.example.com', maxlength: 253 });
       const [mirror, mirrorList] = mirrorInput(n.downloadMirror, []);
       const on = h('input', { type: 'checkbox' });
@@ -2837,7 +2963,8 @@
           const addrs = { domain: accDomain.value, ipv4: accV4.value, ipv6: accV6.value };
           const addrsChanged = addrs.domain.trim() !== (accSet.domain || '') || addrs.ipv4.trim() !== (accSet.ipv4 || '') || addrs.ipv6.trim() !== (accSet.ipv6 || '');
           try {
-            await api('PATCH', '/nodes/' + encodeURIComponent(id), { name: name.value, publicAddr: addr.value, downloadMirror: mirror.value });
+            if (!region.value()) throw new Error('请在"基本"里选择节点所在地区');
+            await api('PATCH', '/nodes/' + encodeURIComponent(id), { name: name.value, publicAddr: addr.value, downloadMirror: mirror.value, region: region.value() });
             if (accessChanged) await api('PUT', '/nodes/' + encodeURIComponent(id) + '/official', access);
             if (addrsChanged) await api('PUT', '/nodes/' + encodeURIComponent(id) + '/access', addrs);
             toast(accessChanged ? '已保存，正在推送到节点' : '已保存');
@@ -2909,6 +3036,7 @@
       const panes = {
         basic: h('div', { class: 'form-grid settings-grid' },
           field('名称', name), field('客户端连接地址', addr),
+          field('地区', region.el, n.region ? '客户端里的官方节点按地区分组' : '还没分类，请选一个：客户端里的官方节点按地区分组'),
           h('div', { class: 'field span-all' }, h('span', { class: 'field-label' }, '下载代理（升级 agent、生成安装命令时用）'), mirror, mirrorList)),
         access: h('div', { class: 'official' },
           old ? h('div', { class: 'callout warn' }, icon('alert', 16), h('span', null, 'agent ' + n.info.agentVersion + ' 要升级到 1.4.0 才能由面板托管（没有 token、加密保存配置），升级前用户用不了这个节点。')) : null,

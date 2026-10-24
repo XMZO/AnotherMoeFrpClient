@@ -118,6 +118,7 @@ func (s *Server) nodeRoutes(mux *http.ServeMux) {
 	mux.Handle("GET "+p+"/tasks/{id}", authed(s.handleTask))
 	mux.Handle("PUT "+p+"/nodes/{id}/official", authed(s.handleNodeOfficial))
 	mux.Handle("PUT "+p+"/nodes/{id}/access", authed(s.handleNodeAccess))
+	mux.Handle("PUT "+p+"/nodes-order", authed(s.handleNodeOrder))
 	mux.Handle("GET "+p+"/quotas", authed(s.handleGetQuotas))
 	mux.Handle("PUT "+p+"/quotas", authed(s.handleSetQuotas))
 	mux.Handle("GET "+p+"/users/{nickname}/nodes", authed(s.handleGetUserNodes))
@@ -309,12 +310,14 @@ func (s *Server) handleElevate(w http.ResponseWriter, r *http.Request) {
 type createNodeRequest struct {
 	Name           string `json:"name"`
 	DownloadMirror string `json:"downloadMirror"`
+	Region         string `json:"region"` // 必填：cn / hmt / intl
 }
 
 type updateNodeRequest struct {
 	Name           string  `json:"name"`
 	PublicAddr     string  `json:"publicAddr"`
 	DownloadMirror *string `json:"downloadMirror,omitempty"` // 不传表示不改
+	Region         *string `json:"region,omitempty"`         // 不传表示不改
 }
 
 func mirrorsOf(list []nodes.View) []string {
@@ -371,7 +374,7 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	c, err := s.nodes.Create(r.Context(), nodeActor(r), req.Name, req.DownloadMirror)
+	c, err := s.nodes.Create(r.Context(), nodeActor(r), req.Name, req.DownloadMirror, req.Region)
 	if err != nil {
 		s.writeError(w, r, err)
 		return
@@ -394,7 +397,7 @@ func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	if err := s.nodes.Update(r.Context(), nodeActor(r), r.PathValue("id"), req.Name, req.PublicAddr, req.DownloadMirror); err != nil {
+	if err := s.nodes.Update(r.Context(), nodeActor(r), r.PathValue("id"), req.Name, req.PublicAddr, req.DownloadMirror, req.Region); err != nil {
 		s.writeError(w, r, err)
 		return
 	}
@@ -665,6 +668,22 @@ func (s *Server) handleNodeTickets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, api.NodeTicketsResponse{Tickets: list})
+}
+
+// PUT /api/v1/admin/nodes-order：{ids: [...]} 按新顺序排好的全部节点 ID。
+func (s *Server) handleNodeOrder(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	if err := s.nodes.SetOrder(r.Context(), nodeActor(r), req.IDs); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // PUT /api/v1/admin/nodes/{id}/access：用户访问地址（域名；IPv4、IPv6 留空自动检测，"-" 不显示）。

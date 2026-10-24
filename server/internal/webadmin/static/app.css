@@ -939,3 +939,21 @@ th.sel, td.sel { width: 1%; padding-right: 0; }
 .dev-copy { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
 .dev-copy code { overflow-wrap: anywhere; font-size: 12px; }
 .dev-copy .icon-btn { flex: none; width: 24px; height: 24px; }
+
+/* 节点 → 排序 */
+.order-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.order-item { display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); cursor: grab; }
+.order-item.dragging { opacity: 0.45; }
+.order-grip { display: inline-flex; color: var(--faint); }
+.order-n { min-width: 1.5em; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12.5px; }
+.order-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; }
+.order-name b { overflow: hidden; text-overflow: ellipsis; }
+.order-item .icon-btn:disabled { opacity: 0.3; }
+
+/* 节点 → 升级 */
+.upg-head { display: flex; justify-content: flex-end; margin: 10px 0 6px; }
+.upg-list { display: flex; flex-direction: column; gap: 6px; }
+.upg-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); cursor: pointer; font-size: 13.5px; }
+.upg-item.off { cursor: default; opacity: 0.7; }
+.upg-item b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.upg-item .grow { flex: 1; }

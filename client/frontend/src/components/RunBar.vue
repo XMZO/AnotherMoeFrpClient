@@ -7,7 +7,7 @@ import { useProfilesStore } from '../stores/profiles'
 import { useSettingsStore } from '../stores/settings'
 import { useTunnelStore } from '../stores/tunnel'
 import { codeText, describeError } from '../errors'
-import { stateLabels } from '../labels'
+import { groupByRegion, stateLabels } from '../labels'
 import { nodeLabel } from '../util'
 
 // 运行控制：节点选择、测速、启动 / 停止，以及下面一行的运行状态。标题由父组件放进 #title 插槽。
@@ -58,12 +58,13 @@ interface NodeOpt {
   sub: string
   online: boolean
   official: boolean
+  region?: string
 }
 const mine = computed<NodeOpt[]>(() =>
   (profiles.current?.nodes ?? []).map((n) => ({ id: n.id, label: nodeLabel(n), sub: `${n.serverAddr}:${n.serverPort}`, online: true, official: false })),
 )
 const official = computed<NodeOpt[]>(() =>
-  officialNodes.value.map((n) => ({ id: n.id, label: n.name, sub: n.online ? (n.description ?? '') : '离线', online: n.online, official: true })),
+  officialNodes.value.map((n) => ({ id: n.id, label: n.name, sub: n.online ? (n.description ?? '') : '离线', online: n.online, official: true, region: n.region })),
 )
 
 // 节点多了：每个节点一行（名字和备注并排），超过 SEARCH_FROM 个时顶上出现搜索框，按名字和备注过滤
@@ -79,7 +80,8 @@ const match = (n: NodeOpt) => {
 const groups = computed(() =>
   [
     { title: profiles.isSubscription ? '分享者提供的节点' : '我的节点', items: mine.value.filter(match) },
-    { title: '官方节点', items: official.value.filter(match) },
+    // 官方节点按地区分组（中国大陆、港澳台、境外），组内是面板排好的顺序
+    ...groupByRegion(official.value.filter(match)).map((g) => ({ title: '官方节点 · ' + g.label, items: g.items })),
   ].filter((g) => g.items.length),
 )
 function pickFirst(close: () => void) {

@@ -28,6 +28,7 @@ const (
 	AuditNodeCreate     = "node.create"
 	AuditNodeEnroll     = "node.enroll" // agent 用安装码注册
 	AuditNodeUpdate     = "node.update"
+	AuditNodeOrder      = "node.order" // 调整节点顺序（客户端的官方节点也按这个顺序）
 	AuditNodeConfig     = "node.config"
 	AuditNodeResetToken = "node.reset_token"
 	AuditNodeDelete     = "node.delete"

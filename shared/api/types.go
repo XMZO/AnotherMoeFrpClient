@@ -188,7 +188,19 @@ type OfficialNode struct {
 	Domain string `json:"domain,omitempty"`
 	IPv4   string `json:"ipv4,omitempty"`
 	IPv6   string `json:"ipv6,omitempty"`
+	// Region 是地区分类（RegionCN / RegionHMT / RegionIntl），客户端按它分组；列表已经按管理员排的顺序排好
+	Region string `json:"region,omitempty"`
 }
+
+// 节点的地区分类：客户端的官方节点按它分组，顺序固定是 Regions 的顺序。
+const (
+	RegionCN   = "cn"   // 中国大陆
+	RegionHMT  = "hmt"  // 港澳台
+	RegionIntl = "intl" // 境外
+)
+
+// Regions 是全部地区，按显示顺序。
+var Regions = []string{RegionCN, RegionHMT, RegionIntl}
 
 // OfficialNodesResponse：GET /api/v1/official-nodes。
 type OfficialNodesResponse struct {

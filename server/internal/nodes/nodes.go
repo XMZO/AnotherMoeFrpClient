@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ import (
 
 	"moefrp/server/internal/store"
 	"moefrp/shared/agentproto"
+	"moefrp/shared/api"
 	"moefrp/shared/apierr"
 	"moefrp/shared/frpsset"
 	"moefrp/shared/model"
@@ -154,6 +156,7 @@ type View struct {
 	Official         bool               `json:"official"`              // 开放给普通用户（管理员总能用）
 	Roles            []string           `json:"roles"`                 // 开放给哪些角色
 	Description      string             `json:"description,omitempty"` // 给用户看的说明
+	Region           string             `json:"region"`                // 地区分类：cn / hmt / intl，空表示还没分类
 	AccessSupported  bool               `json:"accessSupported"`       // agent 支持托管（1.4.0 起）；不知道版本时为 false
 	Access           AccessView         `json:"access"`                // 用户访问地址（域名、IPv4、IPv6）
 }
@@ -218,7 +221,7 @@ func (s *Service) view(n store.Node, withConfig bool) View {
 		b.Has(v.Info.Arch) && newer(b.Version, v.Info.AgentVersion) {
 		v.UpgradeTo = b.Version
 	}
-	v.Roles, v.Description = parseRoles(n.Roles), n.Description
+	v.Roles, v.Description, v.Region = parseRoles(n.Roles), n.Description, n.Region
 	v.Official = openToUsers(v.Roles)
 	v.AccessSupported = v.Info != nil && hasFeature(v.Info, agentproto.FeatureSettings)
 	if withConfig {
@@ -285,10 +288,13 @@ type Created struct {
 }
 
 // Create 新建节点并生成安装码。mirror 是这个节点下载 agent 用的代理前缀（安装和以后升级都用），空表示直连。
-func (s *Service) Create(ctx context.Context, by Actor, name, mirror string) (Created, error) {
+func (s *Service) Create(ctx context.Context, by Actor, name, mirror, region string) (Created, error) {
 	name, err := checkName(name)
 	if err != nil {
 		return Created{}, err
+	}
+	if !slices.Contains(api.Regions, region) {
+		return Created{}, badRequest("region", "请选择节点所在地区：中国大陆、港澳台或境外")
 	}
 	if mirror, err = NormalizeMirror(mirror); err != nil {
 		return Created{}, badRequest("downloadMirror", err.Error())
@@ -298,13 +304,13 @@ func (s *Service) Create(ctx context.Context, by Actor, name, mirror string) (Cr
 	exp := now.Add(enrollTTL)
 	set, _ := json.Marshal(frpsset.Defaults())
 	// 新节点默认只给管理员用，在"设置"里开放给普通用户
-	n := store.Node{ID: model.NewID(), Name: name, DownloadMirror: mirror, Settings: string(set), ConfigRev: 1,
+	n := store.Node{ID: model.NewID(), Name: name, DownloadMirror: mirror, Region: region, Settings: string(set), ConfigRev: 1,
 		NodeOfficial: store.NodeOfficial{Roles: "[]"}, CreatedAt: now.Unix(), UpdatedAt: now.Unix()}
 	err = s.st.Tx(ctx, func(tx *sql.Tx) error {
 		if err := store.InsertNode(ctx, tx, n, hashSecret("enroll", code), exp.Unix()); err != nil {
 			return err
 		}
-		return s.audit(ctx, tx, by, store.AuditNodeCreate, name, map[string]any{"node": n.ID, "mirror": mirror})
+		return s.audit(ctx, tx, by, store.AuditNodeCreate, name, map[string]any{"node": n.ID, "mirror": mirror, "region": region})
 	})
 	if err != nil {
 		return Created{}, err
@@ -338,8 +344,8 @@ func (s *Service) Get(ctx context.Context, id string) (View, error) {
 	return s.view(n, true), nil
 }
 
-// Update 修改名称、客户端连接地址和下载代理。mirror 为 nil 时不改下载代理。
-func (s *Service) Update(ctx context.Context, by Actor, id, name, publicAddr string, mirror *string) error {
+// Update 修改名称、客户端连接地址、下载代理和地区分类。mirror、region 为 nil 时不改。
+func (s *Service) Update(ctx context.Context, by Actor, id, name, publicAddr string, mirror, region *string) error {
 	name, err := checkName(name)
 	if err != nil {
 		return err
@@ -359,10 +365,20 @@ func (s *Service) Update(ctx context.Context, by Actor, id, name, publicAddr str
 				return badRequest("downloadMirror", err.Error())
 			}
 		}
-		if err := store.UpdateNodeMeta(ctx, tx, id, name, publicAddr, m, s.now().Unix()); err != nil {
+		reg := n.Region
+		if region != nil {
+			if !slices.Contains(api.Regions, *region) {
+				return badRequest("region", "请选择节点所在地区：中国大陆、港澳台或境外")
+			}
+			reg = *region
+		}
+		if err := store.UpdateNodeMeta(ctx, tx, id, name, publicAddr, m, reg, s.now().Unix()); err != nil {
 			return err
 		}
-		return s.audit(ctx, tx, by, store.AuditNodeUpdate, name, map[string]any{"node": id, "publicAddr": publicAddr, "mirror": m})
+		if reg != n.Region {
+			defer s.officialChanged() // 客户端按地区分组显示官方节点
+		}
+		return s.audit(ctx, tx, by, store.AuditNodeUpdate, name, map[string]any{"node": id, "publicAddr": publicAddr, "mirror": m, "region": reg})
 	}))
 }
 

@@ -164,6 +164,8 @@ type OfficialNodeView struct {
 	Domain string `json:"domain,omitempty"`
 	IPv4   string `json:"ipv4,omitempty"`
 	IPv6   string `json:"ipv6,omitempty"`
+	// Region 是地区分类（cn / hmt / intl），界面按它分组；列表已经是面板排好的顺序
+	Region string `json:"region,omitempty"`
 }
 
 // OfficialNodes 返回面板下发给当前账号的官方节点。没登录或面板没有官方节点时为空。
@@ -174,7 +176,7 @@ func (t *TunnelService) OfficialNodes() []OfficialNodeView {
 	out := make([]OfficialNodeView, 0, len(t.official))
 	for _, o := range t.official {
 		out = append(out, OfficialNodeView{ID: api.OfficialNodePrefix + o.ID, Name: o.Name, Description: o.Description,
-			Online: o.Online, Quota: o.Quota, Domain: o.Domain, IPv4: o.IPv4, IPv6: o.IPv6})
+			Online: o.Online, Quota: o.Quota, Domain: o.Domain, IPv4: o.IPv4, IPv6: o.IPv6, Region: o.Region})
 	}
 	return out
 }

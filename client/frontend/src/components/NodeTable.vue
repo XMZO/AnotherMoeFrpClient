@@ -9,6 +9,7 @@ import { useProfilesStore } from '../stores/profiles'
 import { useTunnelStore } from '../stores/tunnel'
 import { codeText, describeError } from '../errors'
 import { nodeLabel, quotaText } from '../util'
+import { groupByRegion } from '../labels'
 
 const profiles = useProfilesStore()
 const tunnel = useTunnelStore()
@@ -104,13 +105,15 @@ async function use(id: string) {
         <h3>官方节点</h3>
         <small>由面板提供，登录后自动获得；在上方选择即可使用，代理名会自动加上你的昵称前缀</small>
       </div>
+      <template v-for="g in groupByRegion(official)" :key="g.region">
+      <div class="reg-title">{{ g.label }}<span>{{ g.items.length }}</span></div>
       <div class="cards">
         <article
-          v-for="(n, i) in official"
+          v-for="n in g.items"
           :key="n.id"
           class="ncard"
           :class="{ cur: n.id === tunnel.selectedNodeId }"
-          :style="{ animationDelay: `${(rows.length + i) * 0.04}s` }"
+          :style="{ animationDelay: `${(rows.length + official.indexOf(n)) * 0.04}s` }"
           :data-testid="`official-node-${n.name}`"
         >
           <div class="ncard-top">
@@ -130,6 +133,7 @@ async function use(id: string) {
           </div>
         </article>
       </div>
+      </template>
     </template>
     <NodeDrawer v-model:show="drawer.show" :index="drawer.index" />
   </div>
@@ -237,6 +241,22 @@ async function use(id: string) {
   font-size: 12px;
   color: var(--text-3);
   font-weight: 600;
+}
+.reg-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 2px 8px;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--text-2);
+}
+.reg-title span {
+  padding: 0 7px;
+  border-radius: 99px;
+  background: var(--fill);
+  font-size: 11px;
+  color: var(--text-3);
 }
 .empty.compact {
   padding: 22px 16px;

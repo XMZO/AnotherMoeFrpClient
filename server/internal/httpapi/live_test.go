@@ -262,7 +262,7 @@ func TestPanelSettings(t *testing.T) {
 	n.admin("PUT", "/panel-settings/nodes", nodeSettings{PublicURL: "https://x.example.com/path"}).apiErr(apierr.ValidationFailed)
 	n.admin("PUT", "/panel-settings/nodes", nodeSettings{PublicURL: "https://panel.example.com/", AgentMirror: "https://gh.example.com/"}).expect(http.StatusOK)
 	var created struct{ InstallCommand string }
-	n.admin("POST", "/nodes", map[string]any{"name": "装机"}).expect(http.StatusCreated).decode(&created)
+	n.admin("POST", "/nodes", map[string]any{"name": "装机", "region": "intl"}).expect(http.StatusCreated).decode(&created)
 	if !strings.Contains(created.InstallCommand, "https://panel.example.com/agent/install.sh") {
 		t.Fatalf("安装命令：%s", created.InstallCommand)
 	}

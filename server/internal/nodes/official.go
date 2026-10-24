@@ -465,7 +465,7 @@ func (s *Service) OfficialFor(ctx context.Context, userID string) ([]api.Officia
 		out = append(out, api.OfficialNode{
 			ID: n.ID, Name: n.Name, Description: n.Description, ServerAddr: ci.Addr, ServerPort: ci.Port,
 			User: u.Nickname, Online: s.Online(n.ID), Quota: d.quotaOf(u),
-			Domain: acc.Domain, IPv4: acc.IPv4, IPv6: acc.IPv6,
+			Domain: acc.Domain, IPv4: acc.IPv4, IPv6: acc.IPv6, Region: n.Region,
 		})
 	}
 	return out, nil

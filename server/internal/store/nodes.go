@@ -27,18 +27,19 @@ type Node struct {
 	LastSeenAt       *int64
 	CreatedAt        int64
 	UpdatedAt        int64
+	Region           string // 地区分类：cn / hmt / intl（api.Regions），0011 之前建的为空
 	NodeOfficial
 }
 
 const nodeColumns = `id, name, public_addr, download_mirror, token_hash IS NOT NULL, enroll_expires_at, frps_config, config_rev,
 	applied_rev, apply_error, pending_uninstall, info, last_ip, last_seen_at, created_at, updated_at, official, roles, description,
-	settings, machine_id, access`
+	settings, machine_id, access, region`
 
 func scanNode(row interface{ Scan(...any) error }) (Node, error) {
 	var n Node
 	err := row.Scan(&n.ID, &n.Name, &n.PublicAddr, &n.DownloadMirror, &n.Enrolled, &n.EnrollExpiresAt, &n.FrpsConfig, &n.ConfigRev,
 		&n.AppliedRev, &n.ApplyError, &n.PendingUninstall, &n.Info, &n.LastIP, &n.LastSeenAt, &n.CreatedAt, &n.UpdatedAt,
-		&n.Official, &n.Roles, &n.Description, &n.Settings, &n.MachineID, &n.Access)
+		&n.Official, &n.Roles, &n.Description, &n.Settings, &n.MachineID, &n.Access, &n.Region)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Node{}, ErrNotFound
 	}
@@ -47,9 +48,11 @@ func scanNode(row interface{ Scan(...any) error }) (Node, error) {
 
 // InsertNode 新建节点，同时写入安装码的哈希。
 func InsertNode(ctx context.Context, q Querier, n Node, enrollHash []byte, enrollExpires int64) error {
+	// 新节点排在最后
 	_, err := q.ExecContext(ctx, `INSERT INTO nodes (id, name, public_addr, download_mirror, enroll_hash, enroll_expires_at,
-		settings, config_rev, roles, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		n.ID, n.Name, n.PublicAddr, n.DownloadMirror, enrollHash, enrollExpires, n.Settings, n.ConfigRev, n.Roles, n.CreatedAt, n.UpdatedAt)
+		settings, config_rev, roles, created_at, updated_at, region, sort_order)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM nodes))`,
+		n.ID, n.Name, n.PublicAddr, n.DownloadMirror, enrollHash, enrollExpires, n.Settings, n.ConfigRev, n.Roles, n.CreatedAt, n.UpdatedAt, n.Region)
 	return err
 }
 
@@ -70,7 +73,7 @@ func GetNodeByEnrollHash(ctx context.Context, q Querier, h []byte) (Node, error)
 
 // ListNodes 按创建时间列出节点。
 func ListNodes(ctx context.Context, q Querier) ([]Node, error) {
-	rows, err := q.QueryContext(ctx, `SELECT `+nodeColumns+` FROM nodes ORDER BY created_at, name`)
+	rows, err := q.QueryContext(ctx, `SELECT `+nodeColumns+` FROM nodes ORDER BY sort_order, created_at, name`)
 	if err != nil {
 		return nil, err
 	}
@@ -119,10 +122,10 @@ func SetNodeMachineID(ctx context.Context, q Querier, id, machineID string) erro
 	return execOne(ctx, q, `UPDATE nodes SET machine_id = ? WHERE id = ?`, machineID, id)
 }
 
-// UpdateNodeMeta 修改名称、客户端连接地址和下载代理。
-func UpdateNodeMeta(ctx context.Context, q Querier, id, name, publicAddr, mirror string, now int64) error {
-	return execOne(ctx, q, `UPDATE nodes SET name = ?, public_addr = ?, download_mirror = ?, updated_at = ? WHERE id = ?`,
-		name, publicAddr, mirror, now, id)
+// UpdateNodeMeta 修改名称、客户端连接地址、下载代理和地区分类。
+func UpdateNodeMeta(ctx context.Context, q Querier, id, name, publicAddr, mirror, region string, now int64) error {
+	return execOne(ctx, q, `UPDATE nodes SET name = ?, public_addr = ?, download_mirror = ?, region = ?, updated_at = ? WHERE id = ?`,
+		name, publicAddr, mirror, region, now, id)
 }
 
 // SetNodeSettings 保存新的期望配置（JSON），版本号 +1，返回新版本号。
@@ -146,6 +149,20 @@ func SetNodeApplied(ctx context.Context, q Querier, id string, appliedRev int64,
 func SetNodeSeen(ctx context.Context, q Querier, id, info, ip string, now int64) error {
 	_, err := q.ExecContext(ctx, `UPDATE nodes SET info = ?, last_ip = ?, last_seen_at = ? WHERE id = ?`, info, ip, now, id)
 	return err
+}
+
+// SetNodeOrder 按 ids 的顺序给节点排序（1、2、3……），不在 ids 里的节点不变。
+func SetNodeOrder(ctx context.Context, q Querier, ids []string) error {
+	for i, id := range ids {
+		res, err := q.ExecContext(ctx, `UPDATE nodes SET sort_order = ? WHERE id = ?`, i+1, id)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+	}
+	return nil
 }
 
 // SetNodeInfo 只更新 hello 信息（agent 上报的公网地址变了时）。

@@ -77,6 +77,11 @@ export interface OfficialNodeView {
     "domain"?: string;
     "ipv4"?: string;
     "ipv6"?: string;
+
+    /**
+     * Region 是地区分类（cn / hmt / intl），界面按它分组；列表已经是面板排好的顺序
+     */
+    "region"?: string;
 }
 
 /**

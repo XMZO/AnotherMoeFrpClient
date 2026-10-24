@@ -119,6 +119,28 @@ func (s *Service) SetAccess(ctx context.Context, by Actor, id string, a Access) 
 	return nil
 }
 
+// SetOrder 调整节点顺序：ids 是全部节点按新顺序排好（管理后台的列表和客户端的官方节点列表都按它排）。
+func (s *Service) SetOrder(ctx context.Context, by Actor, ids []string) error {
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if seen[id] {
+			return badRequest("ids", "节点重复了")
+		}
+		seen[id] = true
+	}
+	err := s.st.Tx(ctx, func(tx *sql.Tx) error {
+		if err := store.SetNodeOrder(ctx, tx, ids); err != nil {
+			return err
+		}
+		return s.audit(ctx, tx, by, store.AuditNodeOrder, "", map[string]any{"ids": ids})
+	})
+	if err != nil {
+		return notFound(err)
+	}
+	s.officialChanged()
+	return nil
+}
+
 func validDomain(d string) bool {
 	if len(d) > 253 || !strings.Contains(d, ".") || strings.HasPrefix(d, ".") || strings.HasSuffix(d, ".") {
 		return false

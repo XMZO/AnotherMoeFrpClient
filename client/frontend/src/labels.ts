@@ -36,6 +36,16 @@ export const proxyTypeHints: Record<string, string> = {
   sudp: '点对点访问 UDP 服务，访问方需要相同的密钥',
 }
 
+/** 官方节点的地区分类，按这个顺序分组显示；没分类的（旧面板）放在最后。 */
+export const regionLabels: Record<string, string> = { cn: '中国大陆', hmt: '港澳台', intl: '境外' }
+const regionOrder = ['cn', 'hmt', 'intl']
+export function groupByRegion<T extends { region?: string }>(list: T[]): { region: string; label: string; items: T[] }[] {
+  const key = (n: T) => (regionOrder.includes(n.region ?? '') ? (n.region as string) : '')
+  return [...regionOrder, '']
+    .map((r) => ({ region: r, label: regionLabels[r] ?? '其他', items: list.filter((n) => key(n) === r) }))
+    .filter((g) => g.items.length)
+}
+
 export const isDomainType = (t: string) => t === 'http' || t === 'https' || t === 'tcpmux'
 export const isP2PType = (t: string) => t === 'stcp' || t === 'xtcp' || t === 'sudp'
 export const hasRemotePort = (t: string) => t === 'tcp' || t === 'udp'

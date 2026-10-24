@@ -135,7 +135,7 @@ func (n *nodeEnv) createNode(name string) (id, code string) {
 		EnrollCode     string
 		InstallCommand string
 	}
-	n.admin("POST", "/nodes", createNodeRequest{Name: name}).expect(http.StatusCreated).decode(&c)
+	n.admin("POST", "/nodes", createNodeRequest{Name: name, Region: "intl"}).expect(http.StatusCreated).decode(&c)
 	if !strings.HasPrefix(c.EnrollCode, "MFN-") || !strings.Contains(c.InstallCommand, "/agent/install.sh' | sudo sh -s -- "+c.EnrollCode) {
 		n.t.Fatalf("创建节点：%+v", c)
 	}
@@ -406,7 +406,7 @@ func TestNodeDownloadMirror(t *testing.T) {
 		EnrollCode     string
 		InstallCommand string
 	}
-	n.admin("POST", "/nodes", createNodeRequest{Name: "国内", DownloadMirror: "https://gh.example.com"}).expect(http.StatusCreated).decode(&c)
+	n.admin("POST", "/nodes", createNodeRequest{Name: "国内", DownloadMirror: "https://gh.example.com", Region: "cn"}).expect(http.StatusCreated).decode(&c)
 	if c.Node.DownloadMirror != "https://gh.example.com/" {
 		t.Fatalf("应补上末尾的 /：%q", c.Node.DownloadMirror)
 	}
@@ -422,7 +422,7 @@ func TestNodeDownloadMirror(t *testing.T) {
 	if !strings.Contains(r.Body.String(), "UNAVAILABLE='安装命令里的下载代理不正确") {
 		t.Fatal("代理不正确时脚本应报错")
 	}
-	n.admin("POST", "/nodes", createNodeRequest{Name: "x", DownloadMirror: "http://insecure.example.com/"}).apiErr(apierr.ValidationFailed)
+	n.admin("POST", "/nodes", createNodeRequest{Name: "x", DownloadMirror: "http://insecure.example.com/", Region: "cn"}).apiErr(apierr.ValidationFailed)
 
 	// 列表里给出默认代理和用过的代理
 	var list struct {
@@ -626,4 +626,38 @@ func TestNodeAccess(t *testing.T) {
 	if eff["domain"] != "sh1.example.com" || eff["ipv4"] != "203.0.113.9" || eff["ipv6"] != "" {
 		t.Fatalf("覆盖后：%v", eff)
 	}
+}
+
+// 节点排序：管理后台的列表按它排，新节点排最后，重复或不存在的 ID 报错；新建节点必须选地区
+func TestNodeOrder(t *testing.T) {
+	n := newNodeEnv(t)
+	a, _ := n.createNode("A")
+	b, _ := n.createNode("B")
+	c, _ := n.createNode("C")
+	names := func() string {
+		var list struct{ Nodes []struct{ Name string } }
+		n.admin("GET", "/nodes", nil).expect(http.StatusOK).decode(&list)
+		var out []string
+		for _, x := range list.Nodes {
+			out = append(out, x.Name)
+		}
+		return strings.Join(out, ",")
+	}
+	if got := names(); got != "A,B,C" {
+		t.Fatalf("默认按创建顺序：%s", got)
+	}
+	n.admin("PUT", "/nodes-order", map[string]any{"ids": []string{c, a, b}}).expect(http.StatusNoContent)
+	n.createNode("D")
+	if got := names(); got != "C,A,B,D" {
+		t.Fatalf("排序后、新节点在最后：%s", got)
+	}
+	// 地区必选；改地区时只认三种
+	n.admin("POST", "/nodes", createNodeRequest{Name: "E"}).apiErr(apierr.ValidationFailed)
+	n.admin("PATCH", "/nodes/"+a, map[string]any{"name": "A", "region": "mars"}).apiErr(apierr.ValidationFailed)
+	n.admin("PATCH", "/nodes/"+a, map[string]any{"name": "A", "region": "hmt"}).expect(http.StatusNoContent)
+	if r := n.node(a)["region"]; r != "hmt" {
+		t.Fatalf("地区：%v", r)
+	}
+	n.admin("PUT", "/nodes-order", map[string]any{"ids": []string{a, a}}).apiErr(apierr.ValidationFailed)
+	n.admin("PUT", "/nodes-order", map[string]any{"ids": []string{"nope"}}).apiErr(apierr.NotFound)
 }

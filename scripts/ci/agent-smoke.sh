@@ -49,7 +49,7 @@ VERSION=$(api "$BASE/api/v1/admin/nodes" | jq -r .agent.version)
 test -n "$VERSION" && test "$VERSION" != null
 
 # ---- 1. 用面板给的安装命令安装 ----
-NODE=$(api -X POST "$BASE/api/v1/admin/nodes" -d '{"name":"ci-node"}')
+NODE=$(api -X POST "$BASE/api/v1/admin/nodes" -d '{"name":"ci-node","region":"intl"}')
 ID=$(jq -r .node.id <<<"$NODE")
 CMD=$(jq -r .installCommand <<<"$NODE")
 echo "$CMD"
@@ -100,7 +100,7 @@ test "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -H 'X-MoeFrp-Admin: 1' 
 wait_for "临时卸载单元结束" 20 bash -c '! systemctl list-units --all --no-legend "moefrp-agent*" | grep -q .'
 
 # ---- 6. 再装一次，用 install.sh --uninstall 卸载 ----
-CMD=$(api -X POST "$BASE/api/v1/admin/nodes" -d '{"name":"ci-node-2"}' | jq -r .installCommand)
+CMD=$(api -X POST "$BASE/api/v1/admin/nodes" -d '{"name":"ci-node-2","region":"intl"}' | jq -r .installCommand)
 bash -c "$CMD --no-exec"
 systemctl is-active --quiet moefrp-agent
 sudo grep -qx 'exec = false' /etc/moefrp-agent/agent.toml

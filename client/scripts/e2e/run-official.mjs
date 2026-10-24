@@ -87,7 +87,7 @@ async function main() {
   }, 'server.log')
   await waitUntil('server', async () => (await fetch(`${API}/healthz`)).ok, 15000, 100)
   const admin = adminClient(API)
-  const created = await admin.request('POST', '/nodes', { name: '东京' })
+  const created = await admin.request('POST', '/nodes', { name: '东京', region: 'intl' })
   const nodeId = created.node.id
   const agentEnv = { MOEFRP_AGENT_PREFIX: path.join(T, 'agent') }
   execFileSync(agentExe, ['install', '--server', API, '--code', created.enrollCode], { env: { ...process.env, ...agentEnv }, stdio: 'ignore' })

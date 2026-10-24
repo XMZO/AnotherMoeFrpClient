@@ -451,3 +451,55 @@ func TestNodeResetToken(t *testing.T) {
 	n.admin("POST", "/nodes/"+id+"/restart", nil).apiErr(apierr.NodeOffline)
 	n.admin("POST", "/nodes", createNodeRequest{Name: ""}).apiErr(apierr.ValidationFailed)
 }
+
+// TestNodeOfflineGrace：节点断开后先显示"重连中"（宽限期内仍算在线），宽限期内重连上，上线时间接着算；
+// 超过宽限期才显示离线。断线次数按 24 小时统计。
+func TestNodeOfflineGrace(t *testing.T) {
+	n := newNodeEnv(t)
+	id, code := n.createNode("不稳的节点")
+	en := n.enroll(code)
+	hello := agentproto.Hello{AgentVersion: "1.3.0", OS: "linux", Arch: "amd64"}
+	fa, _, err := dialAgent(t, n.http.URL, en.Token, hello)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "在线", func() bool { return n.node(id)["status"] == "online" })
+	connectedAt := n.node(id)["connectedAt"]
+	if n.node(id)["drops24h"] != float64(0) {
+		t.Fatalf("还没断过：%v", n.node(id)["drops24h"])
+	}
+
+	// 断开：宽限期内显示在线、标为重连中，记一次断线
+	fa.ws.Close(websocket.StatusNormalClosure, "")
+	eventually(t, "重连中", func() bool { v := n.node(id); return v["status"] == "online" && v["reconnecting"] == true })
+	if n.node(id)["drops24h"] != float64(1) {
+		t.Fatalf("断线次数：%v", n.node(id)["drops24h"])
+	}
+
+	// 宽限期内重连上：恢复正常，上线时间接着算
+	n.clock.Add(30 * time.Second)
+	fa2, _, err := dialAgent(t, n.http.URL, en.Token, hello)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "重连上", func() bool { v := n.node(id); return v["status"] == "online" && v["reconnecting"] == nil })
+	if got := n.node(id)["connectedAt"]; got != connectedAt {
+		t.Fatalf("宽限期内重连，上线时间应接着算：%v → %v", connectedAt, got)
+	}
+
+	// 再断开，超过宽限期：离线
+	fa2.ws.Close(websocket.StatusNormalClosure, "")
+	eventually(t, "第二次断开", func() bool { return n.node(id)["reconnecting"] == true })
+	n.clock.Add((agentproto.OfflineGrace + 1) * time.Second)
+	if v := n.node(id); v["status"] != "offline" || v["drops24h"] != float64(2) {
+		t.Fatalf("超过宽限期：%v drops=%v", v["status"], v["drops24h"])
+	}
+	// 24 小时以前的断线不再计数（分几步走，中间的请求让管理后台的会话不因空闲过期）
+	for i := 0; i < 3; i++ {
+		n.clock.Add(9 * time.Hour)
+		n.node(id)
+	}
+	if v := n.node(id); v["drops24h"] != float64(0) {
+		t.Fatalf("24 小时后：%v", v["drops24h"])
+	}
+}

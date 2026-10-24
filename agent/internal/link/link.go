@@ -124,10 +124,18 @@ func (c *conn) call(ctx context.Context, method string, data any, out any) error
 	}
 }
 
+// dialClient 是连面板用的 HTTP 客户端：TLS 握手放宽到 30 秒（默认 10 秒），丢包严重的跨境线路也能连上。
+var dialClient = func() *http.Client {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.TLSHandshakeTimeout = 30 * time.Second
+	return &http.Client{Transport: t}
+}()
+
 func session(ctx context.Context, o Options) error {
-	dctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	dctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	ws, resp, err := websocket.Dial(dctx, wsURL(o.Server), &websocket.DialOptions{
+		HTTPClient:   dialClient,
 		HTTPHeader:   http.Header{"Authorization": {"Bearer " + o.Token}},
 		Subprotocols: []string{agentproto.Subprotocol},
 	})
@@ -147,7 +155,7 @@ func session(ctx context.Context, o Options) error {
 	go func() { readErr <- c.readLoop(ctx, o) }()
 
 	var ack agentproto.HelloAck
-	hctx, hcancel := context.WithTimeout(ctx, 20*time.Second)
+	hctx, hcancel := context.WithTimeout(ctx, 45*time.Second)
 	err = c.call(hctx, agentproto.MethodHello, o.Hello(), &ack)
 	hcancel()
 	if err != nil {
@@ -165,12 +173,17 @@ func session(ctx context.Context, o Options) error {
 	if err := report(); err != nil {
 		return err
 	}
+	// 心跳单独跑，等回应时不耽误上报。面板一直没响应（例如中间的反代断了但 TCP 没断）时断开重连
+	pingErr := make(chan error, 1)
+	go func() { pingErr <- pingLoop(ctx, ws) }()
+
 	tick := time.NewTicker(agentproto.ReportInterval * time.Second)
 	defer tick.Stop()
-	lastPing := time.Now()
 	for {
 		select {
 		case err := <-readErr:
+			return err
+		case err := <-pingErr:
 			return err
 		case <-ctx.Done():
 			ws.Close(websocket.StatusGoingAway, "agent stopping")
@@ -179,17 +192,25 @@ func session(ctx context.Context, o Options) error {
 			if err := report(); err != nil {
 				return err
 			}
-			if time.Since(lastPing) < agentproto.PingInterval*time.Second {
-				continue
-			}
-			lastPing = time.Now()
-			// 面板没响应（例如中间的反代断了但 TCP 没断）时尽快发现
-			pctx, pcancel := context.WithTimeout(ctx, 15*time.Second)
-			err := ws.Ping(pctx)
-			pcancel()
-			if err != nil {
-				return fmt.Errorf("ping：%w", err)
-			}
+		}
+	}
+}
+
+// pingLoop 每 PingInterval 秒 ping 一次，PingTimeout 秒内没有回应就返回错误。ctx 结束时返回 nil。
+func pingLoop(ctx context.Context, ws *websocket.Conn) error {
+	t := time.NewTicker(agentproto.PingInterval * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+		}
+		pctx, cancel := context.WithTimeout(ctx, agentproto.PingTimeout*time.Second)
+		err := ws.Ping(pctx)
+		cancel()
+		if err != nil && ctx.Err() == nil {
+			return fmt.Errorf("ping：%w", err)
 		}
 	}
 }

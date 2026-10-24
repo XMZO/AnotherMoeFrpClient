@@ -29,6 +29,41 @@ type agentConn struct {
 	pending map[string]chan agentproto.Message
 }
 
+// goneState 是刚断开的节点：宽限期内重连上的话，管理后台不显示离线，上线时间也接着算。
+type goneState struct {
+	at          time.Time
+	connectedAt time.Time
+	hello       agentproto.Hello
+}
+
+// graceLocked 返回还在宽限期内的断开记录。调用方持有 s.mu。
+func (s *Service) graceLocked(id string) *goneState {
+	g := s.gone[id]
+	if g == nil || s.now().Sub(g.at) >= agentproto.OfflineGrace*time.Second {
+		return nil
+	}
+	return g
+}
+
+// dropsLocked 返回最近 24 小时的断线次数，顺便清掉更早的记录。调用方持有 s.mu。
+func (s *Service) dropsLocked(id string) int {
+	cut := s.now().Add(-24 * time.Hour)
+	d := s.drops[id]
+	i := 0
+	for i < len(d) && d[i].Before(cut) {
+		i++
+	}
+	if i > 0 {
+		d = d[i:]
+		if len(d) == 0 {
+			delete(s.drops, id)
+		} else {
+			s.drops[id] = d
+		}
+	}
+	return len(d)
+}
+
 // liveState 是节点最近一次上报，只放内存。
 type liveState struct {
 	report         agentproto.Report
@@ -47,11 +82,11 @@ func (c *agentConn) send(ctx context.Context, m agentproto.Message) error {
 	return c.ws.Write(ctx, websocket.MessageText, b)
 }
 
-// Online 判断节点是否在线。
+// Online 判断节点是否在线（刚断开、还在宽限期内的也算，见 OfflineGrace）。
 func (s *Service) Online(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.conns[id] != nil
+	return s.conns[id] != nil || s.graceLocked(id) != nil
 }
 
 func (s *Service) disconnect(id, reason string) {
@@ -114,11 +149,16 @@ func (s *Service) Serve(ctx context.Context, ws *websocket.Conn, node store.Node
 	c := &agentConn{nodeID: node.ID, ws: ws, ip: ip, connectedAt: s.now(), pending: map[string]chan agentproto.Message{}}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	greeted := false // 收到 hello 之后才算上线过，断开时才记入断线
 	defer func() {
 		s.mu.Lock()
 		if s.conns[node.ID] == c {
 			delete(s.conns, node.ID)
 			delete(s.pushed, node.ID)
+			if greeted {
+				s.gone[node.ID] = &goneState{at: s.now(), connectedAt: c.connectedAt, hello: c.hello}
+				s.drops[node.ID] = append(s.drops[node.ID], s.now())
+			}
 		}
 		s.mu.Unlock()
 		c.mu.Lock()
@@ -131,7 +171,6 @@ func (s *Service) Serve(ctx context.Context, ws *websocket.Conn, node store.Node
 		ws.CloseNow()
 	}()
 
-	greeted := false
 	for {
 		// agent 每 ReportInterval 秒上报一次；超过 OfflineAfter 收不到任何消息就断开
 		rctx, rcancel := context.WithTimeout(ctx, agentproto.OfflineAfter*time.Second)
@@ -190,9 +229,13 @@ func (s *Service) handleHello(ctx context.Context, c *agentConn, node store.Node
 	if err := store.SetNodeApplied(ctx, s.st.DB(), node.ID, h.AppliedRev, node.ApplyError); err != nil {
 		return err
 	}
-	// 新连接顶掉旧连接
+	// 新连接顶掉旧连接；宽限期内重连上的，上线时间接着算
 	s.mu.Lock()
 	old := s.conns[node.ID]
+	if g := s.graceLocked(node.ID); g != nil && old == nil {
+		c.connectedAt = g.connectedAt
+	}
+	delete(s.gone, node.ID)
 	s.conns[node.ID] = c
 	s.mu.Unlock()
 	if old != nil && old != c {

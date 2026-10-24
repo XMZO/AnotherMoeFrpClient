@@ -1510,8 +1510,13 @@
   const NODE_STATUS = { online: ['在线', 'ok'], offline: ['离线', 'danger'], pending: ['待安装', 'warn'] };
   const FRPS_STATE = { running: ['运行中', 'ok'], stopped: ['未启动', null], error: ['出错', 'danger'] };
 
+  // dropsText：最近 24 小时断线次数，没断过时为空
+  const dropsText = (n) => (n.drops24h ? '24 小时断线 ' + n.drops24h + ' 次' : '');
+
   function nodeStatusBadge(n) {
     if (n.pendingUninstall) return badge('待卸载', 'warn');
+    // 刚断开、还在宽限期内（一般几秒就重连上）：不显示离线
+    if (n.status === 'online' && n.reconnecting) return h('span', { class: 'badge warn', title: '连接刚断开，正在重连' }, '重连中');
     const [label, kind] = NODE_STATUS[n.status] || [n.status];
     return h('span', { class: 'badge ' + (kind || '') }, n.status === 'online' ? h('span', { class: 'dot ok' }) : null, label);
   }
@@ -1647,7 +1652,7 @@
               h('td', null, h('a', { class: 'node-link', href }, n.name), n.official ? [' ', badge('官方', 'accent')] : null,
                 h('div', { class: 'cell-sub' }, [info.hostname, n.client && n.client.addr].filter(Boolean).join(' · ') || '—')),
               h('td', null, nodeStatusBadge(n),
-                h('div', { class: 'cell-sub' }, n.status === 'online' ? '' : n.lastSeen ? ['最后在线 ', timeEl(n.lastSeen)] : '')),
+                h('div', { class: 'cell-sub' }, n.status === 'online' ? dropsText(n) : n.lastSeen ? ['最后在线 ', timeEl(n.lastSeen)] : '')),
               h('td', null, fs ? [badge(fl, fk), h('div', { class: 'cell-sub' }, fs.state === 'running' ? ':' + fs.bindPort + ' · ' + fs.clients + ' 个客户端' : (fs.error || ''))]
                 : h('span', { class: 'faint' }, '—')),
               h('td', { class: 'res-cell' }, r ? [meterCell('CPU', r.cpu, 100, r.cpu.toFixed(0) + '%'), meterCell('内存', r.memUsed, r.memTotal, fmtBytes(r.memUsed))]
@@ -1672,6 +1677,7 @@
                 info.agentVersion ? 'agent ' + info.agentVersion + (n.upgradeTo ? '（可升级）' : '') : null,
                 n.status !== 'online' && n.lastSeen ? ['最后在线 ', timeEl(n.lastSeen)] : null,
                 n.status === 'pending' ? '还没有安装 agent' : null,
+                dropsText(n),
               ],
               extra: r ? h('div', { class: 'row-meters' },
                 meterCell('CPU', r.cpu, 100, r.cpu.toFixed(0) + '%'), meterCell('内存', r.memUsed, r.memTotal, pct(r.memUsed, r.memTotal))) : null,
@@ -1880,7 +1886,7 @@
         tile('agent', info.agentVersion ? [info.agentVersion, n.upgradeTo ? [' ', badge('可升级', 'info')] : null] : null, n.upgradeTo ? '最新 ' + n.upgradeTo : null),
         tile('远程命令', info.agentVersion ? (info.execEnabled ? '允许' : '已关闭') : null),
         n.status === 'online'
-          ? tile('上线', n.connectedAt ? timeEl(n.connectedAt) : null, '添加于 ' + fmtDate(n.createdAt))
+          ? tile('上线', n.connectedAt ? timeEl(n.connectedAt) : null, dropsText(n) || '24 小时内没有断线')
           : tile('最后在线', n.lastSeen ? timeEl(n.lastSeen) : null, '添加于 ' + fmtDate(n.createdAt)))));
       // 宽屏上也整行堆叠、内容横向铺开：并排的卡片高度对不齐，拉伸又会留白
       return h('div', { class: 'stack' }, parts, side);

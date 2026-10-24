@@ -60,6 +60,8 @@ type Service struct {
 	conns       map[string]*agentConn
 	live        map[string]*liveState
 	pushed      map[string]string // 节点 ID → 上次推送的授权表哈希
+	gone        map[string]*goneState // 刚断开、还在宽限期内的节点（见 OfflineGrace）
+	drops       map[string][]time.Time // 节点最近 24 小时的断线时间
 	accessTimer *time.Timer
 
 	keyMu sync.Mutex
@@ -69,7 +71,8 @@ type Service struct {
 // New 创建 Service，并把服务端重启前没结束的命令任务标记为失败。
 func New(o Options) *Service {
 	s := &Service{st: o.Store, log: o.Log, now: o.Now, src: o.Source,
-		conns: map[string]*agentConn{}, live: map[string]*liveState{}, pushed: map[string]string{}}
+		conns: map[string]*agentConn{}, live: map[string]*liveState{}, pushed: map[string]string{},
+		gone: map[string]*goneState{}, drops: map[string][]time.Time{}}
 	if s.log == nil {
 		s.log = slog.Default()
 	}
@@ -116,6 +119,8 @@ type View struct {
 	PublicAddr       string             `json:"publicAddr"`
 	DownloadMirror   string             `json:"downloadMirror"` // 安装和升级下载 agent 用的代理前缀，空表示直连
 	Status           string             `json:"status"`         // pending / online / offline
+	Reconnecting     bool               `json:"reconnecting,omitempty"` // 刚断开，宽限期内还算在线（status 为 online）
+	Drops24h         int                `json:"drops24h"`               // 最近 24 小时断线次数，看节点稳不稳
 	Enrolled         bool               `json:"enrolled"`
 	EnrollExpiresAt  *time.Time         `json:"enrollExpiresAt,omitempty"`
 	ConfigRev        int64              `json:"configRev"`
@@ -180,7 +185,15 @@ func (s *Service) view(n store.Node, withConfig bool) View {
 		v.ConnectedAt = &t
 		h := c.hello
 		v.Info = &h
+	} else if g := s.graceLocked(n.ID); g != nil {
+		// 刚断开：多半几秒内就重连上了，先不显示离线
+		v.Status, v.Reconnecting = StatusOnline, true
+		t := g.connectedAt.UTC()
+		v.ConnectedAt = &t
+		h := g.hello
+		v.Info = &h
 	}
+	v.Drops24h = s.dropsLocked(n.ID)
 	if l := s.live[n.ID]; l != nil && v.Status == StatusOnline {
 		r := l.report
 		v.Report, v.NetRxRate, v.NetTxRate = &r, l.rxRate, l.txRate
@@ -482,6 +495,8 @@ func (s *Service) Delete(ctx context.Context, by Actor, id string) error {
 	s.disconnect(id, "node deleted")
 	s.mu.Lock()
 	delete(s.live, id)
+	delete(s.gone, id)
+	delete(s.drops, id)
 	s.mu.Unlock()
 	return nil
 }
@@ -519,6 +534,8 @@ func (s *Service) uninstallNow(ctx context.Context, id string) error {
 	s.disconnect(id, "uninstalled")
 	s.mu.Lock()
 	delete(s.live, id)
+	delete(s.gone, id)
+	delete(s.drops, id)
 	s.mu.Unlock()
 	return nil
 }

@@ -23,11 +23,16 @@ const (
 	// Subprotocol 是 WebSocket 子协议名，协议不兼容时改版本号。
 	Subprotocol = "moefrp-agent.v1"
 
-	// ReportInterval 是 agent 上报状态的间隔（秒），面板上的流量和资源按这个频率变化；
-	// PingInterval 是 agent 检查连接是否还通的间隔；面板超过 OfflineAfter 没收到任何消息就认为离线。
+	// ReportInterval 是 agent 上报状态的间隔（秒），面板上的流量和资源按这个频率变化。
 	ReportInterval = 3
-	PingInterval   = 15
-	OfflineAfter   = 45
+	// PingInterval / PingTimeout：agent 每隔 PingInterval 秒检查一次连接，PingTimeout 秒内没有回应才断开重连。
+	// 跨境线路丢包时 TCP 重传一卡就是十几秒，超时太短会把还活着的连接当成死的，断开重连反而更容易失败。
+	PingInterval = 15
+	PingTimeout  = 45
+	// OfflineAfter：面板超过这么多秒没收到任何消息就断开连接。
+	OfflineAfter = 90
+	// OfflineGrace：连接断开后这么多秒内重连上，管理后台照样显示在线（标为"重连中"），不显示离线。
+	OfflineGrace = 60
 )
 
 // 消息类型。

@@ -65,43 +65,37 @@ async function applyCustom() {
           <p>改动会立即生效并自动保存。</p>
         </div>
       </div>
+      <!-- 三张卡片并排，每张三项；三张卡片共用一套行（subgrid），同一行的项一样高，底边自然对齐，不拉伸、不留白 -->
       <div v-if="s" class="set-grid">
-        <section class="card">
-          <div class="card-h"><span class="tile-ic"><Icon name="sun" size="s" /></span>外观</div>
-          <div class="set-cols">
-          <div class="set-row">
-          <div class="set-txt"><b>主题</b><small>“跟随系统”随 Windows 切换</small></div>
-          <div class="tiles" role="radiogroup" aria-label="主题" data-testid="settings-theme">
-            <button
-              v-for="t in themes"
-              :key="t.value"
-              type="button"
-              role="radio"
-              class="tile radio"
-              :class="{ on: s.theme === t.value }"
-              :aria-checked="s.theme === t.value"
-              @click="set({ theme: t.value })"
-            >
-              <span class="mini" :class="t.value">
-                <span class="m-half l"><span class="mr" /><span class="mc"><i class="p" /><i /><i /></span></span>
-                <span class="m-half d"><span class="mr" /><span class="mc"><i class="p" /><i /><i /></span></span>
-              </span>
-              {{ t.label }}
-            </button>
+        <section class="card set-card">
+          <div class="card-h"><span class="tile-ic"><Icon name="sun" size="s" /></span>外观与界面</div>
+          <div class="set-item">
+            <div class="set-txt"><b>主题</b><small>“跟随系统”随 Windows 的深浅色切换</small></div>
+            <div class="tiles" role="radiogroup" aria-label="主题" data-testid="settings-theme">
+              <button
+                v-for="t in themes"
+                :key="t.value"
+                type="button"
+                role="radio"
+                class="tile radio"
+                :class="{ on: s.theme === t.value }"
+                :aria-checked="s.theme === t.value"
+                @click="set({ theme: t.value })"
+              >
+                <span class="mini" :class="t.value">
+                  <span class="m-half l"><span class="mr" /><span class="mc"><i class="p" /><i /><i /></span></span>
+                  <span class="m-half d"><span class="mr" /><span class="mc"><i class="p" /><i /><i /></span></span>
+                </span>
+                {{ t.label }}
+              </button>
+            </div>
           </div>
-          </div>
-          <div class="set-row">
+          <div class="set-item inline">
             <div class="set-txt"><b>图片面板</b><small>侧栏里每分钟换一张图；关闭后不会发出任何图片请求</small></div>
             <Switch :model-value="s.imagePanel" label="图片面板" data-testid="settings-image-panel" @change="(v: boolean) => set({ imagePanel: v })" />
           </div>
-          </div>
-        </section>
-
-        <section class="card" style="animation-delay: 0.05s">
-          <div class="card-h"><span class="tile-ic"><Icon name="power" size="s" /></span>窗口与启动</div>
-          <div class="set-cols">
-          <div class="set-row">
-            <div class="set-txt"><b>点关闭按钮时</b></div>
+          <div class="set-item">
+            <div class="set-txt"><b>点关闭按钮时</b><small>最小化到托盘时隧道照常运行</small></div>
             <Options
               :model-value="s.closeAction"
               :options="[
@@ -112,66 +106,65 @@ async function applyCustom() {
               @pick="(v: string) => set({ closeAction: v })"
             />
           </div>
-          <div class="set-row" :class="{ dim: s.closeAction !== 'tray' }">
-            <div class="set-txt"><b>最小化到托盘时释放界面内存</b><small>后台只占几十 MB（隧道照常运行），再次打开窗口约需半秒</small></div>
+        </section>
+
+        <section class="card set-card" style="animation-delay: 0.05s">
+          <div class="card-h"><span class="tile-ic"><Icon name="power" size="s" /></span>后台与启动</div>
+          <div class="set-item inline" :class="{ dim: s.closeAction !== 'tray' }">
+            <div class="set-txt"><b>托盘时释放界面内存</b><small>后台只占几十 MB（隧道照常运行），再次打开窗口约需半秒</small></div>
             <Switch :model-value="s.releaseOnHide" :disabled="s.closeAction !== 'tray'" label="释放界面内存" data-testid="settings-release-on-hide" @change="(v: boolean) => set({ releaseOnHide: v })" />
           </div>
-          <div class="set-row">
+          <div class="set-item inline">
             <div class="set-txt"><b>开机自启</b><small>开机后只在托盘显示图标，不弹出窗口</small></div>
             <Switch :model-value="s.autoStart" label="开机自启" data-testid="settings-autostart" @change="(v: boolean) => set({ autoStart: v })" />
           </div>
-          <div class="set-row">
+          <div class="set-item inline">
             <div class="set-txt"><b>启动后自动连接</b><small>启动时自动运行上次使用的配置和节点</small></div>
             <Switch :model-value="s.autoConnect" label="启动后自动连接" data-testid="settings-autoconnect" @change="(v: boolean) => set({ autoConnect: v })" />
           </div>
-          </div>
         </section>
 
-        <section class="card" style="animation-delay: 0.1s">
+        <section class="card set-card" style="animation-delay: 0.1s">
           <div class="card-h"><span class="tile-ic"><Icon name="globe" size="s" /></span>网络与日志</div>
-          <div class="set-cols three">
-            <div class="set-row col">
-              <div class="set-txt"><b>应用的网络代理</b><small>登录、同步、检查更新、图片面板走它。“跟随系统”读 Internet 选项里的手动代理</small></div>
-              <div class="net-row">
-                <Options
-                  :model-value="netMode"
-                  :options="[
-                    { value: 'system', label: '跟随系统' },
-                    { value: 'none', label: '不使用' },
-                    { value: 'custom', label: '自定义', testid: 'settings-proxy-custom' },
-                  ]"
-                  label="网络代理"
-                  data-testid="settings-network-proxy"
-                  @pick="onProxyMode"
-                />
-                <Transition name="collapse">
-                  <form v-if="customSelected" class="inp-group" @submit.prevent="applyCustom">
-                    <label for="proxy-url" class="sr-only">代理地址</label>
-                    <input id="proxy-url" v-model="proxyUrl" class="inp mono" placeholder="http://127.0.0.1:7890 或 socks5://…" data-testid="settings-proxy-url" />
-                    <button type="submit" class="btn pri sm" style="height: 40px" data-testid="settings-proxy-apply">应用</button>
-                  </form>
-                </Transition>
-              </div>
-            </div>
-            <div class="set-row col">
-              <div class="set-txt"><b>frp 隧道连接</b><small>连节点时走不走上面的代理（节点自己填了代理的用节点的），重新启动隧道生效</small></div>
-              <Options
-                :model-value="s.frpProxy === 'app' ? 'app' : 'direct'"
-                :options="[
-                  { value: 'direct', label: '直连' },
-                  { value: 'app', label: '跟随网络代理', testid: 'settings-frp-proxy-app' },
-                ]"
-                label="frp 隧道连接"
-                data-testid="settings-frp-proxy"
-                @pick="(v: string) => set({ frpProxy: v })"
-              />
-            </div>
-            <div class="set-row col">
-              <div class="set-txt"><b>frp 日志级别</b><small>排查问题时调到 debug，平时 info 就够了</small></div>
-              <select class="inp mono log-sel" :value="s.logLevel" aria-label="frp 日志级别" data-testid="settings-log-level" @change="(e: Event) => set({ logLevel: (e.target as HTMLSelectElement).value })">
-                <option v-for="l in levels" :key="l.value" :value="l.value">{{ l.label }}</option>
-              </select>
-            </div>
+          <div class="set-item">
+            <div class="set-txt"><b>应用的网络代理</b><small>登录、同步、检查更新、图片面板走它</small></div>
+            <Options
+              :model-value="netMode"
+              :options="[
+                { value: 'system', label: '跟随系统' },
+                { value: 'none', label: '不使用' },
+                { value: 'custom', label: '自定义', testid: 'settings-proxy-custom' },
+              ]"
+              label="网络代理"
+              data-testid="settings-network-proxy"
+              @pick="onProxyMode"
+            />
+            <Transition name="collapse">
+              <form v-if="customSelected" class="inp-group" @submit.prevent="applyCustom">
+                <label for="proxy-url" class="sr-only">代理地址</label>
+                <input id="proxy-url" v-model="proxyUrl" class="inp mono" placeholder="http://127.0.0.1:7890" data-testid="settings-proxy-url" />
+                <button type="submit" class="btn pri sm" style="height: 40px" data-testid="settings-proxy-apply">应用</button>
+              </form>
+            </Transition>
+          </div>
+          <div class="set-item">
+            <div class="set-txt"><b>frp 隧道连接</b><small>连节点走不走上面的代理，重新启动隧道生效</small></div>
+            <Options
+              :model-value="s.frpProxy === 'app' ? 'app' : 'direct'"
+              :options="[
+                { value: 'direct', label: '直连' },
+                { value: 'app', label: '跟随网络代理', testid: 'settings-frp-proxy-app' },
+              ]"
+              label="frp 隧道连接"
+              data-testid="settings-frp-proxy"
+              @pick="(v: string) => set({ frpProxy: v })"
+            />
+          </div>
+          <div class="set-item">
+            <div class="set-txt"><b>frp 日志级别</b><small>排查问题时调到 debug，平时 info 就够了</small></div>
+            <select class="inp mono log-sel" :value="s.logLevel" aria-label="frp 日志级别" data-testid="settings-log-level" @change="(e: Event) => set({ logLevel: (e.target as HTMLSelectElement).value })">
+              <option v-for="l in levels" :key="l.value" :value="l.value">{{ l.label }}</option>
+            </select>
           </div>
         </section>
       </div>
@@ -180,120 +173,78 @@ async function applyCustom() {
 </template>
 
 <style>
-/* 卡片整行堆叠，卡片里按两列排：左右边缘天然对齐，每张卡片的高度只由自己的内容决定，不拉伸、不留白 */
+.settings-page {
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+.settings-page .pg-head {
+  margin-bottom: 10px;
+}
+/* 三列卡片；每张卡片占 4 行（标题 + 三项），用 subgrid 让三张卡片的同一行一样高 */
 .set-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: auto repeat(3, auto);
+  column-gap: 14px;
+  align-content: start;
+}
+.set-card {
+  display: grid;
+  grid-row: span 4;
+  grid-template-rows: subgrid;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 0;
+  padding-bottom: 4px;
+}
+.set-card .card-h {
+  padding: 10px 0 0;
+}
+.set-item {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-}
-.set-grid > .card {
-  container-type: inline-size;
-}
-.set-cols {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 28px;
-  align-items: start;
-}
-.set-row {
-  display: flex;
-  align-items: center;
-  gap: 6px 14px;
-  min-height: 52px;
-  padding: 9px 0;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 0;
   border-top: 1.5px dashed var(--line-2);
 }
-/* 卡片标题下面的第一项、两列各自的第一项不要分隔线 */
-.card-h + .set-row {
+.card-h + .set-item {
   border-top: 0;
 }
-.set-cols > .set-row:nth-child(-n + 2) {
-  border-top: 0;
+/* 全局的 .set-txt 是 flex: 1 1 200px（横排用），竖排时那 200px 会变成高度 */
+.set-item > .set-txt {
+  flex: none;
+  align-self: stretch;
 }
-.set-row > .set-txt {
+/* 开关类：说明在左、开关在右 */
+.set-item.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+.set-item.inline > .set-txt {
   flex: 1;
   min-width: 0;
 }
-.set-row > :not(.set-txt) {
+.set-item.inline > :not(.set-txt) {
   flex-shrink: 0;
 }
-.set-row.col {
-  flex-direction: column;
-  align-items: flex-start;
-}
-.set-row.col > .set-txt {
-  flex: none;
-}
-.set-row.dim .set-txt {
+.set-item.dim .set-txt {
   opacity: 0.55;
 }
-/* 设置页一屏放下：标题区和卡片里的留白收紧 */
-.settings-page {
-  padding-top: 16px;
-  padding-bottom: 16px;
-}
-.settings-page .pg-head {
-  margin-bottom: 12px;
-}
-.set-grid > .card .card-h {
-  padding: 10px 0 2px;
+.set-item .inp-group {
+  width: 100%;
 }
 .log-sel {
   width: 140px;
   height: 36px;
 }
-/* 网络与日志：三列 */
-.set-cols.three {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-.set-cols.three > .set-row:nth-child(3) {
-  border-top: 0;
-}
-.set-note {
-  font-size: 12px;
-  color: var(--text-3);
-  font-weight: 600;
-  line-height: 1.6;
-}
-.set-note b {
-  display: block;
-  margin-bottom: 2px;
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--text);
-}
-.net-row {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-  width: 100%;
-}
-.net-row .inp-group {
-  width: 100%;
-}
-/* 窄了退成一列 */
-@container (max-width: 700px) {
-  .set-cols.three {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .set-cols.three > .set-row:nth-child(n + 2) {
-    border-top: 1.5px dashed var(--line-2);
-  }
-}
-@container (max-width: 640px) {
-  .set-cols {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .set-cols > .set-row:nth-child(2) {
-    border-top: 1.5px dashed var(--line-2);
-  }
-}
 .tiles {
   display: grid;
-  flex-shrink: 0;
-  grid-template-columns: repeat(3, 78px);
+  grid-template-columns: repeat(3, minmax(0, 78px));
   gap: 8px;
+  width: 100%;
 }
 .tile {
   display: flex;

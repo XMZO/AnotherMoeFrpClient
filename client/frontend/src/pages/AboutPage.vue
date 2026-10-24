@@ -45,7 +45,7 @@ async function copy(text: string) {
 </script>
 
 <template>
-  <div class="page dotted-bg">
+  <div class="page dotted-bg about-page">
     <div class="inner">
       <section class="about-hero">
         <Icon name="sparkle" fill class="deco a" />
@@ -123,13 +123,17 @@ async function copy(text: string) {
 </template>
 
 <style>
+.about-page {
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
 .about-hero {
   position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 20px 24px;
-  padding: 24px;
+  gap: 16px 22px;
+  padding: 18px 22px;
   border-radius: 26px;
   background: var(--surface);
   border: 1.5px solid var(--line-2);
@@ -138,9 +142,9 @@ async function copy(text: string) {
   animation: rowIn 0.5s var(--ease-out) backwards;
 }
 .about-hero img {
-  width: 104px;
-  height: 104px;
-  border-radius: 32px;
+  width: 88px;
+  height: 88px;
+  border-radius: 28px;
   box-shadow: 0 0 0 4px var(--surface), 0 16px 34px -12px color-mix(in oklab, var(--pri) 70%, transparent);
   animation: floaty 4.5s ease-in-out infinite;
 }
@@ -250,8 +254,8 @@ async function copy(text: string) {
 .about-grid {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  margin-top: 14px;
+  gap: 12px;
+  margin-top: 12px;
 }
 .about-grid > .card {
   container-type: inline-size;
@@ -305,21 +309,23 @@ async function copy(text: string) {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 0;
+  padding: 6px 0;
   border-top: 1.5px dashed var(--line-2);
 }
 .lic a {
+  flex-shrink: 0;
   font-weight: 800;
   text-decoration: none;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.lic .bdg {
+  flex-shrink: 0;
 }
 .lic a:hover {
   text-decoration: underline;
 }
 .lic small {
+  min-width: 0;
   margin-left: auto;
   font-size: 11.5px;
   color: var(--text-3);

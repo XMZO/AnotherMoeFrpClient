@@ -317,6 +317,15 @@ func (c *Client) OfficialNodes(ctx context.Context, etag string) (nodes []api.Of
 	return out.Nodes, h.Get("ETag"), false, nil
 }
 
+// NodeTickets：POST /api/v1/official-nodes/{id}/tickets，领取 count 张官方节点的登录票据（id 是面板上的节点 ID）。
+func (c *Client) NodeTickets(ctx context.Context, nodeID string, count int) ([]api.NodeTicket, error) {
+	var out api.NodeTicketsResponse
+	if _, _, err := c.do(ctx, http.MethodPost, api.OfficialTicketsPath(nodeID), nil, api.NodeTicketsRequest{Count: count}, &out); err != nil {
+		return nil, err
+	}
+	return out.Tickets, nil
+}
+
 // CreateProfile：POST /api/v1/profiles。
 func (c *Client) CreateProfile(ctx context.Context, req api.CreateProfileRequest) (model.Profile, error) {
 	var out model.Profile

@@ -26,6 +26,7 @@ import (
 	"moefrp/client/internal/services"
 	"moefrp/client/internal/store"
 	"moefrp/client/internal/testhooks"
+	"moefrp/client/internal/tickets"
 	"moefrp/shared/api"
 	"moefrp/shared/apierr"
 )
@@ -70,6 +71,7 @@ func init() {
 	application.RegisterEvent[cloudsync.PushError](cloudsync.EventSyncError)
 	application.RegisterEvent[services.UpdateInfo](services.EventUpdateAvailable)
 	application.RegisterEvent[string](services.EventAnnouncement)
+	application.RegisterEvent[[]services.OfficialNodeView](services.EventOfficial)
 }
 
 var (
@@ -179,8 +181,11 @@ func main() {
 	api.SetProxy(settings.Get().NetworkProxy, settings.Get().ProxyURL)
 	hostname, _ := os.Hostname()
 
-	eng := engine.New(sink, engine.Options{})
+	// 官方节点每次登录都用一张新的登录票据，向面板领取，预取几张备用（docs/node-agent.md 第 12 节）
+	nodeTickets := tickets.New(api.NodeTickets)
+	eng := engine.New(sink, engine.Options{Tickets: nodeTickets})
 	tunnelSvc, tunnelCtl := services.NewTunnelService(eng, sink, profiles, settings)
+	tunnelCtl.SetTicketPool(nodeTickets)
 	tunnelCtl.SetOfficial(profiles.Sync().Official) // 上次缓存的官方节点，离线也能用
 	syncMgr := cloudsync.New(cloudsync.Options{
 		API: api, Creds: credstore.NewWinCred(credTarget), Profiles: profiles, Engine: eng, DeviceName: hostname,

@@ -66,6 +66,8 @@ export const codeMessages: Record<string, string> = {
   node_unreachable: '无法连接节点（{target}）',
   node_handshake_failed: '能连上 {target}，但登录失败：对方可能不是 frps，或协议、TLS 设置不一致',
   node_udp_unprobed: 'kcp / quic 走 UDP，无法测速',
+  node_ticket_failed: '无法领取官方节点的登录票据：{reason}',
+  official_denied: '官方节点拒绝了连接：{reason}',
 
   // ---- 代理状态：frps 拒绝了某个代理 ----
   proxy_port_in_use: '远程端口已被占用',

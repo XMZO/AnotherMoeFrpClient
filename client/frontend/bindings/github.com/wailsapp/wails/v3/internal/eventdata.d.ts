@@ -24,6 +24,7 @@ declare module "@wailsio/runtime" {
             "app:announcement": string;
             "auth:expired": apierr$0.Error | null;
             "auth:state": cloudsync$0.AccountState;
+            "official:nodes": services$0.OfficialNodeView[] | null;
             "sync:changed": cloudsync$0.Changed;
             "sync:conflict": cloudsync$0.Conflict;
             "sync:error": cloudsync$0.PushError;

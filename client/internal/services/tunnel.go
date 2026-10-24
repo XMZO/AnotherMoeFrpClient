@@ -28,7 +28,8 @@ type TunnelService struct {
 
 	mu       sync.Mutex
 	emit     Emitter
-	official []api.OfficialNode // 面板下发的官方节点（含凭证，不直接给前端）
+	official []api.OfficialNode // 面板下发的官方节点（含 frps token，不直接给前端）
+	tickets  TicketPool         // 官方节点的登录票据，见 SetTicketPool
 	pending  []engine.LogLine
 	onStatus []func(engine.Status)
 	stop     chan struct{}
@@ -136,7 +137,20 @@ func (t *TunnelService) logLoop() {
 	}
 }
 
-// OfficialNodeView 是给前端看的官方节点（不含 token 和凭证）。ID 带 official- 前缀，和运行栏里的节点 ID 一致。
+// TicketPool 是官方节点登录票据的预取池（client/internal/tickets.Pool）。
+type TicketPool interface {
+	Clear()
+	Retain(nodeIDs []string)
+}
+
+// SetTicketPool 设置票据池：退出登录时清空，官方节点列表变化时只保留还能用的节点的票据。
+func (c *TunnelControl) SetTicketPool(p TicketPool) {
+	c.t.mu.Lock()
+	c.t.tickets = p
+	c.t.mu.Unlock()
+}
+
+// OfficialNodeView 是给前端看的官方节点（不含 token）。ID 带 official- 前缀，和运行栏里的节点 ID 一致。
 type OfficialNodeView struct {
 	ID          string      `json:"id"`
 	Name        string      `json:"name"`
@@ -162,17 +176,26 @@ func (t *TunnelService) OfficialNodes() []OfficialNodeView {
 }
 
 // SetOfficial 换上新的官方节点列表（cloudsync 拉到变化时、启动时从缓存、退出登录时传 nil）。
-// 正在用官方节点运行时：节点信息变了（例如凭证重置）就重新连接，节点不能用了就停止。
+// 正在用官方节点运行时：节点的连接参数变了就重新连接，节点不能用了就停止。
 func (c *TunnelControl) SetOfficial(list []api.OfficialNode) {
 	t := c.t
 	nodes := make([]model.Node, 0, len(list))
+	ids := make([]string, 0, len(list))
 	for _, o := range list {
 		nodes = append(nodes, o.ToNode())
+		ids = append(ids, o.ID)
 	}
 	t.mu.Lock()
 	t.official = slices.Clone(list)
-	emit := t.emit
+	emit, pool := t.emit, t.tickets
 	t.mu.Unlock()
+	if pool != nil {
+		if list == nil {
+			pool.Clear() // 退出登录、换账号
+		} else {
+			pool.Retain(ids)
+		}
+	}
 	t.eng.SetExtraNodes(nodes)
 	if emit != nil {
 		emit(EventOfficial, t.OfficialNodes())

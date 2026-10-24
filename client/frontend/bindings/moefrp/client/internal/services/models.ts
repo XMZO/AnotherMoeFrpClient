@@ -62,7 +62,7 @@ export interface LogoutInfo {
 }
 
 /**
- * OfficialNodeView 是给前端看的官方节点（不含 token 和凭证）。ID 带 official- 前缀，和运行栏里的节点 ID 一致。
+ * OfficialNodeView 是给前端看的官方节点（不含 token）。ID 带 official- 前缀，和运行栏里的节点 ID 一致。
  */
 export interface OfficialNodeView {
     "id": string;

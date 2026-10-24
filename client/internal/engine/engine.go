@@ -26,6 +26,7 @@ import (
 	"github.com/fatedier/frp/pkg/util/xlog"
 
 	"moefrp/client/internal/apperr"
+	"moefrp/shared/api"
 	"moefrp/shared/apierr"
 	"moefrp/shared/model"
 )
@@ -89,6 +90,14 @@ type Options struct {
 	StopGrace    time.Duration // 用户点停止时 GracefulClose 的时长
 	PollInterval time.Duration // 代理状态轮询间隔
 	ProbeTimeout time.Duration // 连接失败时 TCP 探测的超时
+	// Tickets 给官方节点的每次登录提供登录票据（client/internal/tickets.Pool）。为空时官方节点登录不带票据。
+	Tickets TicketSource
+}
+
+// TicketSource 提供官方节点的登录票据：Peek 拿一张但不取走，连接建立、登录消息发出后再 Used。
+type TicketSource interface {
+	Peek(ctx context.Context, nodeID string) (string, error)
+	Used(nodeID, ticket string)
 }
 
 func (o *Options) complete() {
@@ -330,11 +339,15 @@ func (e *Engine) launchLocked(prep *Prepared) error {
 	if err := cs.ReplaceAll(prep.Proxies, prep.Visitors); err != nil {
 		return fail(err)
 	}
-	svc, err := frpclient.NewService(frpclient.ServiceOptions{
+	so := frpclient.ServiceOptions{
 		Common:                 prep.Common,
 		ConfigSourceAggregator: source.NewAggregator(cs),
 		UnsafeFeatures:         prep.Unsafe,
-	})
+	}
+	if id, ok := strings.CutPrefix(prep.Node.ID, api.OfficialNodePrefix); ok && e.opts.Tickets != nil {
+		so.ConnectorCreator = ticketConnector(e.opts.Tickets, id)
+	}
+	svc, err := frpclient.NewService(so)
 	if err != nil {
 		return fail(err)
 	}
@@ -601,12 +614,23 @@ func (e *Engine) explainLoginFailure(node model.Node, err error) *apierr.Error {
 	if strings.Contains(msg, "token in login doesn't match") || strings.Contains(msg, "authorization failed") {
 		return &apierr.Error{Code: apperr.NodeTokenInvalid, Message: msg}
 	}
-	pr := Probe(context.Background(), node, e.opts.ProbeTimeout)
-	ae := &apierr.Error{Code: apperr.NodeHandshakeFailed, Message: msg,
-		Details: map[string]any{"target": pr.Target}}
-	if !pr.OK {
+	if ae := ticketFailure(msg); ae != nil {
+		return ae
+	}
+	return classifyFailure(node, msg, Probe(context.Background(), node, e.opts.ProbeTimeout))
+}
+
+// classifyFailure 根据 TCP 探测结果解释登录或重连失败。
+// 官方节点能连上却登录失败，多半是节点拒绝了（会话已退出、凭证被重置、没有权限），把节点给的原因原样显示。
+func classifyFailure(node model.Node, msg string, pr PingResult) *apierr.Error {
+	ae := &apierr.Error{Code: apperr.NodeHandshakeFailed, Message: msg, Details: map[string]any{"target": pr.Target}}
+	switch {
+	case !pr.OK:
 		ae.Code = pr.Code
 		ae.Details["probe"] = pr.Message
+	case strings.HasPrefix(node.ID, api.OfficialNodePrefix):
+		ae.Code = apperr.OfficialDenied
+		ae.Details["reason"] = msg
 	}
 	return ae
 }
@@ -669,11 +693,11 @@ func (e *Engine) probeReconnect(r *run, node model.Node, msg string) {
 	if e.cur != r || r.stopping || e.status.State != StateReconnecting {
 		return
 	}
-	code := apperr.NodeHandshakeFailed
-	if !pr.OK {
-		code = pr.Code
+	if ae := ticketFailure(msg); ae != nil {
+		e.status.Error = ae
+	} else {
+		e.status.Error = classifyFailure(node, msg, pr)
 	}
-	e.status.Error = &apierr.Error{Code: code, Message: msg, Details: map[string]any{"target": pr.Target}}
 	e.notifyLocked()
 }
 

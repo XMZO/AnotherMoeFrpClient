@@ -72,7 +72,7 @@ node .\scripts\e2e\run-phase5.mjs       # 体验完善（约 2 分钟）
 ```toml
 [client]
 latest_version = "3.0.0"
-download_url   = "https://frplus.loli-con.cn/download/MoeFrp-3.0.0-windows-amd64.exe"
+download_url   = "https://frp.example.com/download/MoeFrp-3.0.0-windows-amd64.exe"
 sha256         = "<签名后 exe 的 SHA256>"
 release_notes  = "本次更新：……"
 # min_version 只在必须淘汰旧版本时提高（低于它的客户端账号和同步会停止，本地配置仍可启动）

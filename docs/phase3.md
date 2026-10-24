@@ -60,7 +60,7 @@ node .\scripts\e2e\run-phase3.mjs     # 约 5 分钟；结果在 scripts\e2e\out
 $env:MOEFRP_HOME="$env:TEMP\moefrp-try"; $env:MOEFRP_API_BASE="http://127.0.0.1:8080"; .\bin\MoeFrp-e2e.exe
 ```
 
-正式版的服务端地址固定为 `https://frplus.loli-con.cn`（`-ldflags "-X main.apiBase=..."` 可改），不要用正式版连本机服务端。
+正式版的服务端地址在构建时注入（`wails3 build API_BASE=...`，发布脚本读 `client/api-base.local`），不要用正式版连本机服务端。
 
 ## 实现了什么
 
@@ -110,7 +110,7 @@ $env:MOEFRP_HOME="$env:TEMP\moefrp-try"; $env:MOEFRP_API_BASE="http://127.0.0.1:
 
 e2e 构建里设置了 `MOEFRP_HOME` 时，单实例锁 ID 变成 `com.moefrp.client.e2e-<目录哈希>`，凭据目标名变成 `MoeFrp/session/e2e-<目录哈希>`，所以两个实例能同时运行、各存各的令牌（模拟两台机器）。正式构建固定为 `com.moefrp.client` 和 `MoeFrp/session`。
 
-**`main.go`**：服务端地址默认 `https://frplus.loli-con.cn`，可用 `-ldflags "-X main.apiBase=..."` 覆盖；创建 `apiclient`、`credstore`、`cloudsync`，注册 `AuthService`；应用启动后在后台 `Restore()`（用凭据自动登录）；窗口 `WindowFocus` 时 `Focus()`；退出时停止同步循环（不删凭据）。
+**`main.go`**：服务端地址在代码里只是占位值 `https://frp.example.com`，构建时用 `-X main.apiBase=...` 注入真实地址；创建 `apiclient`、`credstore`、`cloudsync`，注册 `AuthService`；应用启动后在后台 `Restore()`（用凭据自动登录）；窗口 `WindowFocus` 时 `Focus()`；退出时停止同步循环（不删凭据）。
 
 ### 前端（`client\frontend\src\`）
 
@@ -147,7 +147,7 @@ e2e 构建里设置了 `MOEFRP_HOME` 时，单实例锁 ID 变成 `com.moefrp.cl
 11. **`client_outdated` 时会话保留**、同步暂停（每小时再试一次），弹窗提示下载；本机的配置照常启动。登录接口也会返回 426（phase1.md 第 2 条），同样弹窗。
 12. **网络代理"跟随系统"只读手动代理**（"Internet 选项"里的地址和例外列表），不支持自动配置脚本（PAC）和"自动检测设置"；没设手动代理时退回 `HTTP_PROXY`/`HTTPS_PROXY` 环境变量。回环地址永远直连。自定义代理按 PLAN 留到 Phase 5。
 13. **e2e 构建的单实例锁和凭据目标名**：设置了 `MOEFRP_HOME` 时分别是 `com.moefrp.client.e2e-<8 位哈希>` 和 `MoeFrp/session/e2e-<8 位哈希>`，正式构建固定为 `com.moefrp.client` 和 `MoeFrp/session`。正式构建现在不认任何 `MOEFRP_*` 环境变量，原来说的"顺带当便携模式用"（phase2.md 第 1 条）也就没有了；以后要做便携模式需要单独设计。
-14. **服务端地址写死在客户端**：默认 `https://frplus.loli-con.cn`，界面上不能改，只能构建时 `-ldflags "-X main.apiBase=..."`；测试版可以用 `MOEFRP_API_BASE`。PLAN 没提要不要让用户改。
+14. **服务端地址编译进客户端**：仓库里只有占位值，真实地址构建时注入（`wails3 build API_BASE=...`），界面上不能改；测试版可以用 `MOEFRP_API_BASE`。PLAN 没提要不要让用户改。
 15. **新增客户端错误码**（`internal\apperr`，前端都有中文）：`server_unreachable`（连不上服务端，显示为离线）、`bad_response`、`not_logged_in`、`conflict_gone`。
 16. **新增事件** `sync:status`、`sync:remote-update`、`sync:error`、`auth:state`（PLAN 6.4 只列了 `sync:changed`、`sync:conflict`、`auth:expired`）。新增方法：`AuthService.Account`、`LogoutInfo`、`SyncStatus`、`SyncNow`，`ProfileService.Upload`、`Conflicts`、`RemoteUpdates`、`ApplyRemote`、`DismissRemote`；`ProfileService.Create` 多了 `origin` 参数。
 17. **推送失败的处理**：网络、会话、版本、限流以外的错误（例如超出 50 份上限、校验失败）记在这份配置上，列表显示"同步失败"（悬停看原因），等它再被修改时才重试；第一次上传就超出上限时自动改回本地配置并提示。

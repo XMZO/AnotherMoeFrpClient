@@ -941,7 +941,7 @@ session_ttl     = "720h"
 [client]
 latest_version = "3.0.0"
 min_version    = "3.0.0"
-download_url   = "https://frplus.loli-con.cn/download/MoeFrp-3.0.0-windows-amd64.exe"
+download_url   = "https://frp.example.com/download/MoeFrp-3.0.0-windows-amd64.exe"
 sha256         = ""
 announcement   = ""
 
@@ -961,7 +961,7 @@ is_api = false
 **Caddy**
 
 ```
-frplus.loli-con.cn {
+frp.example.com {
     reverse_proxy 127.0.0.1:8080
 }
 ```
@@ -1221,7 +1221,7 @@ frplus.loli-con.cn {
 2. **单设备登录是否保留？**（保留，做成配置项，默认开启，和旧版行为一致。）
 3. **新旧版本怎么切换？**（一次性切换，旧客户端统一收到"请升级"提示。新旧两套服务并行会导致两份数据各改各的。）
 4. **图片面板是否保留、默认开不开？**（保留，默认开启，图源由服务端下发。）
-5. **产品名、域名、版本号**：是否继续用"萌！FRP 高级客户端"、`frplus.loli-con.cn`，新版本号从 3.0.0 开始？
+5. **产品名、域名、版本号**：是否继续用"萌！FRP 高级客户端"和现有域名，新版本号从 3.0.0 开始？
 6. ~~能否接受 Wails v3 beta？~~ **已定**：Phase 0 验证通过，用 Wails v3，锁定 `v3.0.0-beta.31`。
 7. **代码签名证书的预算**：不签名的话，杀毒软件误报和 SmartScreen 警告都会明显更多。
 8. **是否要做官方节点**（9.1）？会影响分享功能的长期设计。

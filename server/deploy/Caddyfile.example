@@ -5,7 +5,7 @@
 #
 # Caddy 2.5 起访问日志默认会隐去 Authorization 头，不要打开全局选项 log_credentials。
 
-frplus.loli-con.cn {
+frp.example.com {
 	encode gzip
 
 	# 新客户端的 /api/v1/*、/healthz，以及旧客户端的 /api/*（统一返回"请升级"提示）

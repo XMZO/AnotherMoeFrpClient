@@ -108,7 +108,7 @@ func TestSystemProxyRules(t *testing.T) {
 		return p.String()
 	}
 	cases := map[string]string{
-		"https://frplus.loli-con.cn/api": "http://10.0.0.2:8443",
+		"https://frp.example.com/api": "http://10.0.0.2:8443",
 		"http://example.com/":            "http://10.0.0.1:8080",
 		"http://127.0.0.1:8080/":         "",
 		"http://localhost/":              "",

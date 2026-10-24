@@ -59,14 +59,14 @@ sudo systemctl enable --now moefrp
 curl -s http://127.0.0.1:8080/healthz
 sudo cp deploy/Caddyfile.example /etc/caddy/Caddyfile   # 按需修改域名
 sudo systemctl reload caddy
-curl -s https://frplus.loli-con.cn/healthz
+curl -s https://frp.example.com/healthz
 ```
 
-导入后库里已经有用户，所以不会生成初始化码：直接用**旧版的管理员账号**登录 `https://frplus.loli-con.cn/admin/`，在"用户"页抽查导入结果。旧库里没有管理员时，按 `server-ops.md`"管理后台"一节用 `admin_recovery = true` 建一个。
+导入后库里已经有用户，所以不会生成初始化码：直接用**旧版的管理员账号**登录 `https://frp.example.com/admin/`，在"用户"页抽查导入结果。旧库里没有管理员时，按 `server-ops.md`"管理后台"一节用 `admin_recovery = true` 建一个。
 
 ## 3. 验证
 
-- [ ] `curl -s https://frplus.loli-con.cn/api/v1/client/config` 返回新版本号、公告和图源。
+- [ ] `curl -s https://frp.example.com/api/v1/client/config` 返回新版本号、公告和图源。
 - [ ] 用新客户端登录一个**导入的老账号**，密码不变；云端配置都在。
 - [ ] 订阅一个**旧分享 ID**，能看到预览，并且能运行。
 - [ ] 旧客户端登录时弹出"请下载新版客户端：<下载地址>"。新服务对旧路径的处理是：`get_challenge` 返回假挑战码，`/api/login` 返回 426。

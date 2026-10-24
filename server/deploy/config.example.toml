@@ -21,7 +21,7 @@ log_level       = "info"
 # admin_recovery = false
 
 # frps 节点：节点访问面板用的地址（写进安装命令），不填时取打开后台时的地址
-# public_url = "https://frplus.loli-con.cn"
+# public_url = "https://frp.example.com"
 # 节点 agent 从这个仓库的 GitHub Release（agent-v* 标签）下载
 # agent_repo = "XMZO/AnotherMoeFrpClient"
 # 添加节点时"下载代理"的默认值（每个节点可以在后台单独改，安装和升级都用它）
@@ -34,7 +34,7 @@ log_level       = "info"
 latest_version = "3.0.0"
 # 低于它的客户端访问 /api/v1 下的接口会收到 426 client_outdated；留空表示不检查
 min_version    = "3.0.0"
-download_url   = "https://frplus.loli-con.cn/download/MoeFrp-3.0.0-windows-amd64.exe"
+download_url   = "https://frp.example.com/download/MoeFrp-3.0.0-windows-amd64.exe"
 sha256         = ""
 release_notes  = ""
 announcement   = ""

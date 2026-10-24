@@ -33,6 +33,12 @@ type Config struct {
 	AdminSetupCode string `toml:"admin_setup_code"`
 	AdminRecovery  bool   `toml:"admin_recovery"`
 
+	// 面板主密钥（节点票据、节点存储密钥都由它派生）在数据库里是加密保存的，加密用的密钥（docs/node-agent.md 第 4 节）：
+	// SecretKey（base64 的 32 字节，适合用环境变量 MOEFRP_SECRET_KEY 注入）优先；否则读 SecretKeyFile，
+	// 没有就生成一个（0600）。SecretKeyFile 默认是数据库旁边的 secret.key。数据库备份里只有密文。
+	SecretKey     string `toml:"secret_key"`
+	SecretKeyFile string `toml:"secret_key_file"`
+
 	// 节点 agent（docs/node-agent.md）：
 	// PublicURL 是节点访问面板用的地址（例如 https://frp.example.com），写进安装命令；
 	// 为空时按管理员访问后台时的地址生成。
@@ -133,6 +139,8 @@ var envVars = []struct {
 }{
 	{"LISTEN", func(c *Config, v string) error { c.Listen = v; return nil }},
 	{"DB_PATH", func(c *Config, v string) error { c.DBPath = v; return nil }},
+	{"SECRET_KEY", func(c *Config, v string) error { c.SecretKey = v; return nil }},
+	{"SECRET_KEY_FILE", func(c *Config, v string) error { c.SecretKeyFile = v; return nil }},
 	{"TRUSTED_PROXIES", func(c *Config, v string) error { c.TrustedProxies = splitList(v); return nil }},
 	{"SINGLE_SESSION", func(c *Config, v string) error {
 		b, err := strconv.ParseBool(v)

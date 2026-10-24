@@ -562,31 +562,11 @@ func (s *Service) authenticate(ctx context.Context, token, kind string) (Princip
 	if err != nil {
 		return Principal{}, err
 	}
-	sess := r.Session
-	if sess.Kind == "" {
-		sess.Kind = store.SessionClient
-	}
-	if sess.Kind != kind {
-		// 管理后台的令牌不能调客户端接口，客户端的令牌也不能进管理后台
-		return Principal{}, apierr.New(apierr.Unauthorized)
-	}
-	if sess.RevokedAt != nil {
-		switch sess.RevokeReason {
-		case store.RevokeReplaced:
-			return Principal{}, apierr.New(apierr.SessionReplaced)
-		case store.RevokeLogout:
-			return Principal{}, apierr.New(apierr.Unauthorized)
-		default:
-			return Principal{}, apierr.New(apierr.SessionExpired)
-		}
+	sess, err := s.checkSession(r, kind)
+	if err != nil {
+		return Principal{}, err
 	}
 	now := s.now()
-	if now.Unix() >= sess.ExpiresAt {
-		return Principal{}, apierr.New(apierr.SessionExpired)
-	}
-	if r.User.Status != model.StatusActive {
-		return Principal{}, apierr.New(apierr.AccountDisabled)
-	}
 	// 滑动过期：最多每 TouchInterval 写一次库
 	if now.Sub(time.Unix(sess.LastSeenAt, 0)) >= s.opt.TouchInterval {
 		sess.LastSeenAt = now.Unix()
@@ -597,6 +577,48 @@ func (s *Service) authenticate(ctx context.Context, token, kind string) (Princip
 		}
 	}
 	return Principal{User: r.User, Session: sess}, nil
+}
+
+// CheckClientSession 检查客户端会话现在是否还有效（实时通道用来发现被踢、改密码、账号停用），
+// 无效时返回和普通接口一样的错误（session_replaced、session_expired、account_disabled 等）。
+func (s *Service) CheckClientSession(ctx context.Context, sessionID string) error {
+	r, err := store.GetSessionByID(ctx, s.st.DB(), sessionID)
+	if errors.Is(err, store.ErrNotFound) {
+		return apierr.New(apierr.Unauthorized)
+	}
+	if err != nil {
+		return nil // 查库失败不算无效，下次再查
+	}
+	_, err = s.checkSession(r, store.SessionClient)
+	return err
+}
+
+func (s *Service) checkSession(r store.SessionWithUser, kind string) (store.Session, error) {
+	sess := r.Session
+	if sess.Kind == "" {
+		sess.Kind = store.SessionClient
+	}
+	if sess.Kind != kind {
+		// 管理后台的令牌不能调客户端接口，客户端的令牌也不能进管理后台
+		return store.Session{}, apierr.New(apierr.Unauthorized)
+	}
+	if sess.RevokedAt != nil {
+		switch sess.RevokeReason {
+		case store.RevokeReplaced:
+			return store.Session{}, apierr.New(apierr.SessionReplaced)
+		case store.RevokeLogout:
+			return store.Session{}, apierr.New(apierr.Unauthorized)
+		default:
+			return store.Session{}, apierr.New(apierr.SessionExpired)
+		}
+	}
+	if s.now().Unix() >= sess.ExpiresAt {
+		return store.Session{}, apierr.New(apierr.SessionExpired)
+	}
+	if r.User.Status != model.StatusActive {
+		return store.Session{}, apierr.New(apierr.AccountDisabled)
+	}
+	return sess, nil
 }
 
 // Logout 吊销当前会话。

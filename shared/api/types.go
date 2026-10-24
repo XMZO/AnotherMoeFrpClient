@@ -178,6 +178,10 @@ type OfficialNode struct {
 	User        string      `json:"user"` // frp 的 user，就是用户的昵称，代理名会加上这个前缀
 	Online      bool        `json:"online"`
 	Quota       quota.Quota `json:"quota"` // 当前用户在这个节点上的限额
+	// 用户访问自己映射在这个节点上的代理用的地址（客户端里可以复制）；没有的为空
+	Domain string `json:"domain,omitempty"`
+	IPv4   string `json:"ipv4,omitempty"`
+	IPv6   string `json:"ipv6,omitempty"`
 }
 
 // OfficialNodesResponse：GET /api/v1/official-nodes。

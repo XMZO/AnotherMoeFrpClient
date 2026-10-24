@@ -113,6 +113,7 @@ func (s *Server) nodeRoutes(mux *http.ServeMux) {
 	mux.Handle("GET "+p+"/nodes/{id}/tasks", authed(s.handleNodeTasks))
 	mux.Handle("GET "+p+"/tasks/{id}", authed(s.handleTask))
 	mux.Handle("PUT "+p+"/nodes/{id}/official", authed(s.handleNodeOfficial))
+	mux.Handle("PUT "+p+"/nodes/{id}/access", authed(s.handleNodeAccess))
 	mux.Handle("GET "+p+"/quotas", authed(s.handleGetQuotas))
 	mux.Handle("PUT "+p+"/quotas", authed(s.handleSetQuotas))
 	mux.Handle("GET "+p+"/users/{nickname}/nodes", authed(s.handleGetUserNodes))
@@ -660,4 +661,18 @@ func (s *Server) handleNodeTickets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, api.NodeTicketsResponse{Tickets: list})
+}
+
+// PUT /api/v1/admin/nodes/{id}/access：用户访问地址（域名；IPv4、IPv6 留空自动检测，"-" 不显示）。
+func (s *Server) handleNodeAccess(w http.ResponseWriter, r *http.Request) {
+	var req nodes.Access
+	if err := decodeJSON(r, &req); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	if err := s.nodes.SetAccess(r.Context(), nodeActor(r), r.PathValue("id"), req); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

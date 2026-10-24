@@ -158,6 +158,7 @@ func (s *Service) Serve(ctx context.Context, ws *websocket.Conn, node store.Node
 			if greeted {
 				s.gone[node.ID] = &goneState{at: s.now(), connectedAt: c.connectedAt, hello: c.hello}
 				s.drops[node.ID] = append(s.drops[node.ID], s.now())
+				s.offlineLater()
 			}
 		}
 		s.mu.Unlock()
@@ -271,6 +272,7 @@ func (s *Service) handleHello(ctx context.Context, c *agentConn, node store.Node
 		_ = store.FinishRunningUpgrade(ctx, s.st.DB(), node.ID, "failed", "", "节点重新连接时没有报告升级结果", now.Unix())
 	}
 	go s.afterHello(node.ID, h)
+	s.officialChanged()
 	return nil
 }
 

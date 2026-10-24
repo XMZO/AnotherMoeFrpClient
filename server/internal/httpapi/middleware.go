@@ -222,10 +222,12 @@ func (s *Server) accessLog(next http.Handler) http.Handler {
 // 没有带这个头的请求不检查（curl、监控等）；带了但无法解析的按过低处理。
 func (s *Server) versionCheck(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.minVersion != nil && strings.HasPrefix(r.URL.Path, api.Prefix+"/") && r.URL.Path != api.RouteClientConfig {
+		// 管理后台的接口不受客户端最低版本限制
+		if mv := s.clientMinVersion(); mv != nil && strings.HasPrefix(r.URL.Path, api.Prefix+"/") && r.URL.Path != api.RouteClientConfig &&
+			!strings.HasPrefix(r.URL.Path, adminAPIPrefix+"/") {
 			if v := r.Header.Get(api.HeaderClientVersion); v != "" {
 				cv, err := api.ParseVersion(v)
-				if err != nil || cv.Compare(*s.minVersion) < 0 {
+				if err != nil || cv.Compare(*mv) < 0 {
 					s.writeError(w, r, s.outdatedError())
 					return
 				}
@@ -236,7 +238,7 @@ func (s *Server) versionCheck(next http.Handler) http.Handler {
 }
 
 func (s *Server) outdatedError() *apierr.Error {
-	c := s.cfg.Client
+	c := s.clientCfg()
 	return apierr.New(apierr.ClientOutdated).
 		With(apierr.DetailLatestVersion, c.LatestVersion).
 		With(apierr.DetailMinVersion, c.MinVersion).

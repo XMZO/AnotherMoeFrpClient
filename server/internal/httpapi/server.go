@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"moefrp/server/internal/auth"
 	"moefrp/server/internal/config"
 	"moefrp/server/internal/legacy"
+	"moefrp/server/internal/live"
 	"moefrp/server/internal/nodes"
 	"moefrp/server/internal/profile"
 	"moefrp/server/internal/ratelimit"
@@ -73,7 +75,8 @@ type Server struct {
 	now      func() time.Time
 
 	trustedProxies []netip.Prefix
-	minVersion     *api.Version
+	live           *live.Hub         // 客户端实时通道
+	clientCfgState clientConfigState // 当前生效的客户端配置（配置文件，或后台改过的）
 
 	limLogin, limRegister, limReset, limUser, limPreview, limTickets *ratelimit.Limiter
 
@@ -143,14 +146,18 @@ func New(d Deps) (*Server, error) {
 		if err != nil {
 			return nil, err
 		}
-		s.nodes = nodes.New(nodes.Options{Store: d.Store, Log: s.log, Now: s.now, Source: src})
-	}
-	if v := d.Config.Client.MinVersion; v != "" {
-		mv, err := api.ParseVersion(v)
+		file := d.Config.SecretKeyFile
+		if file == "" {
+			file = filepath.Join(filepath.Dir(d.Config.DBPath), "secret.key")
+		}
+		kek, kekSrc, err := nodes.LoadKEK(d.Config.SecretKey, file)
 		if err != nil {
 			return nil, err
 		}
-		s.minVersion = &mv
+		s.nodes = nodes.New(nodes.Options{Store: d.Store, Log: s.log, Now: s.now, Source: src, KEK: kek, KEKSource: kekSrc})
+	}
+	if err := s.initLive(context.Background()); err != nil {
+		return nil, err
 	}
 	limits := DefaultLimits
 	if d.Limits != nil {
@@ -185,6 +192,13 @@ func (s *Server) routes() {
 	authed := func(h http.HandlerFunc) http.Handler {
 		return chain(h, s.requireAuth, s.limit(s.limUser, byUser))
 	}
+	// 改了云端配置、订阅：这个用户的其他设备马上同步；改了分享：订阅者马上同步
+	synced := func(h http.HandlerFunc) http.Handler {
+		return chain(h, s.requireAuth, s.limit(s.limUser, byUser), s.liveSyncAfter)
+	}
+	shared := func(h http.HandlerFunc) http.Handler {
+		return chain(h, s.requireAuth, s.limit(s.limUser, byUser), s.liveSubscribersAfter)
+	}
 
 	mux.HandleFunc("GET "+api.RouteHealthz, s.handleHealth)
 	mux.HandleFunc("GET "+api.RouteClientConfig, s.handleClientConfig)
@@ -198,25 +212,26 @@ func (s *Server) routes() {
 	mux.Handle("GET "+api.RouteMe, authed(s.handleMe))
 	mux.Handle("GET "+api.RouteState, authed(s.handleState))
 	mux.Handle("GET "+api.RouteOfficialNodes, authed(s.handleOfficialNodes))
+	mux.Handle("GET "+api.RouteClientLive, authed(s.handleLive))
 	mux.Handle("POST "+api.RouteOfficialTickets, chain(http.HandlerFunc(s.handleNodeTickets),
 		s.requireAuth, s.limit(s.limUser, byUser), s.limit(s.limTickets, bySession)))
 
-	mux.Handle("POST "+api.RouteProfiles, authed(s.handleCreateProfile))
+	mux.Handle("POST "+api.RouteProfiles, synced(s.handleCreateProfile))
 	mux.Handle("GET "+api.RouteProfile, authed(s.handleGetProfile))
-	mux.Handle("PUT "+api.RouteProfile, authed(s.handleUpdateProfile))
-	mux.Handle("DELETE "+api.RouteProfile, authed(s.handleDeleteProfile))
+	mux.Handle("PUT "+api.RouteProfile, synced(s.handleUpdateProfile))
+	mux.Handle("DELETE "+api.RouteProfile, synced(s.handleDeleteProfile))
 
 	mux.Handle("POST "+api.RouteShares, authed(s.handleCreateShare))
 	mux.Handle("GET "+api.RouteShares, authed(s.handleListShares))
-	mux.Handle("PATCH "+api.RouteShare, authed(s.handleUpdateShare))
-	mux.Handle("DELETE "+api.RouteShare, authed(s.handleRevokeShare))
-	mux.Handle("POST "+api.RouteShareRepublish, authed(s.handleRepublishShare))
+	mux.Handle("PATCH "+api.RouteShare, shared(s.handleUpdateShare))
+	mux.Handle("DELETE "+api.RouteShare, shared(s.handleRevokeShare))
+	mux.Handle("POST "+api.RouteShareRepublish, shared(s.handleRepublishShare))
 	mux.Handle("GET "+api.RouteSharePreview, chain(http.HandlerFunc(s.handleSharePreview),
 		s.requireAuth, s.limit(s.limUser, byUser), s.limit(s.limPreview, byUser)))
 
-	mux.Handle("POST "+api.RouteSubscriptions, authed(s.handleSubscribe))
-	mux.Handle("PUT "+api.RouteSubscription, authed(s.handleUpdateSubscription))
-	mux.Handle("DELETE "+api.RouteSubscription, authed(s.handleUnsubscribe))
+	mux.Handle("POST "+api.RouteSubscriptions, synced(s.handleSubscribe))
+	mux.Handle("PUT "+api.RouteSubscription, synced(s.handleUpdateSubscription))
+	mux.Handle("DELETE "+api.RouteSubscription, synced(s.handleUnsubscribe))
 	mux.Handle("GET "+api.RouteSubscriptionRuntime, authed(s.handleSubscriptionRuntime))
 
 	s.adminRoutes(mux)

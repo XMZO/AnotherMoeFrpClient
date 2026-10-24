@@ -25,11 +25,11 @@ import (
 )
 
 const (
-	tokenPrefix   = "mfn_"
-	enrollTTL     = 24 * time.Hour
-	maxNameLen    = 40
-	keepTasks     = 100
-	callTimeout   = 20 * time.Second // 要小于 http.Server 的 WriteTimeout（30 秒）
+	tokenPrefix = "mfn_"
+	enrollTTL   = 24 * time.Hour
+	maxNameLen  = 40
+	keepTasks   = 100
+	callTimeout = 20 * time.Second // 要小于 http.Server 的 WriteTimeout（30 秒）
 )
 
 // Actor 是发起操作的管理员。
@@ -45,6 +45,10 @@ type Options struct {
 	Now   func() time.Time
 	// Source 提供可安装、升级的 agent 版本（GitHub Release 或本地目录）。nil 时不能安装和升级
 	Source Source
+	// KEK 加密数据库里的面板主密钥（见 secret.go，LoadKEK）。KEKSource 是它的来源，显示在后台。
+	// 测试可以不设，这时随机生成一个（只在本进程有效）。
+	KEK       []byte
+	KEKSource string
 }
 
 // Service 管理所有节点。
@@ -54,17 +58,21 @@ type Service struct {
 	now func() time.Time
 	src Source
 
-	mu          sync.Mutex
-	conns       map[string]*agentConn
-	live        map[string]*liveState
-	pushed      map[string]string // 节点 ID → 上次推送的授权表哈希
-	gone        map[string]*goneState // 刚断开、还在宽限期内的节点（见 OfflineGrace）
-	drops       map[string][]time.Time // 节点最近 24 小时的断线时间
-	leased      map[string]time.Time   // 节点上次下发存储租约的时间
-	accessTimer *time.Timer
+	mu            sync.Mutex
+	conns         map[string]*agentConn
+	live          map[string]*liveState
+	pushed        map[string]string      // 节点 ID → 上次推送的授权表哈希
+	gone          map[string]*goneState  // 刚断开、还在宽限期内的节点（见 OfflineGrace）
+	drops         map[string][]time.Time // 节点最近 24 小时的断线时间
+	leased        map[string]time.Time   // 节点上次下发存储租约的时间
+	accessTimer   *time.Timer
+	hooks         Hooks
+	officialTimer *time.Timer
 
-	keyMu sync.Mutex
-	key   []byte // 节点凭证的面板密钥
+	keyMu     sync.Mutex
+	key       []byte // 节点凭证的面板密钥
+	kek       []byte
+	kekSource string
 }
 
 // New 创建 Service，并把服务端重启前没结束的命令任务标记为失败。
@@ -77,6 +85,12 @@ func New(o Options) *Service {
 	}
 	if s.now == nil {
 		s.now = time.Now
+	}
+	s.kek, s.kekSource = o.KEK, o.KEKSource
+	if s.kek == nil {
+		s.kek = make([]byte, 32)
+		_, _ = rand.Read(s.kek)
+		s.kekSource = "（临时）"
 	}
 	if err := store.FailStaleTasks(context.Background(), s.st.DB(), s.now().Unix()); err != nil {
 		s.log.Error("nodes: fail stale tasks", "err", err)
@@ -116,8 +130,8 @@ type View struct {
 	ID               string             `json:"id"`
 	Name             string             `json:"name"`
 	PublicAddr       string             `json:"publicAddr"`
-	DownloadMirror   string             `json:"downloadMirror"` // 安装和升级下载 agent 用的代理前缀，空表示直连
-	Status           string             `json:"status"`         // pending / online / offline
+	DownloadMirror   string             `json:"downloadMirror"`         // 安装和升级下载 agent 用的代理前缀，空表示直连
+	Status           string             `json:"status"`                 // pending / online / offline
 	Reconnecting     bool               `json:"reconnecting,omitempty"` // 刚断开，宽限期内还算在线（status 为 online）
 	Drops24h         int                `json:"drops24h"`               // 最近 24 小时断线次数，看节点稳不稳
 	Enrolled         bool               `json:"enrolled"`
@@ -141,6 +155,7 @@ type View struct {
 	Roles            []string           `json:"roles"`                 // 开放给哪些角色
 	Description      string             `json:"description,omitempty"` // 给用户看的说明
 	AccessSupported  bool               `json:"accessSupported"`       // agent 支持托管（1.4.0 起）；不知道版本时为 false
+	Access           AccessView         `json:"access"`                // 用户访问地址（域名、IPv4、IPv6）
 }
 
 // 节点状态。
@@ -163,7 +178,7 @@ func (s *Service) view(n store.Node, withConfig bool) View {
 		ID: n.ID, Name: n.Name, PublicAddr: n.PublicAddr, DownloadMirror: n.DownloadMirror, Enrolled: n.Enrolled,
 		EnrollExpiresAt: unixTime(n.EnrollExpiresAt), ConfigRev: n.ConfigRev, AppliedRev: n.AppliedRev,
 		ApplyError: n.ApplyError, PendingUninstall: n.PendingUninstall, LastIP: n.LastIP,
-		LastSeen: unixTime(n.LastSeenAt), CreatedAt: time.Unix(n.CreatedAt, 0).UTC(),
+		LastSeen: unixTime(n.LastSeenAt), CreatedAt: time.Unix(n.CreatedAt, 0).UTC(), Access: accessView(n),
 	}
 	if n.Info != "" && n.Info != "{}" {
 		var h agentproto.Hello
@@ -409,6 +424,7 @@ func (s *Service) Delete(ctx context.Context, by Actor, id string) error {
 	delete(s.gone, id)
 	delete(s.drops, id)
 	s.mu.Unlock()
+	s.officialChanged()
 	return nil
 }
 

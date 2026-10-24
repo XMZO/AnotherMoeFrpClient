@@ -17,6 +17,7 @@ type Node struct {
 	FrpsConfig       string // 旧的 TOML 配置，只用来转换成 Settings
 	Settings         string // 结构化 frps 配置（JSON，frpsset.Settings）
 	MachineID        string // agent 的机器指纹
+	Access           string // 用户访问地址（JSON，nodes.Access）
 	ConfigRev        int64
 	AppliedRev       int64
 	ApplyError       string
@@ -31,13 +32,13 @@ type Node struct {
 
 const nodeColumns = `id, name, public_addr, download_mirror, token_hash IS NOT NULL, enroll_expires_at, frps_config, config_rev,
 	applied_rev, apply_error, pending_uninstall, info, last_ip, last_seen_at, created_at, updated_at, official, roles, description,
-	settings, machine_id`
+	settings, machine_id, access`
 
 func scanNode(row interface{ Scan(...any) error }) (Node, error) {
 	var n Node
 	err := row.Scan(&n.ID, &n.Name, &n.PublicAddr, &n.DownloadMirror, &n.Enrolled, &n.EnrollExpiresAt, &n.FrpsConfig, &n.ConfigRev,
 		&n.AppliedRev, &n.ApplyError, &n.PendingUninstall, &n.Info, &n.LastIP, &n.LastSeenAt, &n.CreatedAt, &n.UpdatedAt,
-		&n.Official, &n.Roles, &n.Description, &n.Settings, &n.MachineID)
+		&n.Official, &n.Roles, &n.Description, &n.Settings, &n.MachineID, &n.Access)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Node{}, ErrNotFound
 	}
@@ -106,6 +107,11 @@ func SetNodeEnrolled(ctx context.Context, q Querier, id string, tokenHash []byte
 func ResetNodeEnrollment(ctx context.Context, q Querier, id string, enrollHash []byte, expires, now int64) error {
 	return execOne(ctx, q, `UPDATE nodes SET token_hash = NULL, enroll_hash = ?, enroll_expires_at = ?, machine_id = '', updated_at = ?
 		WHERE id = ?`, enrollHash, expires, now, id)
+}
+
+// SetNodeAccess 保存用户访问地址（JSON）。
+func SetNodeAccess(ctx context.Context, q Querier, id, access string, now int64) error {
+	return execOne(ctx, q, `UPDATE nodes SET access = ?, updated_at = ? WHERE id = ?`, access, now, id)
 }
 
 // SetNodeMachineID 记下 agent 的机器指纹（第一次上线时）。

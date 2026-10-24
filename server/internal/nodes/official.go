@@ -69,13 +69,26 @@ func (s *Service) credKey(ctx context.Context) ([]byte, error) {
 	if _, err := rand.Read(b); err != nil {
 		return nil, err
 	}
-	v, err := store.InsertSettingIfAbsent(ctx, s.st.DB(), settingCredKey, base64.StdEncoding.EncodeToString(b))
+	sealed, err := sealKey(s.kek, b)
 	if err != nil {
 		return nil, err
 	}
-	key, err := base64.StdEncoding.DecodeString(v)
-	if err != nil || len(key) < 32 {
-		return nil, errors.New("nodes: bad node_cred_key setting")
+	v, err := store.InsertSettingIfAbsent(ctx, s.st.DB(), settingCredKey, sealed)
+	if err != nil {
+		return nil, err
+	}
+	key, legacy, err := openKey(s.kek, v)
+	if err != nil {
+		return nil, err
+	}
+	if legacy { // 旧版明文保存的：改成加密保存
+		if sealed, err := sealKey(s.kek, key); err == nil {
+			if err := store.SetSetting(ctx, s.st.DB(), settingCredKey, sealed); err != nil {
+				s.log.Warn("nodes: re-seal node_cred_key", "err", err)
+			} else {
+				s.log.Info("nodes: node_cred_key is now stored encrypted", "kek", s.kekSource)
+			}
+		}
 	}
 	s.key = key
 	return key, nil
@@ -208,6 +221,7 @@ func (s *Service) AccessChanged() {
 		s.accessTimer = nil
 		s.mu.Unlock()
 		s.SyncAllAccess(context.Background(), false)
+		s.officialChanged() // 客户端里的节点列表和限额也跟着变
 	})
 }
 
@@ -304,6 +318,7 @@ func (s *Service) SetOfficial(ctx context.Context, by Actor, id string, roles []
 	if err := s.syncAccess(ctx, id, false); err != nil {
 		s.log.Warn("sync node access failed", "node", id, "err", err)
 	}
+	s.officialChanged()
 	return nil
 }
 
@@ -411,6 +426,7 @@ func (s *Service) ResetUserCredential(ctx context.Context, by Actor, nickname st
 	})
 	if err == nil {
 		s.AccessChanged()
+		s.ticketsInvalid(u.ID)
 	}
 	return err
 }
@@ -445,9 +461,11 @@ func (s *Service) OfficialFor(ctx context.Context, userID string) ([]api.Officia
 		if ci.Addr == "" {
 			continue // 不知道地址，下发了也连不上
 		}
+		acc := accessView(n).Effective
 		out = append(out, api.OfficialNode{
 			ID: n.ID, Name: n.Name, Description: n.Description, ServerAddr: ci.Addr, ServerPort: ci.Port,
 			User: u.Nickname, Online: s.Online(n.ID), Quota: d.quotaOf(u),
+			Domain: acc.Domain, IPv4: acc.IPv4, IPv6: acc.IPv6,
 		})
 	}
 	return out, nil

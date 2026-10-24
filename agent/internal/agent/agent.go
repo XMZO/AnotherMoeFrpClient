@@ -160,6 +160,7 @@ func (a *Agent) hello() agentproto.Hello {
 		ExecEnabled: a.cfg.Exec, AppliedRev: a.frps.AppliedRev(),
 		Features:  []string{agentproto.FeatureAccess, agentproto.FeatureTickets, agentproto.FeatureSettings},
 		MachineID: a.machine,
+		PublicIPs: sysinfo.PublicIPs(),
 	}
 	if a.pending != nil && !a.confirmed.Load() {
 		h.Upgrade = selfupdate.Result(a.pending, a.version)

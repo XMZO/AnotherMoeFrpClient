@@ -121,6 +121,9 @@ type Hello struct {
 	// MachineID 是机器指纹（/etc/machine-id 加盐哈希，不是原值）：面板据此派生节点的存储密钥，
 	// 也用它发现 agent 的令牌被拷到了别的机器上（FeatureSettings 起）。
 	MachineID string `json:"machineId,omitempty"`
+	// PublicIPs 是网卡上的公网地址（IPv4、IPv6，不含内网、回环、链路本地），面板据此给用户显示访问地址。
+	// 云服务器的公网 IPv4 常常是 NAT 出来的、不在网卡上，面板再加上它看到的连接来源地址（1.4.1 起）。
+	PublicIPs []string `json:"publicIps,omitempty"`
 	// Upgrade 是上一次升级的结果（升级后第一次连接时带上，之后为空）。
 	Upgrade *UpgradeResult `json:"upgrade,omitempty"`
 }

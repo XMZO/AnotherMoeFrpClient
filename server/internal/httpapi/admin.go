@@ -151,6 +151,7 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	authed := func(h http.HandlerFunc) http.Handler {
 		return chain(h, s.adminCSRF, s.requireAdmin, s.limit(s.limUser, byUser))
 	}
+	s.adminLiveRoutes(mux, authed)
 	mux.Handle("GET "+adminAPIPrefix+"/setup", chain(http.HandlerFunc(s.handleAdminSetupState), s.adminCSRF))
 	mux.Handle("POST "+adminAPIPrefix+"/setup", chain(http.HandlerFunc(s.handleAdminSetup), s.adminCSRF, s.limit(s.limReset, byIP)))
 	mux.Handle("POST "+adminAPIPrefix+"/login", chain(http.HandlerFunc(s.handleAdminLogin), s.adminCSRF, s.limit(s.limLogin, byIP)))
@@ -358,7 +359,7 @@ func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.nodes.AccessChanged() // 角色、停用都会改变官方节点的授权
+	s.sessionsChanged() // 角色、停用都会改变官方节点的授权；停用的账号在线设备马上下线
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -369,7 +370,7 @@ func (s *Server) handleAdminKick(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	s.nodes.AccessChanged() // 被踢的会话在官方节点上的票据和连接一起失效
+	s.sessionsChanged() // 被踢的会话在官方节点上的票据和连接一起失效，在线设备马上下线
 	writeJSON(w, http.StatusOK, map[string]any{"revokedSessions": n})
 }
 

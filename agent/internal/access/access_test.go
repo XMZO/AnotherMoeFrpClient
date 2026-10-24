@@ -104,9 +104,9 @@ func TestDecide(t *testing.T) {
 		t.Fatalf("重复使用：%q", r)
 	}
 	bad := map[string]string{
-		"没有票据":   "",
-		"静态凭证":   "mfc_whatever",
-		"别的节点":   nodeticket.Sign(nodeticket.NodeKey(testMaster, "node-2"), nodeticket.Claims{User: "u1", Session: "s", Node: "node-2", Gen: 1, Expires: time.Now().Unix() + 900, Nonce: "n1"}),
+		"没有票据":    "",
+		"静态凭证":    "mfc_whatever",
+		"别的节点":    nodeticket.Sign(nodeticket.NodeKey(testMaster, "node-2"), nodeticket.Claims{User: "u1", Session: "s", Node: "node-2", Gen: 1, Expires: time.Now().Unix() + 900, Nonce: "n1"}),
 		"声明的节点不对": ticket("sess-a", func(c *nodeticket.Claims) { c.Node = "node-2" }),
 	}
 	for what, tk := range bad {

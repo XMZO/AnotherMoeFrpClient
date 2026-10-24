@@ -574,6 +574,7 @@
     { id: 'nodes', label: '节点', icon: 'server', desc: '在面板上管理 frps 节点：配置、监控、升级、执行命令、卸载', render: pageNodes },
     { id: 'invites', label: '邀请码', icon: 'ticket', desc: '注册需要邀请码，每个码只能用一次', render: pageInvites },
     { id: 'users', label: '用户', icon: 'users', desc: '调整角色、停用账号、踢下线、生成密码重置码', render: pageUsers },
+    { id: 'clients', label: '客户端', icon: 'activity', desc: '在线设备、推送通知、远程控制隧道、客户端版本和公告', render: pageClients },
     { id: 'audit', label: '审计日志', short: '审计', icon: 'list', desc: '登录、注册、分享和管理操作的记录', render: pageAudit },
     { id: 'backup', label: '备份', icon: 'database', desc: '下载数据库快照', render: pageBackup },
   ];
@@ -1158,6 +1159,338 @@
     });
   }
 
+  // ---------- 客户端 ----------
+  // 在线设备（和面板保持实时通道的客户端）、推送通知、远程停止 / 重启隧道、让设备下线，
+  // 以及客户端版本、最低版本（强制更新）和公告，改了马上推给所有在线客户端（docs/client-live.md）。
+
+  const TUNNEL_STATES = {
+    idle: ['未运行', ''], connecting: ['连接中', 'info'], running: ['运行中', 'ok'],
+    reconnecting: ['重连中', 'warn'], stopping: ['停止中', ''], error: ['出错', 'danger'],
+  };
+  const PROFILE_KINDS = { local: '本地配置', cloud: '云端配置', subscription: '订阅' };
+  const NOTICE_LEVELS = [['info', '信息'], ['success', '成功'], ['warning', '警告'], ['error', '错误']];
+
+  // wide 让表单项在两列的 .form-grid 里占满一行
+  function wide(el) {
+    el.classList.add('span-all');
+    return el;
+  }
+
+  // cmpVer 比较 a.b.c 形式的版本号（预发布后缀忽略）
+  function cmpVer(a, b) {
+    const pa = String(a || '').split(/[-+]/)[0].split('.').map(Number);
+    const pb = String(b || '').split(/[-+]/)[0].split('.').map(Number);
+    for (let i = 0; i < 3; i++) {
+      const d = (pa[i] || 0) - (pb[i] || 0);
+      if (d) return d;
+    }
+    return 0;
+  }
+
+  async function pageClients(p) {
+    let list = [];
+    let latest = '';
+    let q = '';
+    let filter = 'all';
+    let loaded = false;
+    const selected = new Set();
+    const box = listCard();
+    const bulk = h('div', { class: 'bulk', hidden: true });
+
+    p.actions.append(
+      button('版本与公告', { icon: 'upgrade', onclick: () => clientConfigDialog() }),
+      button('推送通知', { icon: 'inbox', kind: 'primary', onclick: () => noticeDialog(selected.size ? { sessions: [...selected] } : null, list) }));
+    p.body.append(h('div', { class: 'fill' },
+      h('div', { class: 'toolbar' },
+        segmented([['all', '全部'], ['running', '隧道运行中'], ['outdated', '需要更新']], filter, (v, set) => {
+          filter = v;
+          set(v);
+          draw();
+        }, { label: '筛选' }),
+        searchBox('搜索昵称、设备、IP', (v) => { q = v; draw(); })),
+      bulk, box));
+    box.append(loadingBox());
+    p.onLayout(() => { if (loaded) draw(); });
+
+    async function load() {
+      try {
+        const res = await api('GET', '/clients');
+        if (!p.alive()) return;
+        list = res.clients || [];
+        latest = res.latestVersion || '';
+        loaded = true;
+        for (const id of [...selected]) if (!list.some((c) => c.sessionId === id)) selected.delete(id);
+        draw();
+      } catch (e) {
+        if (p.alive() && !loaded) box.replaceChildren(errorBox(e, load));
+      }
+    }
+
+    const outdated = (c) => latest && c.version && cmpVer(c.version, latest) < 0;
+    const tunnelOf = (c) => c.tunnel || {};
+    const whoOf = (c) => c.nickname + ' 的 ' + (c.hostname || '设备');
+
+    function draw() {
+      const rows = list.filter((c) => {
+        if (filter === 'running' && tunnelOf(c).state !== 'running') return false;
+        if (filter === 'outdated' && !outdated(c)) return false;
+        if (!q) return true;
+        return [c.nickname, c.hostname, c.ip, c.os].some((v) => String(v || '').toLowerCase().includes(q));
+      });
+      drawBulk();
+      if (!rows.length) {
+        fillList(box, stateBox(list.length ? 'search' : 'activity', list.length ? '没有匹配的设备' : '没有在线的客户端',
+          list.length ? null : '用户登录客户端后会出现在这里'));
+        return;
+      }
+      const check = (c) => {
+        const cb = h('input', { type: 'checkbox', 'aria-label': '选择 ' + whoOf(c) });
+        cb.checked = selected.has(c.sessionId);
+        cb.addEventListener('change', () => {
+          if (cb.checked) selected.add(c.sessionId);
+          else selected.delete(c.sessionId);
+          drawBulk();
+        });
+        return h('label', { class: 'check' }, cb);
+      };
+      const device = (c) => h('span', { class: 'nowrap' }, c.hostname || '未知设备', c.os ? h('span', { class: 'faint' }, ' · ' + c.os) : null);
+      const version = (c) => h('span', { class: 'nowrap' }, c.version || '—', outdated(c) ? [' ', badge('可更新', 'warn')] : null);
+      const tunnel = (c) => {
+        const t = tunnelOf(c);
+        const [label, kind] = TUNNEL_STATES[t.state] || ['未知', ''];
+        const where = [PROFILE_KINDS[t.profileKind], t.nodeName].filter(Boolean).join(' · ');
+        return h('span', { class: 'tunnel-cell', title: t.error || null },
+          badge(label, kind),
+          t.state && t.state !== 'idle' ? h('span', { class: 'muted' }, (where ? where + ' · ' : '') + (t.running || 0) + '/' + (t.proxies || 0) + ' 代理') : null);
+      };
+      const ops = (c) => h('div', { class: 'row-ops' },
+        iconButton('inbox', '推送通知', () => noticeDialog({ sessions: [c.sessionId] }, list)),
+        iconButton('refresh', '重启隧道', () => tunnelAction({ sessions: [c.sessionId] }, 'restart', whoOf(c))),
+        iconButton('power', '停止隧道', () => tunnelAction({ sessions: [c.sessionId] }, 'stop', whoOf(c))),
+        iconButton('logout', '让这台设备下线', () => kick([c.sessionId], whoOf(c)), 'danger'));
+      fillList(box,
+        dataList([{ label: '', cls: 'sel' }, { label: '用户' }, { label: '设备' }, { label: '版本' }, { label: '隧道' }, { label: 'IP' }, { label: '上线' }, { label: '', cls: 'actions' }], rows,
+          (c) => [
+            h('td', { class: 'sel' }, check(c)),
+            h('td', { class: 'nowrap' }, h('div', { class: 'user-cell' }, h('div', { class: 'avatar', 'aria-hidden': 'true' }, Array.from(c.nickname)[0] || '?'), c.nickname)),
+            h('td', null, device(c)),
+            h('td', null, version(c)),
+            h('td', null, tunnel(c)),
+            h('td', { class: 'nowrap mono' }, c.ip || '—'),
+            h('td', null, timeEl(c.connectedAt)),
+            h('td', { class: 'actions' }, ops(c))],
+          (c) => ({
+            lead: check(c),
+            title: [c.nickname, device(c)],
+            meta: [tunnel(c), version(c), c.ip],
+            extra: ops(c),
+          })),
+        h('div', { class: 'card-foot' }, rows.length === list.length ? '在线 ' + list.length + ' 台' : '显示 ' + rows.length + ' / ' + list.length + ' 台'));
+    }
+
+    function drawBulk() {
+      const n = selected.size;
+      bulk.hidden = !n;
+      if (!n) {
+        bulk.replaceChildren();
+        return;
+      }
+      const target = () => ({ sessions: [...selected] });
+      bulk.replaceChildren(
+        h('span', { class: 'bulk-n' }, '已选 ' + n + ' 台'),
+        button('推送通知', { small: true, icon: 'inbox', onclick: () => noticeDialog(target(), list) }),
+        button('重启隧道', { small: true, icon: 'refresh', onclick: () => tunnelAction(target(), 'restart', n + ' 台设备') }),
+        button('停止隧道', { small: true, icon: 'power', onclick: () => tunnelAction(target(), 'stop', n + ' 台设备') }),
+        button('下线', { small: true, icon: 'logout', kind: 'danger', onclick: () => kick([...selected], n + ' 台设备') }),
+        button('取消选择', { small: true, onclick: () => { selected.clear(); draw(); } }));
+    }
+
+    function tunnelAction(target, action, who) {
+      const stop = action === 'stop';
+      const reason = input({ placeholder: '可以不填，会显示给用户', maxlength: 200 });
+      const ok = button(stop ? '停止隧道' : '重启隧道', { kind: stop ? 'danger' : 'primary', type: 'submit' });
+      const d = openDialog({
+        title: (stop ? '停止 ' : '重启 ') + who + ' 的隧道',
+        titleIcon: stop ? 'power' : 'refresh',
+        body: [h('p', { class: 'dialog-text' }, stop
+          ? '客户端上正在运行的隧道马上停止，用户可以自己再点启动。'
+          : '客户端上正在运行的隧道马上断开重连（例如改了节点配置后让它立即生效）。没在运行的不受影响。'),
+        h('div', { class: 'gap' }), field('原因', reason)],
+        actions: [button('取消', { onclick: () => d.close() }), ok],
+        onSubmit: () => busy(ok, async () => {
+          try {
+            const res = await api('POST', '/clients/tunnel', { target, action, reason: reason.value });
+            toast('已发送给 ' + res.sent + ' 台设备');
+            d.close();
+          } catch (e) {
+            fail(e);
+          }
+        }),
+      });
+    }
+
+    async function kick(sessions, who) {
+      if (!(await confirmDialog({ title: '让 ' + who + ' 下线', danger: true, ok: '下线',
+        message: '这些设备上的登录马上失效，客户端回到未登录状态（本地配置不受影响），用户可以重新登录。要禁止登录请到“用户”页停用账号。' }))) return;
+      try {
+        const res = await api('POST', '/clients/kick', { sessions });
+        for (const id of sessions) selected.delete(id);
+        toast('已让 ' + res.revoked + ' 台设备下线');
+        load();
+      } catch (e) {
+        fail(e);
+      }
+    }
+
+    load();
+    autoRefresh(p, load);
+  }
+
+  // noticeDialog 推送通知。target 为空时在弹窗里选（全部在线 / 按角色）；有值时发给这些会话。
+  function noticeDialog(target, clients) {
+    const fixed = !!target;
+    let mode = 'all';
+    let level = 'info';
+    let display = 'toast';
+    const title = input({ placeholder: '例如：今晚 23:00 维护', maxlength: 80, required: true });
+    const content = h('textarea', { class: 'input textarea', rows: 4, maxlength: 2000, placeholder: '可以不填' });
+    const linkText = input({ placeholder: '例如：查看详情', maxlength: 20 });
+    const linkUrl = input({ placeholder: 'https://…', type: 'url' });
+    const stickyCb = h('input', { type: 'checkbox' });
+    const sticky = h('label', { class: 'check' }, stickyCb, '不自动消失（要用户手动关）');
+    const preview = h('div', { class: 'notice-preview' });
+    const err = h('div', { class: 'form-error', role: 'alert' });
+    const sendBtn = button('发送', { kind: 'primary', type: 'submit' });
+
+    const who = () => {
+      if (fixed) {
+        const n = target.sessions.length;
+        if (n === 1) {
+          const c = clients.find((x) => x.sessionId === target.sessions[0]);
+          return c ? c.nickname + ' 的 ' + (c.hostname || '设备') : '1 台设备';
+        }
+        return '选中的 ' + n + ' 台设备';
+      }
+      return { all: '所有在线客户端', user: '在线的普通用户', admin: '在线的管理员' }[mode];
+    };
+    const drawPreview = () => {
+      const lv = NOTICE_LEVELS.find((x) => x[0] === level)[1];
+      preview.className = 'notice-preview ' + level;
+      preview.replaceChildren(...[
+        h('div', { class: 'np-head' }, h('b', null, title.value.trim() || '标题'),
+          h('span', { class: 'np-tag' }, lv + (display === 'dialog' ? ' · 弹窗' : stickyCb.checked ? ' · 常驻' : ''))),
+        content.value.trim() ? h('div', { class: 'np-body' }, content.value.trim()) : null,
+        linkUrl.value.trim() ? h('div', { class: 'np-link' }, linkText.value.trim() || '打开链接') : null,
+      ].filter(Boolean));
+      sticky.hidden = display === 'dialog';
+      sendBtn.querySelector('.btn-label').textContent = '发送给' + who();
+    };
+    for (const el of [title, content, linkText, linkUrl]) el.addEventListener('input', drawPreview);
+    stickyCb.addEventListener('change', drawPreview);
+
+    const d = openDialog({
+      title: '推送通知',
+      titleIcon: 'inbox',
+      wide: true,
+      body: [
+        h('div', { class: 'form-grid' },
+          wide(fixed ? field('发给', h('div', { class: 'static' }, who()))
+            : field('发给', segmented([['all', '全部在线'], ['user', '普通用户'], ['admin', '管理员']], mode, (v, set) => { mode = v; set(v); drawPreview(); }, { label: '发给' }))),
+          field('级别', segmented(NOTICE_LEVELS, level, (v, set) => { level = v; set(v); drawPreview(); }, { label: '级别' })),
+          field('显示方式', segmented([['toast', '通知'], ['dialog', '弹窗']], display, (v, set) => { display = v; set(v); drawPreview(); }, { label: '显示方式' })),
+          wide(field('标题', title)),
+          wide(field('内容', content)),
+          field('按钮文字', linkText),
+          field('按钮链接', linkUrl, '在浏览器里打开，只能是 http(s)'),
+          wide(sticky),
+          wide(field('预览', preview))),
+        err],
+      actions: [button('取消', { onclick: () => d.close() }), sendBtn],
+      onSubmit: () => busy(sendBtn, async () => {
+        err.classList.remove('show');
+        const t = fixed ? target : mode === 'all' ? { all: true } : { roles: [mode] };
+        try {
+          const res = await api('POST', '/clients/notice', {
+            target: t,
+            notice: { title: title.value, content: content.value, level, display, linkText: linkText.value, linkUrl: linkUrl.value, sticky: stickyCb.checked },
+          });
+          toast(res.sent ? '已发送给 ' + res.sent + ' 台设备' : '没有在线的客户端收到', res.sent ? undefined : 'error');
+          d.close();
+        } catch (e) {
+          err.textContent = errText(e);
+          err.classList.add('show');
+        }
+      }),
+    });
+    drawPreview();
+    title.focus();
+  }
+
+  // clientConfigDialog 客户端版本、最低版本（强制更新）、下载地址、更新说明、公告。保存后立即推给所有在线客户端。
+  async function clientConfigDialog() {
+    let res;
+    try {
+      res = await api('GET', '/client-config');
+    } catch (e) {
+      fail(e);
+      return;
+    }
+    const c = res.config;
+    const latest = input({ value: c.latestVersion, placeholder: '例如 3.1.0' });
+    const min = input({ value: c.minVersion, placeholder: '不限制' });
+    const url = input({ value: c.downloadUrl, placeholder: 'https://…', type: 'url' });
+    const sha = input({ value: c.sha256, placeholder: '可以不填', class: 'input mono' });
+    const notes = h('textarea', { class: 'input textarea', rows: 3, placeholder: '有新版本时显示给用户' });
+    notes.value = c.releaseNotes || '';
+    const ann = h('textarea', { class: 'input textarea', rows: 3, placeholder: '每台客户端显示一次，内容变了再显示' });
+    ann.value = c.announcement || '';
+    const err = h('div', { class: 'form-error', role: 'alert' });
+    const save = button('保存并推送', { kind: 'primary', type: 'submit' });
+    const reset = button('恢复为配置文件', {
+      disabled: !res.fromPanel,
+      onclick: () => busy(reset, async () => {
+        try {
+          await api('DELETE', '/client-config');
+          toast('已恢复为配置文件里的设置，并推送给在线客户端');
+          d.close();
+        } catch (e) {
+          fail(e);
+        }
+      }),
+    });
+    const d = openDialog({
+      title: '客户端版本与公告',
+      titleIcon: 'upgrade',
+      wide: true,
+      body: [
+        h('p', { class: 'dialog-text' }, (res.fromPanel ? '当前是后台设置的。' : '当前来自配置文件。') +
+          '保存后马上推给 ' + res.online + ' 台在线客户端，其余的下次启动时拿到。'),
+        h('div', { class: 'form-grid' },
+          field('最新版本', latest, '比它旧的客户端提示更新'),
+          field('最低版本（强制更新）', min, '比它旧的客户端立即停用账号功能，直到更新'),
+          wide(field('下载地址', url)),
+          wide(field('SHA-256', sha, '客户端下载新版本后核对')),
+          wide(field('更新说明', notes)),
+          wide(field('公告', ann))),
+        err],
+      actions: [reset, h('span', { class: 'grow' }), button('取消', { onclick: () => d.close() }), save],
+      onSubmit: () => busy(save, async () => {
+        err.classList.remove('show');
+        try {
+          await api('PUT', '/client-config', {
+            latestVersion: latest.value, minVersion: min.value, downloadUrl: url.value, sha256: sha.value,
+            releaseNotes: notes.value, announcement: ann.value,
+          });
+          toast('已保存，并推送给在线客户端');
+          d.close();
+        } catch (e) {
+          err.textContent = errText(e);
+          err.classList.add('show');
+        }
+      }),
+    });
+  }
+
   // ---------- 审计日志 ----------
 
   const ACTIONS = {
@@ -1481,7 +1814,8 @@
     return schemaCache;
   }
 
-  // secretDialog 显示面板主密钥的指纹，可以轮换。
+  // secretDialog 显示面板主密钥的指纹、版本、保存方式，可以轮换。
+  // 轮换在同一个弹窗里分步完成（说明 → 需要时输入密码 → 结果），不叠弹窗；结果页并排显示旧指纹和新指纹。
   async function secretDialog() {
     let info;
     try {
@@ -1490,37 +1824,77 @@
       fail(e);
       return;
     }
-    const kv = h('dl', { class: 'kv' });
-    const draw = () => kv.replaceChildren(
-      h('dt', null, '指纹'), h('dd', null, h('code', null, info.fingerprint)),
-      h('dt', null, '上次轮换'), h('dd', null, info.rotatedAt ? fmtTime(info.rotatedAt) : h('span', { class: 'faint' }, '从未轮换（第一次使用时自动生成）')));
-    draw();
-    const rotate = button('轮换密钥', {
-      kind: 'danger',
-      onclick: async () => {
-        if (!(await confirmDialog({ title: '轮换节点密钥', danger: true, ok: '轮换',
-          message: '所有已签发的登录票据立即作废，在线用户会断开几秒、自动领新票据重连；所有节点换用新的存储密钥重新加密本地配置。确定继续？' }))) return;
-        await busy(rotate, async () => {
-          try {
-            info = await api('POST', '/node-secret/rotate');
-            draw();
-            toast('已轮换，正在推送到节点');
-          } catch (e) {
-            fail(e);
-          }
-        });
-      },
-    });
-    const d = openDialog({
-      title: '节点密钥',
-      titleIcon: 'key',
-      body: [h('p', { class: 'dialog-text' }, '面板主密钥用来签发节点登录票据、派生各节点的存储密钥。只存在面板数据库里，不会下发原值。'),
-        h('div', { class: 'gap' }), kv,
+    const wrap = h('div', { class: 'keybox' });
+    const foot = h('div', { class: 'foot-slot' });
+    const d = openDialog({ title: '节点密钥', titleIcon: 'key', body: wrap, actions: [foot] });
+
+    const fill = (el, ...kids) => el.replaceChildren(...kids.filter(Boolean));
+    const fp = (v, cls) => h('code', { class: 'fp' + (cls ? ' ' + cls : '') }, v || '—');
+    const kv = () => h('dl', { class: 'kv' },
+      h('dt', null, '指纹'), h('dd', null, info.fingerprint ? fp(info.fingerprint) : h('span', { class: 'faint' }, '解不开')),
+      h('dt', null, '版本'), h('dd', null, '第 ' + info.version + ' 版'),
+      h('dt', null, '上次轮换'), h('dd', null, info.rotatedAt ? fmtTime(info.rotatedAt) : h('span', { class: 'faint' }, '从未轮换（第一次使用时自动生成）')),
+      h('dt', null, '保存方式'), h('dd', null, info.protection));
+
+    function overview() {
+      fill(wrap, 
+        h('p', { class: 'dialog-text' }, '面板主密钥用来签发节点登录票据、派生各节点的存储密钥，是节点托管的根。不会下发原值，数据库里也只存密文。'),
+        info.error ? h('div', { class: 'callout warn' }, icon('alert', 16), h('span', null, info.error)) : null,
+        kv(),
         h('ul', { class: 'hints' },
-          h('li', null, '怀疑密钥泄露（例如数据库备份外泄）时轮换。'),
-          h('li', null, '离线节点上线后自动换用新密钥；节点离线超过 7 天，重启后要等面板连上才能启动 frps。'))],
-      actions: [button('关闭', { onclick: () => d.close() }), rotate],
-    });
+          h('li', null, '怀疑泄露（例如服务器被入侵、secret.key 外泄）时轮换。'),
+          h('li', null, '轮换后在线节点和在线客户端马上换用新密钥，用户会断开一两秒后自动重连；离线节点上线时自动换。')));
+      foot.replaceChildren(button('关闭', { onclick: () => d.close() }), button('轮换密钥…', { kind: 'danger', onclick: confirmStep }));
+    }
+
+    async function confirmStep() {
+      let elevated = false;
+      try {
+        elevated = (await api('GET', '/elevate')).elevated;
+      } catch (e) { /* 按没验证处理 */ }
+      const pw = input({ type: 'password', autocomplete: 'current-password', placeholder: '管理员密码' });
+      const err = h('div', { class: 'form-error', role: 'alert' });
+      fill(wrap, 
+        h('div', { class: 'callout warn' }, icon('alert', 16), h('span', null,
+          '轮换后：所有已签发的登录票据立即作废，在线用户断开一两秒后自动重连；所有节点换用新的存储密钥重新加密本地配置。这一步不能撤销。')),
+        h('dl', { class: 'kv' }, h('dt', null, '当前指纹'), h('dd', null, fp(info.fingerprint)), h('dt', null, '轮换后'), h('dd', null, '第 ' + (info.version + 1) + ' 版')),
+        elevated ? null : field('输入密码确认', pw),
+        err);
+      const ok = button('确认轮换', {
+        kind: 'danger',
+        onclick: () => busy(ok, async () => {
+          err.classList.remove('show');
+          try {
+            if (!elevated) {
+              await api('POST', '/elevate', { password: pw.value }, { noRedirect: true, noReauth: true });
+              elevated = true;
+            }
+            info = await api('POST', '/node-secret/rotate', undefined, { noReauth: true });
+            done();
+          } catch (e) {
+            err.textContent = errText(e);
+            err.classList.add('show');
+            if (!elevated) pw.select();
+          }
+        }),
+      });
+      foot.replaceChildren(button('返回', { onclick: overview }), ok);
+      (elevated ? ok : pw).focus();
+    }
+
+    function done() {
+      fill(wrap, 
+        h('div', { class: 'callout ok' }, icon('check', 16), h('span', null, '已轮换为第 ' + info.version + ' 版，正在推送到在线节点和客户端。')),
+        h('dl', { class: 'kv' },
+          h('dt', null, '之前'), h('dd', null, fp(info.previous, 'old')),
+          h('dt', null, '现在'), h('dd', null, fp(info.fingerprint, 'new')),
+          h('dt', null, '版本'), h('dd', null, '第 ' + info.version + ' 版'),
+          h('dt', null, '轮换时间'), h('dd', null, info.rotatedAt ? fmtTime(info.rotatedAt) : '—')));
+      foot.replaceChildren(button('完成', { kind: 'primary', onclick: () => d.close() }));
+      toast('密钥已轮换');
+    }
+
+    overview();
   }
 
   // ---------- 二次验证 ----------
@@ -2154,14 +2528,24 @@
       on.checked = (n.roles || []).includes('user');
       const desc = input({ value: n.description || '', maxlength: 200, placeholder: '例如：东京机房，晚高峰稳定（可选）' });
       const old = n.info && n.info.agentVersion && !n.accessSupported;
+      // 用户访问地址：域名手填；IP 留空自动检测，填 - 不显示
+      const acc = n.access || { set: {}, effective: {} };
+      const accSet = acc.set || {};
+      const auto = (v) => (v ? '自动：' + v : '没检测到，可以手填');
+      const accDomain = input({ value: accSet.domain || '', placeholder: '例如 sh1.example.com（可选）', maxlength: 253 });
+      const accV4 = input({ value: accSet.ipv4 || '', placeholder: auto(acc.detectedV4), maxlength: 15, class: 'input mono' });
+      const accV6 = input({ value: accSet.ipv6 || '', placeholder: auto(acc.detectedV6), maxlength: 45, class: 'input mono' });
       const save = button('保存', {
         kind: 'primary', small: true,
         onclick: () => busy(save, async () => {
           const access = { roles: on.checked ? ['user'] : [], description: desc.value };
           const accessChanged = on.checked !== (n.roles || []).includes('user') || access.description !== (n.description || '');
+          const addrs = { domain: accDomain.value, ipv4: accV4.value, ipv6: accV6.value };
+          const addrsChanged = addrs.domain.trim() !== (accSet.domain || '') || addrs.ipv4.trim() !== (accSet.ipv4 || '') || addrs.ipv6.trim() !== (accSet.ipv6 || '');
           try {
             await api('PATCH', '/nodes/' + encodeURIComponent(id), { name: name.value, publicAddr: addr.value, downloadMirror: mirror.value });
             if (accessChanged) await api('PUT', '/nodes/' + encodeURIComponent(id) + '/official', access);
+            if (addrsChanged) await api('PUT', '/nodes/' + encodeURIComponent(id) + '/access', addrs);
             toast(accessChanged ? '已保存，正在推送到节点' : '已保存');
             load(true);
           } catch (e) {
@@ -2239,7 +2623,10 @@
               h('div', { class: 'official-head' },
                 h('label', { class: 'check setting-title' }, on, '开放给普通用户'),
                 h('span', { class: 'muted' }, '管理员总能用；个别用户在"用户 → 节点权限"里单独允许或禁止')),
-              field('给用户看的说明', desc, '显示在客户端的节点列表里。限额在节点列表的"限额"里按用户组设置')))),
+              field('给用户看的说明', desc, '显示在客户端的节点列表里。限额在节点列表的"限额"里按用户组设置'),
+              h('div', { class: 'field-label access-title' }, '用户访问地址',
+                h('span', { class: 'muted' }, '显示在客户端，用户复制去访问自己的 tcp / udp 代理。IP 留空自动检测，填 - 不显示')),
+              h('div', { class: 'access-grid' }, field('域名', accDomain), field('IPv4', accV4), field('IPv6', accV6))))),
         h('section', { class: 'card' },
           h('div', { class: 'card-head' }, h('h2', null, '维护')),
           h('div', { class: 'card-body' }, h('div', { class: 'ops' },

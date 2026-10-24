@@ -53,6 +53,15 @@ type SessionWithUser struct {
 
 // GetSessionByTokenHash 按令牌哈希查会话和用户（包括已吊销、已过期的会话，由调用方判断）。
 func GetSessionByTokenHash(ctx context.Context, q Querier, tokenHash []byte) (SessionWithUser, error) {
+	return getSessionWithUser(ctx, q, "s.token_hash = ?", tokenHash)
+}
+
+// GetSessionByID 按会话 ID 查会话和用户（包括已吊销、已过期的会话，由调用方判断）。
+func GetSessionByID(ctx context.Context, q Querier, id string) (SessionWithUser, error) {
+	return getSessionWithUser(ctx, q, "s.id = ?", id)
+}
+
+func getSessionWithUser(ctx context.Context, q Querier, where string, arg any) (SessionWithUser, error) {
 	var (
 		r          SessionWithUser
 		deviceName sql.NullString
@@ -64,7 +73,7 @@ func GetSessionByTokenHash(ctx context.Context, q Querier, tokenHash []byte) (Se
 		        s.revoked_at, s.revoke_reason, s.kind,
 		        u.id, u.nickname, u.password_hash, u.role, u.status, u.state_version, u.created_at, u.updated_at
 		   FROM sessions s JOIN users u ON u.id = s.user_id
-		  WHERE s.token_hash = ?`, tokenHash).Scan(
+		  WHERE `+where, arg).Scan(
 		&r.Session.ID, &r.Session.UserID, &r.Session.TokenHash, &r.Session.InstallID, &deviceName, &r.Session.DeviceID,
 		&r.Session.CreatedAt, &r.Session.LastSeenAt, &r.Session.ExpiresAt, &revokedAt, &reason, &r.Session.Kind,
 		&r.User.ID, &r.User.Nickname, &r.User.PasswordHash, &r.User.Role, &r.User.Status,

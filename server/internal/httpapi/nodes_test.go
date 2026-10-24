@@ -1,9 +1,9 @@
 package httpapi
 
 import (
-	"encoding/base64"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -598,5 +598,32 @@ func TestNodeMachineAndSecret(t *testing.T) {
 	key3, _ := base64.StdEncoding.DecodeString(a3a.lease().Key)
 	if string(key3) == string(nodeticket.StoreKey([]byte("x"), id, "machine-2")) || len(key3) != 32 {
 		t.Fatal("存储密钥应由面板主密钥派生")
+	}
+}
+
+// TestNodeAccess：用户访问地址——IP 自动检测（网卡上的公网地址，内网的不算），管理员可以覆盖、填 "-" 不显示；
+// 格式不对时标出字段。
+func TestNodeAccess(t *testing.T) {
+	n := newNodeEnv(t)
+	id, code := n.createNode("上海")
+	en := n.enroll(code)
+	h := managedHello
+	h.PublicIPs = []string{"10.0.0.2", "fe80::1", "2001:db8:1::5"}
+	a, _, err := dialAgent(t, n.http.URL, en.Token, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	(&autoAgent{fakeAgent: a}).run()
+	eventually(t, "上线", func() bool { return n.node(id)["status"] == "online" })
+	acc := n.node(id)["access"].(map[string]any)
+	if acc["detectedV6"] != "2001:db8:1::5" || acc["detectedV4"] != nil {
+		t.Fatalf("自动检测：%v", acc)
+	}
+	n.admin("PUT", "/nodes/"+id+"/access", map[string]string{"domain": "http://x"}).apiErr(apierr.ValidationFailed)
+	n.admin("PUT", "/nodes/"+id+"/access", map[string]string{"ipv4": "2001:db8::1"}).apiErr(apierr.ValidationFailed)
+	n.admin("PUT", "/nodes/"+id+"/access", map[string]string{"domain": "SH1.Example.com", "ipv4": "203.0.113.9", "ipv6": "-"}).expect(http.StatusNoContent)
+	eff := n.node(id)["access"].(map[string]any)["effective"].(map[string]any)
+	if eff["domain"] != "sh1.example.com" || eff["ipv4"] != "203.0.113.9" || eff["ipv6"] != "" {
+		t.Fatalf("覆盖后：%v", eff)
 	}
 }

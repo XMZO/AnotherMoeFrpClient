@@ -10,10 +10,8 @@ package nodes
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -38,6 +36,7 @@ const (
 	leaseRenew = 6 * time.Hour
 
 	settingKeyRotatedAt = "node_cred_key_rotated_at"
+	settingKeyVersion   = "node_cred_key_version"
 )
 
 // settingsOf 解析节点的配置；没有（还没转换）时返回默认配置。
@@ -167,42 +166,64 @@ func (s *Service) pushLease(ctx context.Context, id string, force bool) error {
 
 // SecretInfo 是面板主密钥的概况（不含密钥本身）。
 type SecretInfo struct {
-	Fingerprint string     `json:"fingerprint"` // 密钥 SHA-256 的前 8 字节，看换没换
+	Fingerprint string     `json:"fingerprint"`        // 例如 K7QF-2M9X-AB3D-PQ7Z，看换没换
+	Previous    string     `json:"previous,omitempty"` // 轮换时：换之前的指纹
+	Version     int        `json:"version"`            // 第几版，每轮换一次加一
 	RotatedAt   *time.Time `json:"rotatedAt,omitempty"`
+	Protection  string     `json:"protection"`      // 数据库里怎么保存的，例如"AES-256-GCM 加密，密钥在 /data/secret.key"
+	Error       string     `json:"error,omitempty"` // 主密钥解不开时的原因（只能轮换）
 }
 
 // Secret 返回面板主密钥的概况。
 func (s *Service) Secret(ctx context.Context) (SecretInfo, error) {
-	key, err := s.credKey(ctx)
-	if err != nil {
-		return SecretInfo{}, err
+	out := SecretInfo{Version: 1, Protection: "AES-256-GCM 加密保存，加密密钥在 " + s.kekSource + "（不在数据库里）"}
+	if v, ok, _ := store.GetSetting(ctx, s.st.DB(), settingKeyVersion); ok {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			out.Version = n
+		}
 	}
-	sum := sha256.Sum256(key)
-	out := SecretInfo{Fingerprint: hex.EncodeToString(sum[:8])}
 	if v, ok, _ := store.GetSetting(ctx, s.st.DB(), settingKeyRotatedAt); ok {
 		if sec, err := strconv.ParseInt(v, 10, 64); err == nil {
 			t := time.Unix(sec, 0).UTC()
 			out.RotatedAt = &t
 		}
 	}
+	key, err := s.credKey(ctx)
+	if errors.Is(err, ErrKeyUnreadable) {
+		out.Error = err.Error()
+		return out, nil
+	}
+	if err != nil {
+		return SecretInfo{}, err
+	}
+	out.Fingerprint = fingerprint(key)
 	return out, nil
 }
 
 // RotateSecret 换一个新的面板主密钥：所有已签发的登录票据、节点的票据密钥和存储密钥立即作废，
-// 新的授权表和存储租约马上推给在线节点（节点用新密钥重新加密本地存储）；客户端会自动领新票据重连。
+// 新的授权表和存储租约马上推给在线节点（节点用新密钥重新加密本地存储）；在线客户端通过实时通道
+// 马上丢掉旧票据、领新票据重连。
 func (s *Service) RotateSecret(ctx context.Context, by Actor) (SecretInfo, error) {
+	prev, _ := s.Secret(ctx)
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return SecretInfo{}, err
 	}
-	err := s.st.Tx(ctx, func(tx *sql.Tx) error {
-		if err := store.SetSetting(ctx, tx, settingCredKey, base64.StdEncoding.EncodeToString(b)); err != nil {
+	sealed, err := sealKey(s.kek, b)
+	if err != nil {
+		return SecretInfo{}, err
+	}
+	err = s.st.Tx(ctx, func(tx *sql.Tx) error {
+		if err := store.SetSetting(ctx, tx, settingCredKey, sealed); err != nil {
 			return err
 		}
 		if err := store.SetSetting(ctx, tx, settingKeyRotatedAt, strconv.FormatInt(s.now().Unix(), 10)); err != nil {
 			return err
 		}
-		return s.audit(ctx, tx, by, store.AuditNodeSecret, "", nil)
+		if err := store.SetSetting(ctx, tx, settingKeyVersion, strconv.Itoa(prev.Version+1)); err != nil {
+			return err
+		}
+		return s.audit(ctx, tx, by, store.AuditNodeSecret, "", map[string]any{"from": prev.Fingerprint, "to": fingerprint(b), "version": prev.Version + 1})
 	})
 	if err != nil {
 		return SecretInfo{}, err
@@ -222,7 +243,10 @@ func (s *Service) RotateSecret(ctx context.Context, by Actor) (SecretInfo, error
 		}
 	}
 	s.SyncAllAccess(ctx, true)
-	return s.Secret(ctx)
+	s.ticketsInvalid("")
+	out, err := s.Secret(ctx)
+	out.Previous = prev.Fingerprint
+	return out, err
 }
 
 // ---- 旧配置转换 ----

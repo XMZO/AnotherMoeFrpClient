@@ -80,6 +80,8 @@ journalctl -u moefrp | grep 初始化码     # 第一次启动时打印，用来
 
 `moefrp-server backup --to <文件>` 内部用 `VACUUM INTO`，服务运行中也可以执行，目标文件已存在时报错。
 
+**`secret.key` 要单独备份**（默认在数据库旁边；Docker 部署在 `./data/secret.key`）：它加密数据库里的面板主密钥（节点票据、节点存储密钥的根，`docs/node-agent.md` 第 4 节），数据库备份里只有密文。只恢复数据库、没有 `secret.key` 的话主密钥解不开，只能在后台轮换一个新的（节点自动换用，在线用户重连一下）。也可以不用文件，用环境变量 `MOEFRP_SECRET_KEY`（base64 的 32 字节）注入。
+
 每天备份、保留 14 天（PLAN 7.11），用 systemd timer：
 
 ```ini

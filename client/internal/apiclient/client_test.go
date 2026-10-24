@@ -109,12 +109,12 @@ func TestSystemProxyRules(t *testing.T) {
 	}
 	cases := map[string]string{
 		"https://frp.example.com/api": "http://10.0.0.2:8443",
-		"http://example.com/":            "http://10.0.0.1:8080",
-		"http://127.0.0.1:8080/":         "",
-		"http://localhost/":              "",
-		"http://intranet/":               "",
-		"https://a.corp.example/":        "",
-		"http://192.168.1.10/":           "",
+		"http://example.com/":         "http://10.0.0.1:8080",
+		"http://127.0.0.1:8080/":      "",
+		"http://localhost/":           "",
+		"http://intranet/":            "",
+		"https://a.corp.example/":     "",
+		"http://192.168.1.10/":        "",
 	}
 	for in, want := range cases {
 		if got := get(in); got != want {

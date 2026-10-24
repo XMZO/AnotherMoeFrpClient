@@ -56,15 +56,20 @@ type Service struct {
 	now func() time.Time
 	src Source
 
-	mu    sync.Mutex
-	conns map[string]*agentConn
-	live  map[string]*liveState
+	mu          sync.Mutex
+	conns       map[string]*agentConn
+	live        map[string]*liveState
+	pushed      map[string]string // 节点 ID → 上次推送的授权表哈希
+	accessTimer *time.Timer
+
+	keyMu sync.Mutex
+	key   []byte // 节点凭证的面板密钥
 }
 
 // New 创建 Service，并把服务端重启前没结束的命令任务标记为失败。
 func New(o Options) *Service {
 	s := &Service{st: o.Store, log: o.Log, now: o.Now, src: o.Source,
-		conns: map[string]*agentConn{}, live: map[string]*liveState{}}
+		conns: map[string]*agentConn{}, live: map[string]*liveState{}, pushed: map[string]string{}}
 	if s.log == nil {
 		s.log = slog.Default()
 	}
@@ -126,8 +131,12 @@ type View struct {
 	NetRxRate        float64            `json:"netRxRate"` // 字节/秒
 	NetTxRate        float64            `json:"netTxRate"`
 	Client           *ClientInfo        `json:"client,omitempty"`
-	UpgradeTo        string             `json:"upgradeTo,omitempty"`  // 有新版本可升级时为目标版本
-	FrpsConfig       *string            `json:"frpsConfig,omitempty"` // 只在详情里返回
+	UpgradeTo        string             `json:"upgradeTo,omitempty"`   // 有新版本可升级时为目标版本
+	FrpsConfig       *string            `json:"frpsConfig,omitempty"`  // 只在详情里返回
+	Official         bool               `json:"official"`              // 下发给用户
+	Roles            []string           `json:"roles"`                 // 开放给哪些角色
+	Description      string             `json:"description,omitempty"` // 给用户看的说明
+	AccessSupported  bool               `json:"accessSupported"`       // agent 支持官方节点（不知道版本时为 false）
 }
 
 // 节点状态。
@@ -188,6 +197,8 @@ func (s *Service) view(n store.Node, withConfig bool) View {
 		b.Has(v.Info.Arch) && newer(b.Version, v.Info.AgentVersion) {
 		v.UpgradeTo = b.Version
 	}
+	v.Official, v.Roles, v.Description = n.Official, parseRoles(n.Roles), n.Description
+	v.AccessSupported = hasFeature(v.Info, agentproto.FeatureAccess)
 	if withConfig {
 		c := n.FrpsConfig
 		v.FrpsConfig = &c

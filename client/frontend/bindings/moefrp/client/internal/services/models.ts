@@ -13,6 +13,9 @@ import * as apierr$0 from "../../../shared/apierr/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as model$0 from "../../../shared/model/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as quota$0 from "../../../shared/quota/models.js";
 
 /**
  * ImageInfo 是一张已下载的图片。
@@ -56,6 +59,20 @@ export interface LogoutInfo {
      * 正在运行的云端配置名（退出会停止隧道），没有为空
      */
     "runningCloud": string;
+}
+
+/**
+ * OfficialNodeView 是给前端看的官方节点（不含 token 和凭证）。ID 带 official- 前缀，和运行栏里的节点 ID 一致。
+ */
+export interface OfficialNodeView {
+    "id": string;
+    "name": string;
+    "description"?: string;
+    "serverAddr": string;
+    "serverPort": number;
+    "user": string;
+    "online": boolean;
+    "quota": quota$0.Quota;
 }
 
 /**

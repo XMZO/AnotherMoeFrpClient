@@ -6,6 +6,9 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -21,7 +24,9 @@ import (
 	"moefrp/server/internal/auth"
 	"moefrp/server/internal/nodes"
 	"moefrp/shared/agentproto"
+	"moefrp/shared/api"
 	"moefrp/shared/apierr"
+	"moefrp/shared/quota"
 )
 
 const elevateTTL = 15 * time.Minute
@@ -103,6 +108,12 @@ func (s *Server) nodeRoutes(mux *http.ServeMux) {
 	mux.Handle("GET "+p+"/nodes/{id}/logs", authed(s.handleNodeLogs))
 	mux.Handle("GET "+p+"/nodes/{id}/tasks", authed(s.handleNodeTasks))
 	mux.Handle("GET "+p+"/tasks/{id}", authed(s.handleTask))
+	mux.Handle("PUT "+p+"/nodes/{id}/official", authed(s.handleNodeOfficial))
+	mux.Handle("GET "+p+"/quotas", authed(s.handleGetQuotas))
+	mux.Handle("PUT "+p+"/quotas", authed(s.handleSetQuotas))
+	mux.Handle("GET "+p+"/users/{nickname}/nodes", authed(s.handleGetUserNodes))
+	mux.Handle("PUT "+p+"/users/{nickname}/nodes", authed(s.handleSetUserNodes))
+	mux.Handle("POST "+p+"/users/{nickname}/reset-node-credential", authed(s.handleResetNodeCredential))
 }
 
 // ---- 面板地址 ----
@@ -209,7 +220,7 @@ func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
 func (s *Server) agentStatus() map[string]any {
 	src := s.nodes.Source()
 	if src == nil {
-		return map[string]any{"error": "面板没有配置 agent 来源，不能安装和升级节点"}
+		return map[string]any{"error": "面板没有配置 agent 来源（agent_repo / agent_dist_dir）"}
 	}
 	b, err := src.Cached()
 	out := map[string]any{"source": src.Kind()}
@@ -499,4 +510,102 @@ func (s *Server) handleNodeExec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"tasks": tasks})
+}
+
+// ---- 官方节点 ----
+
+type nodeOfficialRequest struct {
+	Official    bool     `json:"official"`
+	Roles       []string `json:"roles"`
+	Description string   `json:"description"`
+}
+
+type userNodesRequest struct {
+	Override *quota.Override  `json:"override"`
+	Grants   map[string]*bool `json:"grants"` // 节点 ID → true 允许 / false 禁止 / null 按角色
+}
+
+func (s *Server) handleNodeOfficial(w http.ResponseWriter, r *http.Request) {
+	var req nodeOfficialRequest
+	if err := decodeJSON(r, &req); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	if err := s.nodes.SetOfficial(r.Context(), nodeActor(r), r.PathValue("id"), req.Official, req.Roles, req.Description); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleGetQuotas(w http.ResponseWriter, r *http.Request) {
+	q, err := s.nodes.RoleQuotas(r.Context())
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, q)
+}
+
+func (s *Server) handleSetQuotas(w http.ResponseWriter, r *http.Request) {
+	var q quota.Roles
+	if err := decodeJSON(r, &q); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	if err := s.nodes.SetRoleQuotas(r.Context(), nodeActor(r), q); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleGetUserNodes(w http.ResponseWriter, r *http.Request) {
+	out, err := s.nodes.GetUserNodes(r.Context(), r.PathValue("nickname"))
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleSetUserNodes(w http.ResponseWriter, r *http.Request) {
+	var req userNodesRequest
+	if err := decodeJSON(r, &req); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	if err := s.nodes.SetUserNodes(r.Context(), nodeActor(r), r.PathValue("nickname"), req.Override, req.Grants); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleResetNodeCredential(w http.ResponseWriter, r *http.Request) {
+	if err := s.nodes.ResetUserCredential(r.Context(), nodeActor(r), r.PathValue("nickname")); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GET /api/v1/official-nodes：当前用户能用的官方节点。内容不变时返回 304（客户端每分钟同步一次）。
+func (s *Server) handleOfficialNodes(w http.ResponseWriter, r *http.Request) {
+	list, err := s.nodes.OfficialFor(r.Context(), principalFrom(r).User.ID)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	resp := api.OfficialNodesResponse{Nodes: list}
+	b, _ := json.Marshal(resp)
+	sum := sha256.Sum256(b)
+	etag := `"` + hex.EncodeToString(sum[:12]) + `"`
+	w.Header().Set("ETag", etag)
+	if r.Header.Get("If-None-Match") == etag {
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

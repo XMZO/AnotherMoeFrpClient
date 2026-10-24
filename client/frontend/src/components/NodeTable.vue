@@ -7,6 +7,7 @@ import type { Node } from '../api'
 import { useProfilesStore } from '../stores/profiles'
 import { useTunnelStore } from '../stores/tunnel'
 import { codeText, describeError } from '../errors'
+import { quotaText } from '../util'
 
 const profiles = useProfilesStore()
 const tunnel = useTunnelStore()
@@ -14,6 +15,7 @@ const message = useMessage()
 const drawer = ref<{ show: boolean; index: number }>({ show: false, index: -1 })
 const rows = computed(() => (profiles.current?.nodes ?? []).map((n, index) => ({ ...n, index })))
 const ro = computed(() => profiles.readonly('nodes'))
+const official = computed(() => (profiles.isSubscription ? [] : tunnel.official))
 
 async function remove(index: number) {
   try {
@@ -76,6 +78,24 @@ const actionsColumn: DataTableColumns<Node & { index: number }>[number] = {
       }}</n-text>
     </div>
     <n-data-table size="small" :columns="columns" :data="rows" :row-key="(r: any) => r.id" :bordered="false" />
+    <template v-if="official.length">
+      <div class="official-head">
+        <n-text strong>官方节点</n-text>
+        <n-text depth="3" style="font-size: 12px">由面板提供，登录后自动获得；在底部选择即可使用，代理名会自动加上你的昵称前缀</n-text>
+      </div>
+      <div class="official-list">
+        <div v-for="n in official" :key="n.id" class="official-item" :data-testid="`official-node-${n.name}`">
+          <div class="official-main">
+            <n-text strong>{{ n.name }}</n-text>
+            <n-tag size="small" :bordered="false" :type="n.online ? 'success' : 'default'">{{ n.online ? '在线' : '离线' }}</n-tag>
+            <n-text depth="3" style="font-size: 12px">{{ n.serverAddr }}:{{ n.serverPort }}</n-text>
+            <span class="official-ping"><component :is="renderPing({ id: n.id } as Node)" /></span>
+          </div>
+          <n-text v-if="n.description" depth="2" style="font-size: 13px">{{ n.description }}</n-text>
+          <n-text depth="3" style="font-size: 12px">你的限额：{{ quotaText(n.quota) }}</n-text>
+        </div>
+      </div>
+    </template>
     <NodeDrawer v-model:show="drawer.show" :index="drawer.index" />
   </div>
 </template>
@@ -85,5 +105,35 @@ const actionsColumn: DataTableColumns<Node & { index: number }>[number] = {
   margin-bottom: 8px;
   display: flex;
   align-items: center;
+}
+.official-head {
+  margin: 18px 0 8px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.official-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.official-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--n-border-color, rgba(128, 128, 128, 0.2));
+  border-radius: 6px;
+}
+.official-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.official-ping {
+  margin-left: auto;
+  font-size: 12px;
 }
 </style>

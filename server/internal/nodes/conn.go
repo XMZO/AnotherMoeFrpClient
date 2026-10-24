@@ -118,6 +118,7 @@ func (s *Service) Serve(ctx context.Context, ws *websocket.Conn, node store.Node
 		s.mu.Lock()
 		if s.conns[node.ID] == c {
 			delete(s.conns, node.ID)
+			delete(s.pushed, node.ID)
 		}
 		s.mu.Unlock()
 		c.mu.Lock()
@@ -237,6 +238,10 @@ func (s *Service) afterHello(id string, h agentproto.Hello) {
 			s.log.Error("pending uninstall failed", "node", id, "err", err)
 		}
 		return
+	}
+	// 先推授权表（官方节点会让 frps 挂上准入插件），再补发配置
+	if err := s.syncAccess(ctx, id, true); err != nil {
+		s.log.Warn("sync node access failed", "node", id, "err", err)
 	}
 	// 节点已经拒绝过的版本（apply_error 不为空）不自动重发：每次重发都会让 frps 重启再回滚。
 	// 管理员保存新配置时 apply_error 会被清空

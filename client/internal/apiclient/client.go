@@ -296,6 +296,27 @@ func (c *Client) State(ctx context.Context, stateVersion int64) (st api.StateRes
 	return st, false, nil
 }
 
+// OfficialNodes：GET /api/v1/official-nodes。etag 不为空时带 If-None-Match，没有变化返回 notModified=true。
+// 返回新的 ETag。
+func (c *Client) OfficialNodes(ctx context.Context, etag string) (nodes []api.OfficialNode, newETag string, notModified bool, err error) {
+	var hdr http.Header
+	if etag != "" {
+		hdr = http.Header{api.HeaderIfNoneMatch: {etag}}
+	}
+	var out api.OfficialNodesResponse
+	h, code, err := c.do(ctx, http.MethodGet, api.RouteOfficialNodes, hdr, nil, &out)
+	if err != nil {
+		return nil, "", false, err
+	}
+	if code == http.StatusNotModified {
+		return nil, etag, true, nil
+	}
+	if out.Nodes == nil {
+		out.Nodes = []api.OfficialNode{}
+	}
+	return out.Nodes, h.Get("ETag"), false, nil
+}
+
 // CreateProfile：POST /api/v1/profiles。
 func (c *Client) CreateProfile(ctx context.Context, req api.CreateProfileRequest) (model.Profile, error) {
 	var out model.Profile

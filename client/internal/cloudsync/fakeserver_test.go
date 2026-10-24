@@ -1,6 +1,7 @@
 package cloudsync
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -36,6 +37,9 @@ type fakeServer struct {
 	subs         []api.SubscriptionSummary
 	runtimes     map[string]api.SubscriptionRuntime
 	runtimeCalls int
+
+	official      []api.OfficialNode // nil 表示服务端没有这个接口（旧版本，返回 404）
+	officialCalls int
 }
 
 func newFakeServer() *fakeServer {
@@ -163,6 +167,21 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == api.RouteOfficialNodes:
+		if f.official == nil {
+			writeErr(w, apierr.New(apierr.NotFound))
+			return
+		}
+		f.officialCalls++
+		b, _ := json.Marshal(api.OfficialNodesResponse{Nodes: f.official})
+		etag := fmt.Sprintf(`"%x"`, sha256.Sum256(b))
+		w.Header().Set("ETag", etag)
+		if r.Header.Get(api.HeaderIfNoneMatch) == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(b)
 	case r.Method == http.MethodGet && r.URL.Path == api.RouteMe:
 		writeJSON(w, 200, api.MeResponse{User: f.user})
 	case r.Method == http.MethodPost && r.URL.Path == api.RouteLogout:

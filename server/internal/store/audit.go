@@ -35,6 +35,10 @@ const (
 	AuditNodeExec       = "node.exec"
 	AuditNodeUpgrade    = "node.upgrade"
 	AuditNodeRestart    = "node.restart"
+	AuditNodeOfficial   = "node.official"     // 官方节点设置（是否下发、开放给哪些角色）
+	AuditQuotaRoles     = "admin.quota_roles" // 角色限额
+	AuditUserNodes      = "admin.user_nodes"  // 单个用户的节点授权和限额覆盖
+	AuditUserNodeCred   = "admin.node_cred"   // 重置用户的节点凭证
 
 	AuditShareCreate    = "share.create"
 	AuditShareRepublish = "share.republish"

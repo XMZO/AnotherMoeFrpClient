@@ -82,12 +82,14 @@ func (ev *events) last(name string) (any, bool) {
 }
 
 type device struct {
-	m     *Manager
-	ps    *store.ProfileStore
-	creds *credstore.Memory
-	eng   *fakeEngine
-	ev    *events
-	dir   string
+	m        *Manager
+	offMu    sync.Mutex
+	official [][]api.OfficialNode // 每次 OnOfficial 回调收到的列表
+	ps       *store.ProfileStore
+	creds    *credstore.Memory
+	eng      *fakeEngine
+	ev       *events
+	dir      string
 }
 
 func newDevice(t *testing.T, srv *fakeServer, dir string) *device {
@@ -106,7 +108,11 @@ func newDevice(t *testing.T, srv *fakeServer, dir string) *device {
 	d := &device{ps: ps, creds: &credstore.Memory{}, eng: &fakeEngine{}, ev: &events{}, dir: dir}
 	d.m = New(Options{API: c, Creds: d.creds, Profiles: ps, Engine: d.eng, DeviceName: "test",
 		PollInterval: time.Hour, OfflineRetry: 50 * time.Millisecond, PushDelay: 30 * time.Millisecond,
-		Logf: t.Logf})
+		Logf: t.Logf, OnOfficial: func(n []api.OfficialNode) {
+			d.offMu.Lock()
+			d.official = append(d.official, n)
+			d.offMu.Unlock()
+		}})
 	d.m.SetEmitter(d.ev.emit)
 	t.Cleanup(d.m.Close)
 	return d
@@ -601,4 +607,59 @@ func mustGet(t *testing.T, ps *store.ProfileStore, id string) store.CachedProfil
 		t.Fatalf("profile %s not found", id)
 	}
 	return c
+}
+
+func (d *device) officialCalls() [][]api.OfficialNode {
+	d.offMu.Lock()
+	defer d.offMu.Unlock()
+	return append([][]api.OfficialNode(nil), d.official...)
+}
+
+func TestOfficialNodesSync(t *testing.T) {
+	srv := newFakeServer()
+	defer srv.Close()
+	srv.official = []api.OfficialNode{{ID: "n1", Name: "东京", ServerAddr: "tokyo.example.com", ServerPort: 7000, Token: "t",
+		User: "alice", Credential: "mfc_secret", Online: true}}
+	d := newDevice(t, srv, "")
+	d.login(t, true)
+
+	calls := d.officialCalls()
+	if len(calls) != 1 || len(calls[0]) != 1 || calls[0][0].Credential != "mfc_secret" {
+		t.Fatalf("登录后拉到官方节点：%+v", calls)
+	}
+	if st := d.ps.Sync(); len(st.Official) != 1 || st.OfficialETag == "" {
+		t.Fatalf("官方节点存进加密缓存：%+v", st)
+	}
+
+	// 没变化：304，不回调
+	d.syncNow(t)
+	if len(d.officialCalls()) != 1 {
+		t.Fatal("没变化时不应回调")
+	}
+	// 变化了：回调新列表
+	srv.mu.Lock()
+	srv.official = append(srv.official, api.OfficialNode{ID: "n2", Name: "香港", ServerAddr: "hk.example.com", ServerPort: 7000})
+	srv.mu.Unlock()
+	d.syncNow(t)
+	if c := d.officialCalls(); len(c) != 2 || len(c[1]) != 2 {
+		t.Fatalf("变化后回调：%+v", c)
+	}
+
+	// 退出登录：清空并回调 nil
+	if err := d.m.Logout(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if c := d.officialCalls(); c[len(c)-1] != nil || len(d.ps.Sync().Official) != 0 {
+		t.Fatal("退出登录应清空官方节点")
+	}
+}
+
+func TestOfficialNodesOldServer(t *testing.T) {
+	srv := newFakeServer() // official 为 nil：旧版服务端，接口 404
+	defer srv.Close()
+	d := newDevice(t, srv, "")
+	d.login(t, true)
+	if len(d.officialCalls()) != 0 || d.m.Status().State != StateSynced {
+		t.Fatal("旧版服务端没有官方节点接口时同步照常")
+	}
 }

@@ -4,6 +4,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"runtime"
@@ -11,10 +12,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	v1 "github.com/fatedier/frp/pkg/config/v1"
 	frplog "github.com/fatedier/frp/pkg/util/log"
 	frpversion "github.com/fatedier/frp/pkg/util/version"
 	golog "github.com/fatedier/golib/log"
 
+	"moefrp/agent/internal/access"
 	"moefrp/agent/internal/agentcfg"
 	"moefrp/agent/internal/execx"
 	"moefrp/agent/internal/frpsrv"
@@ -35,6 +38,7 @@ type Agent struct {
 	log     *slog.Logger
 	logs    *logbuf.Buffer
 	frps    *frpsrv.Manager
+	access  *access.Store
 	sampler sysinfo.Sampler
 	static  sysinfo.Static
 
@@ -62,6 +66,22 @@ func Run(ctx context.Context, version string) error {
 		frps:   frpsrv.New(p.FrpsConfig()),
 		static: sysinfo.ReadStatic(),
 		exit:   os.Exit,
+	}
+	// 官方节点：本机起 frps 插件，是官方节点时挂到 frps 上
+	acc, err := access.Load(p.Access())
+	if err != nil {
+		log.Error("读取授权用户表失败，按非官方节点处理", "err", err)
+	}
+	a.access = acc
+	pluginAddr, err := acc.Listen()
+	if err != nil {
+		return fmt.Errorf("启动准入插件：%w", err)
+	}
+	a.frps.Plugin = func() *v1.HTTPPluginOptions {
+		if !acc.Enabled() {
+			return nil
+		}
+		return &v1.HTTPPluginOptions{Name: "moefrp-access", Addr: pluginAddr, Path: "/handler", Ops: access.PluginOps}
 	}
 
 	pending, rollbackNow, err := selfupdate.Startup(p, version)
@@ -114,6 +134,7 @@ func (a *Agent) hello() agentproto.Hello {
 		OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Distro: a.static.Distro, Kernel: a.static.Kernel, Hostname: a.static.Hostname, BootTime: a.static.BootTime,
 		ExecEnabled: a.cfg.Exec, AppliedRev: a.frps.AppliedRev(),
+		Features: []string{agentproto.FeatureAccess},
 	}
 	if a.pending != nil && !a.confirmed.Load() {
 		h.Upgrade = selfupdate.Result(a.pending, a.version)
@@ -155,6 +176,25 @@ func (a *Agent) handle(ctx context.Context, method string, data json.RawMessage)
 
 	case agentproto.MethodFrpsRestart:
 		return struct{}{}, a.frps.Restart()
+
+	case agentproto.MethodAccessSync:
+		var t agentproto.AccessTable
+		if err := json.Unmarshal(data, &t); err != nil {
+			return nil, bad(err)
+		}
+		changed, err := a.access.Apply(t)
+		if err != nil {
+			return nil, err
+		}
+		res := agentproto.AccessResult{Users: len(t.Users)}
+		if changed {
+			// 挂上或去掉插件要重启 frps；还没有 frps 配置时等配置下发后自然生效
+			if err := a.frps.Restart(); err == nil {
+				res.Restarted = true
+			}
+			a.log.Info("官方节点开关变化", "enabled", t.Enabled, "frps_restarted", res.Restarted)
+		}
+		return res, nil
 
 	case agentproto.MethodFrpsProxies:
 		return agentproto.ProxiesResult{Proxies: a.frps.Proxies()}, nil

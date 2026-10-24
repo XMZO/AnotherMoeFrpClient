@@ -320,8 +320,8 @@
   }
 
   // openDialog 打开模态框。onSubmit 存在时整个框是一个表单，回车即提交。
-  function openDialog({ title, titleIcon, body, actions, wide, onSubmit, onClose }) {
-    const dlg = h('dialog', { class: 'dialog' + (wide ? ' wide' : '') });
+  function openDialog({ title, titleIcon, body, actions, wide, xwide, onSubmit, onClose }) {
+    const dlg = h('dialog', { class: 'dialog' + (wide ? ' wide' : '') + (xwide ? ' xwide' : '') });
     const close = () => dlg.open && dlg.close();
     const form = h(onSubmit ? 'form' : 'div', { class: 'dialog-form', novalidate: !!onSubmit },
       h('div', { class: 'dialog-head' },
@@ -885,7 +885,8 @@
           setting('角色', 'VIP 可以使用更多功能，管理员可以登录这个后台', roleSeg),
           setting('账号状态', u.status === 'disabled' ? '账号已停用，不能登录' : '停用后不能登录，数据保留', statusBtn),
           setting('踢下线', '注销 ' + u.nickname + ' 在桌面客户端上的所有登录，不影响账号本身', kickBtn),
-          setting('密码重置', '用户忘记密码时，生成一次性重置码发给对方', resetBtn)),
+          setting('密码重置', '用户忘记密码时，生成一次性重置码发给对方', resetBtn),
+          setting('节点权限', '能用哪些官方节点、限额是否和角色不同、重置节点凭证', button('设置', { small: true, icon: 'server', onclick: () => userNodesDialog(u) }))),
         secretBox,
       ],
       onClose: () => { if (changed) reload(); },
@@ -1023,6 +1024,165 @@
           h('code', null, '*.pre-migrate-时间.db'), '。日常备份建议定期在这里下载，或者备份整个数据卷。'))));
   }
 
+  // ---------- 官方节点：限额和用户权限 ----------
+
+  const ROLE_OPTIONS = [['user', '普通用户'], ['vip', 'VIP'], ['admin', '管理员']];
+  const PROXY_TYPES = ['tcp', 'udp', 'http', 'https', 'tcpmux', 'stcp', 'xtcp', 'sudp'];
+
+  function quotaText(q) {
+    if (!q) return '—';
+    return [q.maxProxies ? '最多 ' + q.maxProxies + ' 个代理' : '代理数不限', q.ports ? '端口 ' + q.ports : '端口不限',
+      q.types && q.types.length ? q.types.join('/') : '类型不限'].join(' · ');
+  }
+
+  // quotaFields 返回编辑一份限额的输入框和读取函数。compact 时不显示每个字段的说明（并排显示三个角色时用）。
+  function quotaFields(q, compact) {
+    const max = input({ type: 'number', min: 0, max: 10000, value: String(q.maxProxies || 0) });
+    const ports = input({ value: q.ports || '', placeholder: '不限，例如 10000-20000,30000' });
+    const boxes = PROXY_TYPES.map((t) => {
+      const cb = h('input', { type: 'checkbox', value: t });
+      cb.checked = !q.types || q.types.length === 0 || q.types.includes(t);
+      return h('label', { class: 'check' }, cb, t);
+    });
+    const read = () => {
+      const types = boxes.map((l) => l.querySelector('input')).filter((c) => c.checked).map((c) => c.value);
+      return { maxProxies: Number(max.value) || 0, ports: ports.value.trim(), types: types.length === PROXY_TYPES.length ? [] : types };
+    };
+    const el = h('div', { class: 'quota-fields' },
+      field('最多同时在线的代理', max, compact ? null : '0 表示不限'),
+      field('远程端口范围', ports, compact ? null : 'tcp / udp 代理的远程端口必须在范围内；留空不限（以节点 frps 的 allowPorts 为准）'),
+      field('允许的代理类型', h('div', { class: 'checks' }, boxes)));
+    return { el, read };
+  }
+
+  async function quotasDialog() {
+    let roles;
+    try {
+      roles = await api('GET', '/quotas');
+    } catch (e) {
+      fail(e);
+      return;
+    }
+    const editors = ROLE_OPTIONS.map(([v, label]) => [v, label, quotaFields(roles[v] || {}, true)]);
+    const err = h('div', { class: 'form-error', role: 'alert' });
+    const submit = button('保存', { kind: 'primary', type: 'submit' });
+    const d = openDialog({
+      title: '官方节点限额',
+      titleIcon: 'layers',
+      xwide: true,
+      body: [h('p', { class: 'dialog-text' }, '按角色设置用户在每个官方节点上能用的资源，由节点上的 agent 强制执行。个别用户可以在"用户 → 管理 → 节点权限"里单独调整。'),
+        h('div', { class: 'quota-grid' }, editors.map(([, label, f]) => h('section', { class: 'quota-role' }, h('h3', null, label), f.el))),
+        h('ul', { class: 'hints' },
+          h('li', null, '代理数：同一时间在一个节点上在线的代理，0 表示不限。'),
+          h('li', null, '远程端口：tcp / udp 代理的远程端口必须在范围内，例如 10000-20000,30000；留空不限（以节点 frps 的 allowPorts 为准）。'),
+          h('li', null, '代理类型：不勾选的类型会被节点拒绝。')),
+        err],
+      actions: [button('取消', { onclick: () => d.close() }), submit],
+      onSubmit: () => busy(submit, async () => {
+        err.classList.remove('show');
+        const body = {};
+        for (const [v, , f] of editors) body[v] = f.read();
+        try {
+          await api('PUT', '/quotas', body);
+          toast('限额已保存，正在推送到节点');
+          d.close();
+        } catch (e) {
+          if (e.handled) return;
+          err.textContent = errText(e);
+          err.classList.add('show');
+        }
+      }),
+    });
+  }
+
+  async function userNodesDialog(u) {
+    const nick = encodeURIComponent(u.nickname);
+    let data;
+    try {
+      data = await api('GET', '/users/' + nick + '/nodes');
+    } catch (e) {
+      fail(e);
+      return;
+    }
+    const ov = data.override || {};
+    const custom = h('input', { type: 'checkbox' });
+    custom.checked = !!(data.override && (ov.maxProxies != null || ov.ports != null || ov.types != null));
+    const base = Object.assign({}, data.roleQuota, data.effective);
+    const qf = quotaFields(base);
+    qf.el.hidden = !custom.checked;
+    custom.addEventListener('change', () => { qf.el.hidden = !custom.checked; });
+
+    const official = data.nodes.filter((x) => x.official);
+    const selects = official.map((x) => {
+      const roleOK = (x.roles || []).includes(data.role);
+      const sel = h('select', { class: 'input select' },
+        h('option', { value: '' }, '按角色（' + (roleOK ? '可用' : '不可用') + '）'),
+        h('option', { value: 'allow' }, '允许'), h('option', { value: 'deny' }, '禁止'));
+      sel.value = x.grant === true ? 'allow' : x.grant === false ? 'deny' : '';
+      return [x, sel];
+    });
+    const resetBtn = button('重置节点凭证', {
+      small: true,
+      onclick: async (e) => {
+        const b = e.currentTarget;
+        if (!(await confirmDialog({ title: '重置节点凭证', ok: '重置', danger: true,
+          message: u.nickname + ' 的旧凭证在所有官方节点上立即失效（正在运行的隧道不再接受新连接），客户端下次同步时自动拿到新凭证。用于凭证泄露。' }))) return;
+        await busy(b, async () => {
+          try {
+            await api('POST', '/users/' + nick + '/reset-node-credential');
+            toast('已重置');
+          } catch (ex) {
+            fail(ex);
+          }
+        });
+      },
+    });
+    const err = h('div', { class: 'form-error', role: 'alert' });
+    const submit = button('保存', { kind: 'primary', type: 'submit' });
+    const d = openDialog({
+      title: u.nickname + ' 的节点权限',
+      titleIcon: 'server',
+      wide: true,
+      body: [
+        h('h3', { class: 'sub-head' }, '官方节点'),
+        official.length ? h('div', { class: 'grant-list' }, selects.map(([x, sel]) => h('div', { class: 'grant-row' },
+          h('div', null, h('div', { class: 'setting-title' }, x.name), h('div', { class: 'setting-desc' },
+            '开放给：' + ((x.roles || []).map((r) => (ROLE_OPTIONS.find(([v]) => v === r) || [r, r])[1]).join('、') || '无') +
+            ' · 现在' + (x.allowed ? '可用' : '不可用'))), sel)))
+          : h('p', { class: 'muted' }, '还没有官方节点。在节点的"设置"里开启。'),
+        h('div', { class: 'gap' }),
+        h('h3', { class: 'sub-head' }, '限额'),
+        h('p', { class: 'cell-sub' }, '角色（' + ((ROLE_OPTIONS.find(([v]) => v === data.role) || [0, data.role])[1]) + '）的限额：' + quotaText(data.roleQuota)),
+        h('label', { class: 'check' }, custom, '给这个用户单独设置'),
+        qf.el,
+        h('div', { class: 'gap' }),
+        h('div', { class: 'setting' }, h('div', { class: 'setting-text' }, h('div', { class: 'setting-title' }, '节点凭证'),
+          h('div', { class: 'setting-desc' }, '客户端登录后自动获取，用于连接官方节点')), resetBtn),
+        err,
+      ],
+      actions: [button('取消', { onclick: () => d.close() }), submit],
+      onSubmit: () => busy(submit, async () => {
+        err.classList.remove('show');
+        const grants = {};
+        for (const [x, sel] of selects) grants[x.nodeId] = sel.value === 'allow' ? true : sel.value === 'deny' ? false : null;
+        let override = null;
+        if (custom.checked) {
+          const q = qf.read();
+          override = { maxProxies: q.maxProxies, ports: q.ports, types: q.types };
+        }
+        try {
+          await api('PUT', '/users/' + nick + '/nodes', { override, grants });
+          toast('已保存，正在推送到节点');
+          d.close();
+        } catch (e) {
+          if (e.handled) return;
+          err.textContent = errText(e);
+          err.classList.add('show');
+        }
+      }),
+    });
+  }
+
   // ---------- 二次验证 ----------
 
   // reauthDialog 让管理员重新输入密码，15 分钟内的敏感操作不用再输。返回是否成功。
@@ -1152,6 +1312,7 @@
     let data = null;
     p.actions.append(
       button('刷新', { icon: 'refresh', onclick: () => load() }),
+      button('限额', { icon: 'layers', onclick: () => quotasDialog() }),
       button('执行命令', { icon: 'terminal', onclick: () => data && execDialog(data.nodes) }),
       button('添加节点', { kind: 'primary', icon: 'plus', onclick: () => createNodeDialog(() => load(), data) }));
     p.body.append(notice, box);
@@ -1188,7 +1349,7 @@
             const [fl, fk] = fs ? (FRPS_STATE[fs.state] || [fs.state]) : [null];
             const href = '#/nodes/' + encodeURIComponent(n.id);
             return h('tr', null,
-              h('td', null, h('a', { class: 'node-link', href }, n.name),
+              h('td', null, h('a', { class: 'node-link', href }, n.name), n.official ? [' ', badge('官方', 'accent')] : null,
                 h('div', { class: 'cell-sub' }, [info.hostname, n.client && n.client.addr].filter(Boolean).join(' · ') || '—')),
               h('td', null, nodeStatusBadge(n),
                 h('div', { class: 'cell-sub' }, n.status === 'online' ? '' : n.lastSeen ? ['最后在线 ', timeEl(n.lastSeen)] : '')),
@@ -1510,6 +1671,46 @@
       });
     }
 
+    // officialCard 是"官方节点"设置：是否下发给用户、开放给哪些角色、给用户看的说明。
+    function officialCard() {
+      const on = h('input', { type: 'checkbox' });
+      on.checked = !!n.official;
+      const roleBoxes = ROLE_OPTIONS.map(([v, label]) => {
+        const cb = h('input', { type: 'checkbox', value: v });
+        cb.checked = (n.roles || []).includes(v);
+        return h('label', { class: 'check' }, cb, label);
+      });
+      const desc = input({ value: n.description || '', maxlength: 200, placeholder: '例如：东京机房，晚高峰稳定（可选）' });
+      const old = n.info && n.info.agentVersion && !n.accessSupported;
+      const save = button('保存', {
+        kind: 'primary',
+        onclick: () => busy(save, async () => {
+          if (on.checked && !n.official && !(await confirmDialog({ title: '设为官方节点', ok: '开启',
+            message: '开启后，这个节点只接受 MoeFrp 用户用自己的节点凭证登录：直接用 token 连接的 frpc 会被拒绝。节点上的 frps 会重启一次。' }))) return;
+          try {
+            await api('PUT', '/nodes/' + encodeURIComponent(id) + '/official', {
+              official: on.checked, roles: roleBoxes.map((l) => l.querySelector('input')).filter((c) => c.checked).map((c) => c.value),
+              description: desc.value,
+            });
+            toast(on.checked ? '已设为官方节点，正在推送到节点' : '已保存');
+            load(true);
+          } catch (e) {
+            fail(e);
+          }
+        }),
+      });
+      return h('section', { class: 'card mb' }, h('div', { class: 'card-head' }, h('h2', null, '官方节点'),
+        h('span', null, '下发给用户，用户在客户端里直接选')), h('div', { class: 'card-body' },
+        old ? h('div', { class: 'callout warn mb' }, icon('alert', 16), h('span', null, '节点上的 agent（' + n.info.agentVersion + '）不支持官方节点，请先在"维护"里升级。')) : null,
+        h('label', { class: 'check' }, on, '下发给用户（官方节点）'),
+        h('div', { class: 'gap' }),
+        field('开放给', h('div', { class: 'checks' }, roleBoxes), '这些角色的用户能用；个别用户可以在"用户 → 管理 → 节点权限"里单独允许或禁止'),
+        h('div', { class: 'gap' }),
+        field('说明', desc, '显示在客户端的节点列表里'),
+        h('p', { class: 'cell-sub' }, '用户用自己的节点凭证登录，frp 的 user 固定为昵称（代理名带昵称前缀，不会互相冲突）；限额在节点页的"限额"里按角色设置。'),
+        h('div', { class: 'row-end' }, save)));
+    }
+
     function tabSettings() {
       const name = input({ value: n.name, maxlength: 40 });
       const addr = input({ value: n.publicAddr, placeholder: n.lastIp || 'frp.example.com', maxlength: 253 });
@@ -1592,6 +1793,7 @@
             field('下载代理', h('div', null, mirror, mirrorList), '升级 agent 和重新生成安装命令时下载用的地址前缀，留空直连 GitHub。' +
               '面板改用本地目录提供 agent 时不需要。'),
             h('div', { class: 'row-end' }, save))),
+        officialCard(),
         h('section', { class: 'card mb' }, h('div', { class: 'card-head' }, h('h2', null, '维护')), h('div', { class: 'card-body' },
           setting('重启 frps', '用当前配置重启，客户端会短暂断开', op('重启', '/restart', 'frps 已重启')),
           setting('升级 agent', n.upgradeTo ? '当前 ' + n.info.agentVersion + '，可升级到 ' + n.upgradeTo + '。升级失败会自动回滚。' : '已是最新版本',

@@ -63,6 +63,9 @@ type Node struct {
 	Protocol   string `json:"protocol,omitempty"` // tcp/kcp/quic/websocket/wss，默认 tcp
 	TLS        *bool  `json:"tls,omitempty"`      // nil 表示跟随 frp 默认（开启）
 	ProxyURL   string `json:"proxyURL,omitempty"` // 通过代理连接 frps，可选
+	// Metadatas 对应 frpc 的 metadatas，登录时发给 frps 插件。官方节点用它带上用户的节点凭证，
+	// 用户自己的节点一般不用。
+	Metadatas map[string]string `json:"metadatas,omitempty"`
 }
 
 type Proxy struct {

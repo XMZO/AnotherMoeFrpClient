@@ -11,7 +11,9 @@ import (
 	"moefrp/client/internal/apperr"
 	"moefrp/client/internal/engine"
 	"moefrp/client/internal/store"
+	"moefrp/shared/api"
 	"moefrp/shared/model"
+	"moefrp/shared/quota"
 )
 
 // logBatchInterval 是日志事件的批量推送间隔（PLAN 6.3.6）。
@@ -26,6 +28,7 @@ type TunnelService struct {
 
 	mu       sync.Mutex
 	emit     Emitter
+	official []api.OfficialNode // 面板下发的官方节点（含凭证，不直接给前端）
 	pending  []engine.LogLine
 	onStatus []func(engine.Status)
 	stop     chan struct{}
@@ -133,11 +136,67 @@ func (t *TunnelService) logLoop() {
 	}
 }
 
+// OfficialNodeView 是给前端看的官方节点（不含 token 和凭证）。ID 带 official- 前缀，和运行栏里的节点 ID 一致。
+type OfficialNodeView struct {
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description,omitempty"`
+	ServerAddr  string      `json:"serverAddr"`
+	ServerPort  int         `json:"serverPort"`
+	User        string      `json:"user"`
+	Online      bool        `json:"online"`
+	Quota       quota.Quota `json:"quota"`
+}
+
+// OfficialNodes 返回面板下发给当前账号的官方节点。没登录或面板没有官方节点时为空。
+// 订阅来的配置不能用官方节点（节点由分享决定），自己的云端配置和本地配置都可以用。
+func (t *TunnelService) OfficialNodes() []OfficialNodeView {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]OfficialNodeView, 0, len(t.official))
+	for _, o := range t.official {
+		out = append(out, OfficialNodeView{ID: api.OfficialNodePrefix + o.ID, Name: o.Name, Description: o.Description,
+			ServerAddr: o.ServerAddr, ServerPort: o.ServerPort, User: o.User, Online: o.Online, Quota: o.Quota})
+	}
+	return out
+}
+
+// SetOfficial 换上新的官方节点列表（cloudsync 拉到变化时、启动时从缓存、退出登录时传 nil）。
+// 正在用官方节点运行时：节点信息变了（例如凭证重置）就重新连接，节点不能用了就停止。
+func (c *TunnelControl) SetOfficial(list []api.OfficialNode) {
+	t := c.t
+	nodes := make([]model.Node, 0, len(list))
+	for _, o := range list {
+		nodes = append(nodes, o.ToNode())
+	}
+	t.mu.Lock()
+	t.official = slices.Clone(list)
+	emit := t.emit
+	t.mu.Unlock()
+	t.eng.SetExtraNodes(nodes)
+	if emit != nil {
+		emit(EventOfficial, t.OfficialNodes())
+	}
+	pid, nid, ok := t.eng.RunningProfile()
+	if !ok || !strings.HasPrefix(nid, api.OfficialNodePrefix) {
+		return
+	}
+	if cp, ok := t.profiles.Get(pid); ok {
+		if _, err := t.eng.Update(cp.Profile); err != nil {
+			t.sink.Appendf("warn", "official node is no longer available, stopping: %v", err)
+			_ = t.eng.Stop()
+		}
+	}
+}
+
 // Start 用指定配置的指定节点启动隧道。已有隧道在运行时会先停掉再启动（状态先变为 stopping）。
 func (t *TunnelService) Start(profileID, nodeID string) error {
 	c, ok := t.profiles.Get(profileID)
 	if !ok {
 		return apperr.New(apperr.ProfileNotFound, profileID)
+	}
+	if c.IsSubscription() && strings.HasPrefix(nodeID, api.OfficialNodePrefix) {
+		return apperr.New(apperr.InvalidArg, "subscribed profiles cannot use official nodes")
 	}
 	if c.IsSubscription() && c.Sub != nil && (c.Sub.Summary.Revoked || c.Sub.Summary.Expired) {
 		return apperr.New(apperr.SubscriptionInactive, profileID)
@@ -189,7 +248,15 @@ func (t *TunnelService) PingNodes(profileID string) ([]engine.PingResult, error)
 	if !ok {
 		return nil, apperr.New(apperr.ProfileNotFound, profileID)
 	}
-	return engine.PingNodes(context.Background(), c.Profile.Nodes, engine.DefaultProbeTimeout), nil
+	nodes := slices.Clone(c.Profile.Nodes)
+	if !c.IsSubscription() {
+		t.mu.Lock()
+		for _, o := range t.official {
+			nodes = append(nodes, o.ToNode())
+		}
+		t.mu.Unlock()
+	}
+	return engine.PingNodes(context.Background(), nodes, engine.DefaultProbeTimeout), nil
 }
 
 // PingNode 测一个还没保存的节点（编辑节点时的"测试连接"）。

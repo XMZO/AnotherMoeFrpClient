@@ -27,6 +27,12 @@ export interface Node {
      * 通过代理连接 frps，可选
      */
     "proxyURL"?: string;
+
+    /**
+     * Metadatas 对应 frpc 的 metadatas，登录时发给 frps 插件。官方节点用它带上用户的节点凭证，
+     * 用户自己的节点一般不用。
+     */
+    "metadatas"?: { [_ in string]?: string } | null;
 }
 
 /**

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"maps"
 
 	"github.com/fatedier/frp/pkg/config"
 	"github.com/fatedier/frp/pkg/config/source"
@@ -35,7 +36,9 @@ type Prepared struct {
 //
 // 校验用的是单独映射出来的一份对象（Complete 会改写字段），返回给调用方的是没有补全过的一份，
 // 由 frp 在 NewService / UpdateConfigSource 里自己补全，和 frpc 的流程一致。
-func Prepare(p model.Profile, nodeID string) (*Prepared, error) {
+//
+// extra 是配置之外也能选的节点（面板下发的官方节点），按 ID 和配置里的节点一起查找。
+func Prepare(p model.Profile, nodeID string, extra ...model.Node) (*Prepared, error) {
 	if err := validate.Profile(p); err != nil {
 		return nil, apperr.FromValidate(err)
 	}
@@ -47,6 +50,11 @@ func Prepare(p model.Profile, nodeID string) (*Prepared, error) {
 		if p.Nodes[i].ID == nodeID {
 			node = &p.Nodes[i]
 			break
+		}
+	}
+	for i := range extra {
+		if node == nil && extra[i].ID == nodeID {
+			node = &extra[i]
 		}
 	}
 	if node == nil {
@@ -76,6 +84,9 @@ func BuildCommon(n model.Node) (*v1.ClientCommonConfig, error) {
 		User:       n.User,
 	}
 	common.Auth.Token = n.Token
+	if len(n.Metadatas) > 0 {
+		common.Metadatas = maps.Clone(n.Metadatas) // 官方节点的节点凭证
+	}
 	common.Transport.Protocol = n.Protocol
 	common.Transport.ProxyURL = n.ProxyURL
 	if n.TLS != nil {
@@ -100,7 +111,7 @@ func SameConnection(a, b model.Node) bool {
 		protoB = model.ProtocolTCP
 	}
 	return a.ServerAddr == b.ServerAddr && a.ServerPort == b.ServerPort && a.Token == b.Token &&
-		a.User == b.User && protoA == protoB && tlsA == tlsB && a.ProxyURL == b.ProxyURL
+		a.User == b.User && protoA == protoB && tlsA == tlsB && a.ProxyURL == b.ProxyURL && maps.Equal(a.Metadatas, b.Metadatas)
 }
 
 // MapProfile 把模型里的代理和访客转换成 frp 的配置对象（PLAN 6.3.3）。

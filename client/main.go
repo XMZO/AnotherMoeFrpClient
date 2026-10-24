@@ -180,14 +180,16 @@ func main() {
 	hostname, _ := os.Hostname()
 
 	eng := engine.New(sink, engine.Options{})
+	tunnelSvc, tunnelCtl := services.NewTunnelService(eng, sink, profiles, settings)
+	tunnelCtl.SetOfficial(profiles.Sync().Official) // 上次缓存的官方节点，离线也能用
 	syncMgr := cloudsync.New(cloudsync.Options{
 		API: api, Creds: credstore.NewWinCred(credTarget), Profiles: profiles, Engine: eng, DeviceName: hostname,
 		Logf: func(format string, args ...any) {
 			log.Printf(format, args...)
 			diag("cloud: "+format, args...)
 		},
+		OnOfficial: tunnelCtl.SetOfficial,
 	})
-	tunnelSvc, tunnelCtl := services.NewTunnelService(eng, sink, profiles, settings)
 	profileSvc := services.NewProfileService(profiles, settings, eng, syncMgr)
 	authSvc := services.NewAuthService(syncMgr, profiles, eng)
 	settingsSvc := services.NewSettingsService(settings, sink)

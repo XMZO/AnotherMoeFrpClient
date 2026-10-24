@@ -17,6 +17,10 @@ import * as engine$0 from "../engine/models.js";
 // @ts-ignore: Unused imports
 import * as model$0 from "../../../shared/model/models.js";
 
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as $models from "./models.js";
+
 /**
  * ClearLogs 清空日志缓冲。
  */
@@ -43,6 +47,14 @@ export function ExportLogsDialog(): $CancellablePromise<string> {
  */
 export function Logs(): $CancellablePromise<engine$0.LogLine[] | null> {
     return $Call.ByID(3370261665);
+}
+
+/**
+ * OfficialNodes 返回面板下发给当前账号的官方节点。没登录或面板没有官方节点时为空。
+ * 订阅来的配置不能用官方节点（节点由分享决定），自己的云端配置和本地配置都可以用。
+ */
+export function OfficialNodes(): $CancellablePromise<$models.OfficialNodeView[] | null> {
+    return $Call.ByID(2400498560);
 }
 
 /**

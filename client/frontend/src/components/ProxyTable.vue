@@ -53,7 +53,8 @@ function renderStatus(p: Proxy) {
     ])
   }
   if (st?.err) {
-    const text = codeText(st.code, null, st.err)
+    // 没有专门说明的错误（例如官方节点的限额拒绝）直接显示原因，不只显示"代理启动失败"
+    const text = (st.code as string) === 'proxy_start_error' ? st.err : codeText(st.code, null, st.err)
     return h(
       NTooltip,
       {},

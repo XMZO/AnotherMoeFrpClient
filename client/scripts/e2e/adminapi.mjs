@@ -24,6 +24,13 @@ export function adminClient(base) {
       await login()
       return (await (await call('POST', '/invites', { count, note: 'e2e' })).json()).codes
     },
+    // request 调任意管理接口，返回解析后的 JSON（204 时为 null）
+    async request(method, p, body) {
+      await login()
+      const r = await call(method, p, body)
+      return r.status === 204 ? null : r.json()
+    },
+    password: 'e2e-admin-password',
     async resetCode(nickname) {
       await login()
       return (await (await call('POST', `/users/${encodeURIComponent(nickname)}/reset-code`)).json()).code

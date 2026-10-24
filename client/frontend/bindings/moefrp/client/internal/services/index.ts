@@ -22,6 +22,7 @@ export type {
     ImageInfo,
     License,
     LogoutInfo,
+    OfficialNodeView,
     ProfileSummary,
     SaveResult,
     StartupInfo,

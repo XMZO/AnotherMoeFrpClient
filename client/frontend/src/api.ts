@@ -2,7 +2,7 @@
 export { Events } from '@wailsio/runtime'
 export { AppService, AuthService, ImageService, ProfileService, SettingsService, ShareService, TunnelService } from '../bindings/moefrp/client/internal/services'
 
-export type { ProfileSummary, SaveResult, StartupInfo, VersionInfo, LogoutInfo, SubscriptionSaveResult, UpdateInfo, License, ImageInfo } from '../bindings/moefrp/client/internal/services/models'
+export type { ProfileSummary, SaveResult, StartupInfo, VersionInfo, LogoutInfo, SubscriptionSaveResult, UpdateInfo, License, ImageInfo, OfficialNodeView } from '../bindings/moefrp/client/internal/services/models'
 export type { Profile, Node, Proxy, Visitor, SharePayload, P2PTarget, P2PBind, SubscriptionParams } from '../bindings/moefrp/shared/model/models'
 export type { Status, ProxyStatus, LogLine, PingResult } from '../bindings/moefrp/client/internal/engine/models'
 export type { Settings } from '../bindings/moefrp/client/internal/store/models'

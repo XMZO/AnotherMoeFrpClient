@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
-import { Events, TunnelService, type PingResult, type ProxyStatus, type Status } from '../api'
+import { Events, TunnelService, type OfficialNodeView, type PingResult, type ProxyStatus, type Status } from '../api'
 import { toAppError } from '../errors'
 
 export const useTunnelStore = defineStore('tunnel', () => {
@@ -8,6 +8,8 @@ export const useTunnelStore = defineStore('tunnel', () => {
   const proxies = shallowRef<ProxyStatus[]>([])
   const pings = ref<Record<string, PingResult>>({})
   const pinging = ref(false)
+  /** 面板下发的官方节点（订阅来的配置不能用）。 */
+  const official = shallowRef<OfficialNodeView[]>([])
   const acting = ref(false) // 正在等 Start / Stop 调用返回
   let started = false
 
@@ -32,6 +34,10 @@ export const useTunnelStore = defineStore('tunnel', () => {
     Events.On('tunnel:proxy', (ev) => {
       proxies.value = ev.data ?? []
     })
+    Events.On('official:nodes', (ev) => {
+      official.value = ev.data ?? []
+    })
+    official.value = (await TunnelService.OfficialNodes()) ?? []
     status.value = await TunnelService.State()
     proxies.value = (await TunnelService.ProxyStatuses()) ?? []
   }
@@ -64,5 +70,5 @@ export const useTunnelStore = defineStore('tunnel', () => {
     }
   }
 
-  return { status, proxies, proxyById, pings, pinging, acting, active, busy, runningProfileId, init, start, stop, ping }
+  return { status, proxies, proxyById, pings, pinging, official, acting, active, busy, runningProfileId, init, start, stop, ping }
 })

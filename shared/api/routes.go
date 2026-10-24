@@ -25,6 +25,9 @@ const (
 	RouteMe    = Prefix + "/me"
 	RouteState = Prefix + "/state"
 
+	// RouteOfficialNodes 是面板下发给当前用户的官方节点（docs/node-agent.md 第 12 节），支持 ETag。
+	RouteOfficialNodes = Prefix + "/official-nodes"
+
 	RouteProfiles = Prefix + "/profiles"
 	RouteProfile  = Prefix + "/profiles/{id}"
 

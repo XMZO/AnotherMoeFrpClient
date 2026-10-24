@@ -63,6 +63,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	infoFrom(r.Context()).UserID = u.ID
+	s.nodes.AccessChanged() // 新用户可能能用官方节点
 	writeJSON(w, http.StatusCreated, api.RegisterResponse{User: userInfo(u)})
 }
 

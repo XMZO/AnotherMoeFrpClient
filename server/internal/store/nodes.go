@@ -24,15 +24,17 @@ type Node struct {
 	LastSeenAt       *int64
 	CreatedAt        int64
 	UpdatedAt        int64
+	NodeOfficial
 }
 
 const nodeColumns = `id, name, public_addr, download_mirror, token_hash IS NOT NULL, enroll_expires_at, frps_config, config_rev,
-	applied_rev, apply_error, pending_uninstall, info, last_ip, last_seen_at, created_at, updated_at`
+	applied_rev, apply_error, pending_uninstall, info, last_ip, last_seen_at, created_at, updated_at, official, roles, description`
 
 func scanNode(row interface{ Scan(...any) error }) (Node, error) {
 	var n Node
 	err := row.Scan(&n.ID, &n.Name, &n.PublicAddr, &n.DownloadMirror, &n.Enrolled, &n.EnrollExpiresAt, &n.FrpsConfig, &n.ConfigRev,
-		&n.AppliedRev, &n.ApplyError, &n.PendingUninstall, &n.Info, &n.LastIP, &n.LastSeenAt, &n.CreatedAt, &n.UpdatedAt)
+		&n.AppliedRev, &n.ApplyError, &n.PendingUninstall, &n.Info, &n.LastIP, &n.LastSeenAt, &n.CreatedAt, &n.UpdatedAt,
+		&n.Official, &n.Roles, &n.Description)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Node{}, ErrNotFound
 	}

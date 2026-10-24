@@ -276,3 +276,24 @@ func TestLogSinkRingAndLevels(t *testing.T) {
 		t.Fatalf("subscriber got %+v", got)
 	}
 }
+
+func TestPrepareOfficialNode(t *testing.T) {
+	p := baseProfile()
+	official := model.Node{ID: "official-n1", Remark: "东京", ServerAddr: "tokyo.example.com", ServerPort: 7000, Token: "t",
+		User: "alice", Metadatas: map[string]string{"moefrp_cred": "mfc_secret"}}
+	if _, err := Prepare(p, official.ID); apierr.CodeOf(err) != apperr.NodeNotFound {
+		t.Fatalf("没有传额外节点时找不到：%v", err)
+	}
+	prep, err := Prepare(p, official.ID, official)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prep.Common.User != "alice" || prep.Common.Metadatas["moefrp_cred"] != "mfc_secret" || prep.Common.ServerAddr != "tokyo.example.com" {
+		t.Fatalf("公共配置：%+v", prep.Common)
+	}
+	changed := official
+	changed.Metadatas = map[string]string{"moefrp_cred": "mfc_new"}
+	if SameConnection(official, changed) {
+		t.Fatal("凭证变了要重新连接")
+	}
+}

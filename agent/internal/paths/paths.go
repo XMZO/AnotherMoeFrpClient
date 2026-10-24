@@ -41,6 +41,9 @@ func (p Paths) AgentConfig() string { return filepath.Join(p.ConfDir, "agent.tom
 // FrpsConfig 是当前生效的 frps 配置。
 func (p Paths) FrpsConfig() string { return filepath.Join(p.ConfDir, "frps.toml") }
 
+// Access 是官方节点的授权用户表（只有凭证哈希）。
+func (p Paths) Access() string { return filepath.Join(p.ConfDir, "access.json") }
+
 // NewBin 是升级时下载的新版本。
 func (p Paths) NewBin() string { return filepath.Join(p.StateDir, ServiceName+".new") }
 

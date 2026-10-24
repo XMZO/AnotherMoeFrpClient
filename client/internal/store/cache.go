@@ -69,6 +69,9 @@ type SyncState struct {
 	Nickname     string     `json:"nickname,omitempty"` // 该账号的昵称，离线时显示用
 	StateVersion int64      `json:"stateVersion"`       // 最近一次拉到的 stateVersion
 	LastSyncAt   *time.Time `json:"lastSyncAt,omitempty"`
+	// Official 是面板下发的官方节点（含节点凭证，所以放在加密的缓存里），离线时也能用。
+	Official     []api.OfficialNode `json:"official,omitempty"`
+	OfficialETag string             `json:"officialETag,omitempty"`
 }
 
 type cacheFile struct {

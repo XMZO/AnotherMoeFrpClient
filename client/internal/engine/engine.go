@@ -149,6 +149,8 @@ type Engine struct {
 	lastState State
 	history   []Transition
 
+	extra []model.Node // 配置之外也能选的节点（官方节点），见 SetExtraNodes
+
 	statusCh chan struct{}
 	proxyCh  chan struct{}
 	closed   chan struct{}
@@ -281,7 +283,7 @@ func (e *Engine) RunningProfile() (profileID, nodeID string, ok bool) {
 // Start 校验配置并启动。已有 Service（运行中、连接中、停止中）时，先停掉旧的，
 // 等旧的 Run 返回之后再启动新的（PLAN 6.3.5，坑 6、9），这段时间状态是 Stopping。
 func (e *Engine) Start(p model.Profile, nodeID string) error {
-	prep, err := Prepare(p, nodeID)
+	prep, err := Prepare(p, nodeID, e.extraNodes()...)
 	if err != nil {
 		return err
 	}
@@ -398,7 +400,7 @@ func (e *Engine) Update(p model.Profile) (UpdateMode, error) {
 	nodeID, oldNode, common := r.node.ID, r.node, r.common
 	e.mu.Unlock()
 
-	prep, err := Prepare(p, nodeID)
+	prep, err := Prepare(p, nodeID, e.extraNodes()...)
 	if err != nil {
 		return UpdateNone, err
 	}
@@ -431,7 +433,7 @@ func (e *Engine) PredictUpdate(p model.Profile) UpdateMode {
 	if r == nil || r.profile.ID != p.ID {
 		return UpdateNone
 	}
-	for _, n := range p.Nodes {
+	for _, n := range append(slices.Clone(p.Nodes), e.extra...) {
 		if n.ID == r.node.ID {
 			if SameConnection(r.node, n) {
 				return UpdateHot
@@ -440,6 +442,19 @@ func (e *Engine) PredictUpdate(p model.Profile) UpdateMode {
 		}
 	}
 	return UpdateRestart
+}
+
+// SetExtraNodes 设置配置之外也能选的节点（面板下发的官方节点）。启动和热更新时按 ID 查找。
+func (e *Engine) SetExtraNodes(nodes []model.Node) {
+	e.mu.Lock()
+	e.extra = slices.Clone(nodes)
+	e.mu.Unlock()
+}
+
+func (e *Engine) extraNodes() []model.Node {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.extra)
 }
 
 // Stop 发起停止并立即返回，状态变为 Stopping，Run 返回后变为 Idle。

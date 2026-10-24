@@ -42,6 +42,7 @@ func (m *Manager) syncOnce(s *session, reason string) time.Duration {
 	m.setState(StateSyncing, nil)
 	err := m.pull(s, reason)
 	if err == nil {
+		m.syncOfficial(s)
 		err = m.push(s.ctx)
 	}
 	if s.ctx.Err() != nil || !m.isCurrent(s) {
@@ -87,6 +88,32 @@ func retryAfter(err error, def time.Duration) time.Duration {
 		}
 	}
 	return def
+}
+
+// ---- 官方节点 ----
+
+// syncOfficial 拉取面板下发的官方节点，有变化时存进缓存并通知隧道服务。
+// 失败只记日志：旧版服务端没有这个接口，不能影响配置同步。
+func (m *Manager) syncOfficial(s *session) {
+	nodes, etag, notModified, err := m.api.OfficialNodes(s.ctx, m.profiles.Sync().OfficialETag)
+	if err != nil {
+		if apierr.CodeOf(err) != apierr.NotFound {
+			m.logf("official nodes: %v", err)
+		}
+		return
+	}
+	if notModified || !m.isCurrent(s) {
+		return
+	}
+	_ = m.profiles.Tx(func(t *store.Txn) error {
+		st := t.Sync()
+		st.Official, st.OfficialETag = nodes, etag
+		return nil
+	})
+	m.logf("official nodes: %d", len(nodes))
+	if m.onOfficial != nil {
+		m.onOfficial(nodes)
+	}
 }
 
 // ---- 拉取 ----

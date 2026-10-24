@@ -2,6 +2,7 @@ package validate
 
 import (
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -36,9 +37,14 @@ const (
 	MaxCustomDomains  = 20
 	MaxAllowUsers     = 50
 	MaxProxyURLLen    = 512
+	MaxMetadatas      = 8 // 节点 metadatas 的条数
+	MaxMetaKeyLen     = 32
+	MaxMetaValueLen   = 256
 	MaxPort           = 65535
 	MinPort           = 1
 )
+
+var metaKeyRe = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
 
 // ProxyURLSchemes 是节点 proxyURL 允许的协议，与 frp 支持的一致。
 var ProxyURLSchemes = []string{"http", "socks5", "ntlm"}
@@ -148,6 +154,17 @@ func checkNode(c *collector, i int, n model.Node) {
 	checkWord(c, path("nodes", i, "user"), n.User, MaxUserLen, false)
 	if n.Protocol != "" && !slices.Contains(model.Protocols, n.Protocol) {
 		c.add(path("nodes", i, "protocol"), ReasonUnknown, "不支持的协议 %q", n.Protocol)
+	}
+	if len(n.Metadatas) > MaxMetadatas {
+		c.add(path("nodes", i, "metadatas"), ReasonTooLong, "metadatas 最多 %d 项", MaxMetadatas)
+	}
+	for k, v := range n.Metadatas {
+		field := path("nodes", i, "metadatas")
+		if !metaKeyRe.MatchString(k) {
+			c.add(field, ReasonInvalid, "metadatas 的键 %q 只能是 1–%d 位小写字母、数字和下划线", k, MaxMetaKeyLen)
+		} else if len(v) > MaxMetaValueLen {
+			c.add(field, ReasonTooLong, "metadatas 的值最多 %d 个字符", MaxMetaValueLen)
+		}
 	}
 	if n.ProxyURL != "" {
 		field := path("nodes", i, "proxyURL")

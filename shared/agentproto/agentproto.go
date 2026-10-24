@@ -4,7 +4,11 @@
 // 事件（report）不需要响应。
 package agentproto
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"moefrp/shared/quota"
+)
 
 const (
 	// RouteWS 是 agent 的长连接，请求头 Authorization: Bearer <节点令牌>。
@@ -42,6 +46,7 @@ const (
 	MethodExec        = "exec"
 	MethodUpgrade     = "upgrade"
 	MethodUninstall   = "uninstall"
+	MethodAccessSync  = "access.sync" // 面板 → agent：官方节点的授权用户表
 )
 
 // Message 是线上传输的一条消息。
@@ -99,6 +104,8 @@ type Hello struct {
 	BootTime     int64  `json:"bootTime"`
 	ExecEnabled  bool   `json:"execEnabled"`
 	AppliedRev   int64  `json:"appliedRev"` // 当前生效的 frps 配置版本，0 表示还没收到过面板的配置
+	// Features 是这个 agent 支持的可选功能，面板据此决定能不能开官方节点等（旧版本没有这个字段）。
+	Features []string `json:"features,omitempty"`
 	// Upgrade 是上一次升级的结果（升级后第一次连接时带上，之后为空）。
 	Upgrade *UpgradeResult `json:"upgrade,omitempty"`
 }
@@ -238,4 +245,31 @@ type UpgradeResult struct {
 // UninstallRequest：Purge 为 true 时连同配置一起删除（面板发起的卸载总是 true）。
 type UninstallRequest struct {
 	Purge bool `json:"purge"`
+}
+
+// ---- 官方节点授权 ----
+
+// FeatureAccess：agent 支持官方节点的授权（access.sync 和 frps 插件）。
+const FeatureAccess = "access"
+
+// AccessTable 是一个节点的授权用户表，面板在变化时整表下发。
+// Enabled 为 false 时节点不是官方节点：agent 不挂插件，frps 只按 token 认证。
+type AccessTable struct {
+	Enabled bool         `json:"enabled"`
+	Users   []AccessUser `json:"users"`
+}
+
+// AccessUser 是一个可以使用这个节点的用户。CredHash 是节点凭证的 SHA-256（十六进制），
+// 节点上不保存凭证本身。
+type AccessUser struct {
+	CredHash string      `json:"credHash"`
+	UserID   string      `json:"userId"`
+	Nickname string      `json:"nickname"` // 必须和 frpc 的 user 一致
+	Quota    quota.Quota `json:"quota"`
+}
+
+// AccessResult：access.sync 的响应。
+type AccessResult struct {
+	Users     int  `json:"users"`
+	Restarted bool `json:"restarted"` // 开关官方节点时 frps 重启了
 }

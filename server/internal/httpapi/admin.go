@@ -358,6 +358,7 @@ func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.nodes.AccessChanged() // 角色、停用都会改变官方节点的授权
 	w.WriteHeader(http.StatusNoContent)
 }
 

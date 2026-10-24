@@ -512,3 +512,22 @@ code.clip { display: inline-block; max-width: 360px; overflow: hidden; text-over
 
 .danger-zone { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
 .danger-zone .card-head h2 { color: var(--danger); }
+
+/* ---------- 官方节点 ---------- */
+
+.quota-role { padding: 12px 0; border-top: 1px solid var(--border); }
+.quota-role:first-of-type { border-top: 0; }
+.quota-role h3, .sub-head { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
+.quota-fields .field + .field { margin-top: 10px; }
+.quota-fields { margin-top: 10px; }
+.grant-list { display: flex; flex-direction: column; }
+.grant-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); }
+.grant-row:first-child { border-top: 0; }
+.grant-row .select { min-width: 160px; }
+
+dialog.dialog { overflow: hidden; } /* 只让内容区滚动，避免两条滚动条 */
+dialog.dialog.xwide { width: min(880px, calc(100vw - 32px)); }
+.quota-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 20px; margin-top: 12px; }
+.quota-grid .quota-role { border-top: 0; padding-top: 0; }
+@media (max-width: 760px) { .quota-grid { grid-template-columns: minmax(0, 1fr); } }
+.dialog-body { flex: 1 1 auto; min-height: 0; }

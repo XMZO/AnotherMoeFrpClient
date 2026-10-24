@@ -31,6 +31,10 @@ var enableMemOnce sync.Once
 type Manager struct {
 	path string // frps.toml
 
+	// Plugin 在每次启动 frps 时调用，返回非 nil 时把这个 HTTP 插件加到配置里（官方节点的准入控制）。
+	// 在 Boot 之前设置。
+	Plugin func() *v1.HTTPPluginOptions
+
 	mu        sync.Mutex
 	svc       *server.Service
 	done      chan struct{}
@@ -186,6 +190,11 @@ func (m *Manager) Close() {
 }
 
 func (m *Manager) startLocked(cfg *v1.ServerConfig) error {
+	if m.Plugin != nil {
+		if p := m.Plugin(); p != nil {
+			cfg.HTTPPlugins = append(cfg.HTTPPlugins, *p)
+		}
+	}
 	svc, err := server.NewService(cfg)
 	if err != nil {
 		return err

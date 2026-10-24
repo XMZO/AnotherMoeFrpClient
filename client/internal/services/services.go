@@ -6,9 +6,10 @@ package services
 
 // 推送给前端的事件名（PLAN 6.4）。sync:*、auth:*、image:*、update:* 在之后的阶段加。
 const (
-	EventTunnelState = "tunnel:state" // engine.Status
-	EventTunnelProxy = "tunnel:proxy" // []engine.ProxyStatus：当前全部启用代理的状态
-	EventTunnelLogs  = "tunnel:logs"  // []engine.LogLine：一批新日志
+	EventTunnelState = "tunnel:state"   // engine.Status
+	EventTunnelProxy = "tunnel:proxy"   // []engine.ProxyStatus：当前全部启用代理的状态
+	EventTunnelLogs  = "tunnel:logs"    // []engine.LogLine：一批新日志
+	EventOfficial    = "official:nodes" // []OfficialNodeView：面板下发的官方节点有变化
 )
 
 // Emitter 把事件推给前端，由 main 在 Wails 应用创建后注入。

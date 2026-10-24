@@ -193,6 +193,7 @@ func (s *Server) routes() {
 
 	mux.Handle("GET "+api.RouteMe, authed(s.handleMe))
 	mux.Handle("GET "+api.RouteState, authed(s.handleState))
+	mux.Handle("GET "+api.RouteOfficialNodes, authed(s.handleOfficialNodes))
 
 	mux.Handle("POST "+api.RouteProfiles, authed(s.handleCreateProfile))
 	mux.Handle("GET "+api.RouteProfile, authed(s.handleGetProfile))
@@ -272,6 +273,8 @@ func (s *Server) RunMaintenance(ctx context.Context, interval time.Duration) {
 			if err := s.auth.Cleanup(ctx); err != nil && ctx.Err() == nil {
 				s.log.Error("maintenance", "err", err)
 			}
+			// 兜底：授权表有变化但没被事件触发时（例如直接改了库），在这里补推
+			s.nodes.SyncAllAccess(ctx, false)
 		}
 	}
 }

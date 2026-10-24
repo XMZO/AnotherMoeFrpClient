@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { NButton, NSelect, NTag, NText, useMessage } from 'naive-ui'
+import { NButton, NSelect, NTag, NText, useMessage, type SelectGroupOption, type SelectOption } from 'naive-ui'
 import { useProfilesStore } from '../stores/profiles'
 import { useSettingsStore } from '../stores/settings'
 import { useTunnelStore } from '../stores/tunnel'
@@ -20,12 +20,15 @@ const st = computed(() => tunnel.status)
 const runningHere = computed(() => !!profiles.current && tunnel.runningProfileId === profiles.current.id)
 const failedHere = computed(() => st.value.state === 'failed' && st.value.profileId === profiles.current?.id)
 
-// 默认节点：正在运行的 → 上次给这份配置选的 → 第一个
+// 官方节点：自己的配置（云端、本地）都能用，订阅来的配置不能用
+const officialNodes = computed(() => (profiles.isSubscription ? [] : tunnel.official))
+
+// 默认节点：正在运行的 → 上次给这份配置选的 → 第一个（先自己的节点，再官方节点）
 watch(
-  () => [profiles.current?.id, profiles.current?.nodes?.length, st.value.nodeId, runningHere.value] as const,
+  () => [profiles.current?.id, profiles.current?.nodes?.length, officialNodes.value.length, st.value.nodeId, runningHere.value] as const,
   () => {
     const p = profiles.current
-    const ids = (p?.nodes ?? []).map((n) => n.id)
+    const ids = [...(p?.nodes ?? []).map((n) => n.id), ...officialNodes.value.map((n) => n.id)]
     if (!p || ids.length === 0) {
       nodeId.value = ''
       return
@@ -42,14 +45,25 @@ watch(
   { immediate: true },
 )
 
-const nodeOptions = computed(() =>
-  (profiles.current?.nodes ?? []).map((n) => {
-    const r = tunnel.pings[n.id]
-    let suffix = ''
-    if (r) suffix = r.ok ? `  ·  ${r.latencyMs} ms` : `  ·  ${codeText(r.code, { target: r.target }, '失败')}`
-    return { label: nodeLabel(n) + suffix, value: n.id }
-  }),
-)
+function pingSuffix(id: string) {
+  const r = tunnel.pings[id]
+  if (!r) return ''
+  return r.ok ? `  ·  ${r.latencyMs} ms` : `  ·  ${codeText(r.code, { target: r.target }, '失败')}`
+}
+
+const nodeOptions = computed(() => {
+  const mine = (profiles.current?.nodes ?? []).map((n) => ({ label: nodeLabel(n) + pingSuffix(n.id), value: n.id }))
+  const official = officialNodes.value.map((n) => ({
+    label: n.name + (n.online ? '' : '（离线）') + pingSuffix(n.id),
+    value: n.id,
+  }))
+  if (official.length === 0) return mine
+  const groups: (SelectGroupOption | SelectOption)[] = []
+  if (mine.length) groups.push({ type: 'group', label: '我的节点', key: 'mine', children: mine })
+  groups.push({ type: 'group', label: '官方节点', key: 'official', children: official })
+  return groups
+})
+const hasNodes = computed(() => !!profiles.current?.nodes?.length || officialNodes.value.length > 0)
 
 const buttonText = computed(() => {
   if (st.value.state === 'stopping') return st.value.pending ? '切换中…' : '停止中…'
@@ -119,7 +133,7 @@ async function ping() {
       data-testid="run-node"
       @update:value="onNodeChange"
     />
-    <n-button size="small" :loading="tunnel.pinging" :disabled="!profiles.current?.nodes?.length" data-testid="run-ping" @click="ping">测速</n-button>
+    <n-button size="small" :loading="tunnel.pinging" :disabled="!profiles.current || !hasNodes" data-testid="run-ping" @click="ping">测速</n-button>
     <n-button
       size="small"
       :type="tunnel.active ? 'error' : 'primary'"

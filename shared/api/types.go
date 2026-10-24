@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"moefrp/shared/model"
+	"moefrp/shared/quota"
 )
 
 // UserInfo 是返回给客户端的用户信息。
@@ -163,3 +164,38 @@ type LegacyChallengeResponse struct {
 type LegacyErrorResponse struct {
 	Error string `json:"error"`
 }
+
+// ---- 官方节点 ----
+
+// OfficialNode 是面板下发的一个官方节点：连接参数里已经带上了当前用户的节点凭证。
+type OfficialNode struct {
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description,omitempty"`
+	ServerAddr  string      `json:"serverAddr"`
+	ServerPort  int         `json:"serverPort"`
+	Token       string      `json:"token"` // frps 的 auth.token；真正的准入由节点凭证决定
+	User        string      `json:"user"`  // frp 的 user，就是用户的昵称，代理名会加上这个前缀
+	Credential  string      `json:"credential"`
+	Online      bool        `json:"online"`
+	Quota       quota.Quota `json:"quota"` // 当前用户在这个节点上的限额
+}
+
+// OfficialNodesResponse：GET /api/v1/official-nodes。
+type OfficialNodesResponse struct {
+	Nodes []OfficialNode `json:"nodes"`
+}
+
+// MetaCredential 是 frpc metadatas 里放节点凭证的键。
+const MetaCredential = "moefrp_cred"
+
+// ToNode 把官方节点转换成客户端能直接运行的节点。ID 加上 OfficialNodePrefix，和用户自己的节点区分开。
+func (o OfficialNode) ToNode() model.Node {
+	return model.Node{
+		ID: OfficialNodePrefix + o.ID, Remark: o.Name, ServerAddr: o.ServerAddr, ServerPort: o.ServerPort,
+		Token: o.Token, User: o.User, Metadatas: map[string]string{MetaCredential: o.Credential},
+	}
+}
+
+// OfficialNodePrefix 是官方节点在客户端里的 ID 前缀。
+const OfficialNodePrefix = "official-"

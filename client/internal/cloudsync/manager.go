@@ -133,6 +133,9 @@ type Options struct {
 
 	// Logf 记录同步过程（不含令牌、密码、节点 token）。
 	Logf func(format string, args ...any)
+
+	// OnOfficial 在官方节点列表变化时调用（退出登录时传 nil）。
+	OnOfficial func([]api.OfficialNode)
 }
 
 type pushErr struct {
@@ -142,15 +145,16 @@ type pushErr struct {
 
 // Manager 见包注释。
 type Manager struct {
-	api      *apiclient.Client
-	creds    credstore.Store
-	profiles *store.ProfileStore
-	eng      Engine
-	device   string
-	poll     time.Duration
-	retry    time.Duration
-	delay    time.Duration
-	logf     func(string, ...any)
+	api        *apiclient.Client
+	creds      credstore.Store
+	profiles   *store.ProfileStore
+	eng        Engine
+	device     string
+	poll       time.Duration
+	retry      time.Duration
+	delay      time.Duration
+	logf       func(string, ...any)
+	onOfficial func([]api.OfficialNode)
 
 	mu        sync.Mutex
 	emit      func(string, any)
@@ -199,7 +203,7 @@ func New(o Options) *Manager {
 	}
 	m := &Manager{
 		api: o.API, creds: o.Creds, profiles: o.Profiles, eng: o.Engine, device: apiclient.DeviceName(o.DeviceName),
-		poll: o.PollInterval, retry: o.OfflineRetry, delay: o.PushDelay, logf: o.Logf,
+		poll: o.PollInterval, retry: o.OfflineRetry, delay: o.PushDelay, logf: o.Logf, onOfficial: o.OnOfficial,
 		conflicts: map[string]*Conflict{}, remote: map[string]RemoteUpdate{}, pushErrs: map[string]pushErr{},
 	}
 	m.acct.CacheOwner = o.Profiles.Sync().Nickname
@@ -475,6 +479,9 @@ func (m *Manager) clearCloud() []string {
 		*t.Sync() = store.SyncState{}
 		return nil
 	})
+	if m.onOfficial != nil {
+		m.onOfficial(nil) // 官方节点属于原来的账号
+	}
 	if running && slices.Contains(ids, runID) {
 		m.logf("stopping tunnel: running profile was a cloud profile")
 		_ = m.eng.Stop()

@@ -22,8 +22,12 @@ log_level       = "info"
 
 # frps 节点：节点访问面板用的地址（写进安装命令），不填时取打开后台时的地址
 # public_url = "https://frplus.loli-con.cn"
-# 打包的节点 agent 程序目录（非 Docker 部署时把 moefrp-agent-linux-amd64 / -arm64 和 VERSION 放进去）
-# agent_dist_dir = "/usr/share/moefrp/agent"
+# 节点 agent 从这个仓库的 GitHub Release（agent-v* 标签）下载
+# agent_repo = "XMZO/AnotherMoeFrpClient"
+# 节点连不上 GitHub 时用的下载地址前缀
+# agent_mirror = "https://ghproxy.example.com/"
+# 离线环境改用本地目录：放 moefrp-agent-linux-amd64 / -arm64 和 VERSION
+# agent_dist_dir = "/var/lib/moefrp/agent"
 
 [client]
 # GET /api/v1/client/config 下发给客户端

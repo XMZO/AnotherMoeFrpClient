@@ -97,6 +97,7 @@ func newEnv(t *testing.T, opts ...envOpt) *env {
 		Announcement:  "测试公告",
 		ImageSources:  []config.ImageSource{{URL: "https://img.example.com/random", Weight: 5}},
 	}
+	o.cfg.AgentRepo = "" // 测试不访问 GitHub；需要时用 withConfig 设置
 	for _, f := range opts {
 		f(&o)
 	}

@@ -15,7 +15,7 @@
 
 ## 0. 使用
 
-1. 部署面板（Docker 镜像里已经带了 agent 程序）。节点访问面板的地址和管理员打开后台的地址不一样时（例如后台走内网），在配置里设 `public_url`。
+1. 部署面板。agent 程序从 GitHub Release 下载（见第 6 节），面板本身不带。节点访问面板的地址和管理员打开后台的地址不一样时（例如后台走内网），在配置里设 `public_url`。
 2. 管理后台 → 节点 → 添加节点，复制安装命令，在 VPS 上执行：
 
    ```bash
@@ -33,15 +33,18 @@
    │  /api/v1/admin/nodes/*（cookie + X-MoeFrp-Admin）
    ▼
 moefrp-server ──────── WebSocket /api/v1/agent/ws（agent 主动连，Bearer 节点令牌）
-   │  提供 /agent/install.sh、/agent/download/<arch>
+   │  提供 /agent/install.sh（写好下载地址和校验和）
    ▼
-moefrp-agent（节点上，root，systemd 服务）
+moefrp-agent（节点上，root，systemd 服务）←── 程序从 GitHub Release 下载（agent-v* 标签）
    └─ 进程内嵌 frps v0.71.1（和客户端内嵌 frpc 一样）
 ```
 
 - **agent 是单个静态二进制**，内嵌 frps，节点上不需要另装 frp。frps 跑在 agent 进程里，改配置时进程内关掉旧的 `Service` 再起新的，agent 和面板的连接不断（已确认 v0.71.1 的 `Service.Close()` 会释放所有监听端口）。
 - **只由 agent 主动连面板**，节点不需要开放额外端口。断线后指数退避重连（1s → 60s，带抖动）。
-- **agent 二进制由面板自己提供**：服务端镜像里带上 linux-amd64 / linux-arm64 两个 agent，安装和升级都从面板下载。不依赖 GitHub，国内机器也能装；面板版本和 agent 版本始终一致。
+- **agent 程序发布在 GitHub Release**，和面板分开发版：推送 `agent-v1.2.3` 标签时，`.github/workflows/agent-release.yml` 测试、编译 linux-amd64 / linux-arm64，连同 `SHA256SUMS` 发布到 Release（不标记为 Latest，`releases/latest` 留给客户端）。
+- 面板查询仓库里标签以 `agent-v` 开头、版本号最大的正式 Release（草稿和预发布不算），结果缓存 10 分钟；查询失败时继续用上次的结果，1 分钟后重试。校验和取自同一个 Release 的 `SHA256SUMS`，由面板写进安装脚本和升级请求，节点下载后核对。
+- 连不上 GitHub 的机器：配置 `agent_mirror`（下载地址前缀，例如 `https://ghproxy.example.com/`），下载地址变成"前缀 + GitHub 地址"。校验和仍由面板从 GitHub 获取，镜像改不了内容。
+- 完全离线：配置 `agent_dist_dir`，把 `moefrp-agent-linux-amd64`、`moefrp-agent-linux-arm64` 和 `VERSION` 放进去，面板改从 `/agent/download/*` 提供程序（CI 冒烟测试就是这样用的）。
 
 ## 2. 添加节点和认证
 
@@ -100,7 +103,8 @@ WebSocket（`github.com/coder/websocket`），JSON 文本帧，双向请求/响�
 
 ## 6. 升级
 
-- 面板显示每个节点的 agent 版本，和面板版本不同时提示"可升级"，支持单个或全部升级。
+- 面板显示每个节点的 agent 版本，有更新的 Release 时提示"可升级"（都是语义化版本时按版本号比较，节点上的版本更新时不提示降级；开发版、CI 构建这类非正式版本只要不同就提示）。
+- 发新版：改完 agent 代码后 `git tag agent-v1.2.3 && git push origin agent-v1.2.3`，等 Release 出来，面板 10 分钟内就会提示升级。
 - 流程：
   1. 面板下发 `upgrade`，带上下载地址和 SHA-256。
   2. agent 下载到 `/var/lib/moefrp-agent/moefrp-agent.new`，校验哈希，执行 `moefrp-agent.new version` 预检。
@@ -136,8 +140,8 @@ agent 只会在机器上创建这些东西，卸载时全部删除：
 `/agent/install.sh` 由面板提供（内容里写好面板地址），步骤：
 
 1. 检查 root、systemd、架构（`uname -m`：x86_64 → amd64，aarch64 → arm64），其他情况直接报错退出。
-2. 从面板下载 `/agent/download/linux-<arch>` 和对应的 SHA-256，校验。
-3. 安装到 `/usr/local/bin/moefrp-agent`，执行 `moefrp-agent enroll <面板地址> <安装码>`：换取令牌，写入 `/etc/moefrp-agent/agent.toml`。
+2. 按架构选面板写好的下载地址（GitHub Release，或者镜像 / 本地目录）下载，用面板写好的 SHA-256 校验。面板拿不到 agent 版本时，脚本直接报出原因（卸载不受影响）。
+3. 执行 `moefrp-agent install --server <面板地址> --code <安装码>`：换取令牌写入 `/etc/moefrp-agent/agent.toml`，程序装到 `/usr/local/bin/moefrp-agent`。
 4. 写 systemd 单元（`User=root`、`Restart=always`、`RestartSec=3`、`LimitNOFILE=1048576`），`enable --now`。
 5. 已经装过时：保留现有配置，只替换程序（相当于升级）；加 `--force` 才重新注册。
 
@@ -184,6 +188,6 @@ CREATE TABLE node_tasks (
 
 | 期 | 内容 |
 |---|---|
-| 一（已完成） | agent（内嵌 frps、注册、WebSocket、上报、配置下发与回滚、日志、执行命令、升级与回滚、卸载）；服务端接口和表；安装脚本；管理后台节点页；镜像里带 agent；CI 冒烟测试 |
+| 一（已完成） | agent（内嵌 frps、注册、WebSocket、上报、配置下发与回滚、日志、执行命令、升级与回滚、卸载）；服务端接口和表；安装脚本；管理后台节点页；agent 发布到 GitHub Release；CI 冒烟测试 |
 | 二 | 网页终端；批量执行；节点流量历史图表 |
 | 三 | 和 PLAN 9.1 结合：节点配置 frps 插件指向面板，按用户授权和配额 |

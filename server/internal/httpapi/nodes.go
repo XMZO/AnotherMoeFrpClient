@@ -175,9 +175,46 @@ func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, apierr.Newf(apierr.ValidationFailed, "无法确定面板地址，请在配置里设置 public_url"))
 		return
 	}
+	// 脚本里写好下载地址和校验和：查一次最新版本（GitHub 有缓存，一般不用等）。
+	// 查不到时仍然返回脚本，卸载照常可用，安装时报出原因
+	var build *nodes.Build
+	unavailable := ""
+	if src := s.nodes.Source(); src == nil {
+		unavailable = "面板没有配置 agent 来源（agent_repo / agent_dist_dir）"
+	} else {
+		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		b, err := src.Latest(ctx)
+		cancel()
+		if err != nil {
+			unavailable = "面板获取 agent 版本失败：" + err.Error()
+		}
+		build = b
+	}
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write([]byte(nodes.InstallScript(base)))
+	_, _ = w.Write([]byte(nodes.InstallScript(base, build, unavailable)))
+}
+
+// agentStatus 是列表页和新建节点时显示的 agent 来源和版本（不等网络）。
+func (s *Server) agentStatus() map[string]any {
+	src := s.nodes.Source()
+	if src == nil {
+		return map[string]any{"error": "面板没有配置 agent 来源，不能安装和升级节点"}
+	}
+	b, err := src.Cached()
+	out := map[string]any{"source": src.Kind()}
+	if g, ok := src.(*nodes.GitHub); ok {
+		out["repo"] = g.Repo
+	}
+	if b != nil {
+		out["version"], out["arches"] = b.Version, b.ArchList()
+		if b.Tag != "" {
+			out["tag"] = b.Tag
+		}
+	} else if err != nil {
+		out["error"] = err.Error()
+	}
+	return out
 }
 
 func (s *Server) handleAgentDownload(w http.ResponseWriter, r *http.Request) {
@@ -185,7 +222,7 @@ func (s *Server) handleAgentDownload(w http.ResponseWriter, r *http.Request) {
 	name, wantSum := strings.CutSuffix(name, ".sha256")
 	f, ok := s.nodes.Dist().ByName(name)
 	if !ok {
-		s.writeError(w, r, apierr.Newf(apierr.NotFound, "面板没有打包这个架构的 agent"))
+		s.writeError(w, r, apierr.Newf(apierr.NotFound, "面板不提供这个 agent 的下载（agent 从 GitHub Release 下载，或者本地目录里没有这个架构）"))
 		return
 	}
 	if wantSum {
@@ -264,10 +301,7 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	resp := map[string]any{"nodes": list}
-	if d := s.nodes.Dist(); d != nil {
-		resp["agent"] = map[string]any{"version": d.Version(), "arches": d.ArchList()}
-	}
+	resp := map[string]any{"nodes": list, "agent": s.agentStatus()}
 	if base, ok := s.publicURL(r); ok {
 		resp["publicUrl"] = base
 	}
@@ -279,8 +313,8 @@ func (s *Server) createdResponse(r *http.Request, c nodes.Created) map[string]an
 	if base, ok := s.publicURL(r); ok {
 		resp["installCommand"] = installCommand(base, c.EnrollCode)
 	}
-	if s.nodes.Dist() == nil {
-		resp["warning"] = "这个面板没有打包 agent 程序（开发环境？），安装命令会下载失败"
+	if st := s.agentStatus(); st["error"] != nil && st["version"] == nil {
+		resp["warning"] = fmt.Sprintf("暂时拿不到 agent 程序：%v。安装命令现在执行会失败", st["error"])
 	}
 	return resp
 }

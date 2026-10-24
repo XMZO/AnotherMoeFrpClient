@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # 节点 agent 的真机冒烟测试（GitHub Actions 的 ubuntu 机器有 systemd 和免密 sudo）：
-# 用镜像里的面板 → 面板给的安装命令安装 → 下发 frps 配置 → 执行命令 → 从旧版本升级 → 面板卸载，
+# 面板（镜像）→ 面板给的安装命令安装 → 下发 frps 配置 → 执行命令 → 从旧版本升级 → 面板卸载，
 # 最后检查机器上没有残留。另外测一遍 install.sh --uninstall。
+# agent 用本次提交编出来的程序（目录挂进面板，agent_dist_dir），不依赖 GitHub Release。
 #
-#   scripts/ci/agent-smoke.sh <镜像名> <旧版本 agent 程序>
+#   scripts/ci/agent-smoke.sh <镜像名> <旧版本 agent 程序> <新版本 agent 目录>
 set -euxo pipefail
 
 IMAGE=$1
 OLD_AGENT=$2
+DIST=$3
 BASE=http://127.0.0.1:18090
 JAR=$(mktemp)
 DATA=$(mktemp -d)
@@ -38,8 +40,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-docker run -d --name smoke-panel -p 127.0.0.1:18090:8080 -v "$DATA:/data" \
-  -e MOEFRP_ADMIN_SETUP_CODE=CI-ADMIN-SETUP-CODE "$IMAGE"
+docker run -d --name smoke-panel -p 127.0.0.1:18090:8080 -v "$DATA:/data" -v "$DIST:/agent:ro" \
+  -e MOEFRP_ADMIN_SETUP_CODE=CI-ADMIN-SETUP-CODE -e MOEFRP_AGENT_DIST_DIR=/agent "$IMAGE"
 wait_for "面板启动" 30 curl -fsS "$BASE/healthz"
 api -X POST "$BASE/api/v1/admin/setup" -d '{"code":"CI-ADMIN-SETUP-CODE","nickname":"ci_admin","password":"ci-admin-password"}' >/dev/null
 api -X POST "$BASE/api/v1/admin/elevate" -d '{"password":"ci-admin-password"}' >/dev/null

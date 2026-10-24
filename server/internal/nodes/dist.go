@@ -105,7 +105,36 @@ func (d *Dist) ArchList() []string {
 //go:embed install.sh
 var installScript string
 
-// InstallScript 返回写好面板地址的安装脚本。server 必须已经校验过（只含 URL 安全字符）。
-func InstallScript(server string) string {
-	return strings.ReplaceAll(installScript, "__SERVER__", server)
+// InstallScript 返回安装脚本：写好面板地址和各架构的下载地址、校验和。
+// server 必须已经校验过；b 为 nil 时脚本只能用来卸载，安装会报 unavailable 里的原因。
+// 本地目录的相对地址补全成面板地址。所有值都在脚本里用单引号包起来，调用方保证不含单引号。
+func InstallScript(server string, b *Build, unavailable string) string {
+	vals := map[string]string{"__SERVER__": server, "__VERSION__": "", "__UNAVAILABLE__": unavailable}
+	for _, arch := range Arches {
+		u, sum := "", ""
+		if f, ok := b.file(arch); ok {
+			u, sum = f.URL, f.SHA256
+			if strings.HasPrefix(u, "/") {
+				u = server + u
+			}
+		}
+		vals["__URL_"+strings.ToUpper(arch)+"__"] = u
+		vals["__SHA_"+strings.ToUpper(arch)+"__"] = sum
+	}
+	if b != nil {
+		vals["__VERSION__"] = b.Version
+	}
+	out := installScript
+	for k, v := range vals {
+		out = strings.ReplaceAll(out, k, strings.ReplaceAll(v, "'", ""))
+	}
+	return out
+}
+
+func (b *Build) file(arch string) (BuildFile, bool) {
+	if b == nil {
+		return BuildFile{}, false
+	}
+	f, ok := b.Files[arch]
+	return f, ok
 }

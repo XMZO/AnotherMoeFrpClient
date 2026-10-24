@@ -45,15 +45,16 @@ type Options struct {
 	Store *store.Store
 	Log   *slog.Logger
 	Now   func() time.Time
-	Dist  *Dist // 可以为 nil：没有打包 agent 时不能安装和升级
+	// Source 提供可安装、升级的 agent 版本（GitHub Release 或本地目录）。nil 时不能安装和升级
+	Source Source
 }
 
 // Service 管理所有节点。
 type Service struct {
-	st   *store.Store
-	log  *slog.Logger
-	now  func() time.Time
-	dist *Dist
+	st  *store.Store
+	log *slog.Logger
+	now func() time.Time
+	src Source
 
 	mu    sync.Mutex
 	conns map[string]*agentConn
@@ -62,7 +63,7 @@ type Service struct {
 
 // New 创建 Service，并把服务端重启前没结束的命令任务标记为失败。
 func New(o Options) *Service {
-	s := &Service{st: o.Store, log: o.Log, now: o.Now, dist: o.Dist,
+	s := &Service{st: o.Store, log: o.Log, now: o.Now, src: o.Source,
 		conns: map[string]*agentConn{}, live: map[string]*liveState{}}
 	if s.log == nil {
 		s.log = slog.Default()
@@ -76,8 +77,23 @@ func New(o Options) *Service {
 	return s
 }
 
-// Dist 返回打包的 agent（可能为 nil）。
-func (s *Service) Dist() *Dist { return s.dist }
+// Source 返回 agent 来源（可能为 nil）。
+func (s *Service) Source() Source { return s.src }
+
+// Dist 返回本地目录来源；来源是 GitHub 或没有配置时返回 nil。
+func (s *Service) Dist() *Dist {
+	d, _ := s.src.(*Dist)
+	return d
+}
+
+// cachedBuild 立即返回已知的最新版本（不等网络），没有时为 nil。
+func (s *Service) cachedBuild() *Build {
+	if s.src == nil {
+		return nil
+	}
+	b, _ := s.src.Cached()
+	return b
+}
 
 // ---- 视图 ----
 
@@ -167,9 +183,9 @@ func (s *Service) view(n store.Node, withConfig bool) View {
 		}
 		v.Client = ci
 	}
-	if s.dist != nil && v.Info != nil && v.Info.AgentVersion != "" && v.Info.AgentVersion != s.dist.Version() &&
-		v.Info.OS == "linux" && s.dist.Has(v.Info.Arch) {
-		v.UpgradeTo = s.dist.Version()
+	if b := s.cachedBuild(); b != nil && v.Info != nil && v.Info.AgentVersion != "" && v.Info.OS == "linux" &&
+		b.Has(v.Info.Arch) && newer(b.Version, v.Info.AgentVersion) {
+		v.UpgradeTo = b.Version
 	}
 	if withConfig {
 		c := n.FrpsConfig
@@ -624,7 +640,7 @@ func (s *Service) Tasks(ctx context.Context, nodeID string) ([]Task, error) {
 	return out, nil
 }
 
-// Upgrade 让节点升级到面板打包的版本。结果在 agent 重启后上报，任务一直是 running 直到那时。
+// Upgrade 让节点升级到最新版本（GitHub Release 或本地目录）。结果在 agent 重启后上报，任务一直是 running 直到那时。
 func (s *Service) Upgrade(ctx context.Context, by Actor, id string) (Task, error) {
 	n, err := store.GetNode(ctx, s.st.DB(), id)
 	if err != nil {
@@ -634,31 +650,40 @@ func (s *Service) Upgrade(ctx context.Context, by Actor, id string) (Task, error
 	if v.Status != StatusOnline || v.Info == nil {
 		return Task{}, apierr.New(apierr.NodeOffline)
 	}
-	if s.dist == nil || v.Info.OS != "linux" || !s.dist.Has(v.Info.Arch) {
-		return Task{}, apierr.Newf(apierr.NodeFailed, "面板没有打包 %s/%s 的 agent", v.Info.OS, v.Info.Arch)
+	if s.src == nil {
+		return Task{}, apierr.Newf(apierr.NodeFailed, "面板没有配置 agent 来源（agent_repo / agent_dist_dir）")
 	}
-	if v.Info.AgentVersion == s.dist.Version() {
-		return Task{}, apierr.Newf(apierr.ValidationFailed, "已经是最新版本 %s", s.dist.Version())
+	lctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	b, err := s.src.Latest(lctx)
+	cancel()
+	if err != nil {
+		return Task{}, apierr.Newf(apierr.NodeFailed, "获取 agent 最新版本失败：%v", err)
+	}
+	if v.Info.OS != "linux" || !b.Has(v.Info.Arch) {
+		return Task{}, apierr.Newf(apierr.NodeFailed, "%s 没有 %s/%s 的 agent", b.Version, v.Info.OS, v.Info.Arch)
+	}
+	if !newer(b.Version, v.Info.AgentVersion) {
+		return Task{}, apierr.Newf(apierr.ValidationFailed, "已经是最新版本（当前 %s，最新 %s）", v.Info.AgentVersion, b.Version)
 	}
 	if running, err := store.HasRunningUpgrade(ctx, s.st.DB(), id); err != nil {
 		return Task{}, err
 	} else if running {
 		return Task{}, apierr.Newf(apierr.ValidationFailed, "这个节点正在升级")
 	}
-	f := s.dist.File(v.Info.Arch)
+	f := b.Files[v.Info.Arch]
 	t := store.NodeTask{ID: model.NewID(), NodeID: id, Kind: "upgrade",
-		Command: v.Info.AgentVersion + " → " + s.dist.Version(), CreatedBy: by.UserID, CreatedAt: s.now().Unix()}
+		Command: v.Info.AgentVersion + " → " + b.Version, CreatedBy: by.UserID, CreatedAt: s.now().Unix()}
 	if err := s.st.Tx(ctx, func(tx *sql.Tx) error {
 		if err := store.InsertNodeTask(ctx, tx, t); err != nil {
 			return err
 		}
-		return s.audit(ctx, tx, by, store.AuditNodeUpgrade, n.Name, map[string]any{"node": id, "from": v.Info.AgentVersion, "to": s.dist.Version()})
+		return s.audit(ctx, tx, by, store.AuditNodeUpgrade, n.Name, map[string]any{"node": id, "from": v.Info.AgentVersion, "to": b.Version, "source": b.Source})
 	}); err != nil {
 		return Task{}, err
 	}
 	// agent 下载、校验、预检都通过后才响应，可能要几分钟，所以在后台等。
-	// URL 是相对路径，agent 用自己配置的面板地址补全
-	req := agentproto.UpgradeRequest{Version: s.dist.Version(), URL: agentproto.RouteDownload + f.Name, SHA256: f.SHA256}
+	// URL 是 GitHub 的完整地址；本地目录时是相对路径，agent 用自己配置的面板地址补全
+	req := agentproto.UpgradeRequest{Version: b.Version, URL: f.URL, SHA256: f.SHA256}
 	go func() {
 		bg := context.Background()
 		if err := s.Call(bg, id, agentproto.MethodUpgrade, req, nil, 11*time.Minute); err != nil {

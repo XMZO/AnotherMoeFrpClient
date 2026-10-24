@@ -1156,8 +1156,10 @@
     }
 
     function draw() {
-      notice.replaceChildren(...(data.agent ? [] : [h('div', { class: 'callout warn mb' }, icon('alert', 16),
-        h('span', null, '这个面板没有打包 agent 程序，安装和升级不可用。正式部署请使用 Docker 镜像。'))]));
+      const ag = data.agent || {};
+      notice.replaceChildren(...(ag.version ? [] : [h('div', { class: 'callout warn mb' }, icon('alert', 16),
+        h('span', null, ag.error ? '暂时不能安装和升级节点：' + ag.error : '正在从 GitHub 查询 agent 最新版本…'))]));
+      const agentText = ag.version ? ' · agent 最新 ' + ag.version + (ag.source === 'github' ? '（GitHub ' + (ag.repo || '') + '）' : '（本地目录）') : '';
       const list = data.nodes || [];
       if (!list.length) {
         box.replaceChildren(stateBox('server', '还没有节点', '添加一台 VPS，面板会在上面运行 frps，并负责配置、监控、升级和卸载。',
@@ -1186,7 +1188,7 @@
                 n.upgradeTo ? h('div', null, badge('可升级', 'info')) : null),
               h('td', { class: 'actions' }, h('a', { class: 'btn btn-sm', href }, '管理')));
           })),
-        h('div', { class: 'card-foot' }, '共 ' + list.length + ' 个节点，' + list.filter((n) => n.status === 'online').length + ' 个在线 · 每 10 秒自动刷新'));
+        h('div', { class: 'card-foot' }, '共 ' + list.length + ' 个节点，' + list.filter((n) => n.status === 'online').length + ' 个在线' + agentText + ' · 每 10 秒自动刷新'));
     }
 
     await load();
@@ -1573,7 +1575,7 @@
             field('名称', name), field('客户端连接地址', addr, '填域名或 IP；留空时用节点上报的 IP')), h('div', { class: 'row-end' }, save))),
         h('section', { class: 'card mb' }, h('div', { class: 'card-head' }, h('h2', null, '维护')), h('div', { class: 'card-body' },
           setting('重启 frps', '用当前配置重启，客户端会短暂断开', op('重启', '/restart', 'frps 已重启')),
-          setting('升级 agent', n.upgradeTo ? '当前 ' + n.info.agentVersion + '，可升级到 ' + n.upgradeTo + '。升级失败会自动回滚。' : '已是面板打包的版本',
+          setting('升级 agent', n.upgradeTo ? '当前 ' + n.info.agentVersion + '，可升级到 ' + n.upgradeTo + '。升级失败会自动回滚。' : '已是最新版本',
             op('升级', '/upgrade', '已开始升级，完成后在"命令"页的历史里查看结果', { disabled: !online || !n.upgradeTo, icon: 'upgrade',
               confirm: { title: '升级 agent', ok: '升级', message: 'agent 会下载新版本并重启，frps 会断开几秒。' } })),
           setting('重置令牌', '令牌泄露或机器重装时使用，需要在节点上重新安装', button('重置', { small: true, onclick: (e) => resetToken(e.currentTarget, true) })))),

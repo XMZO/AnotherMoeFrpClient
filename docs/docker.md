@@ -59,7 +59,15 @@ docker compose logs moefrp | grep 初始化码
 
 ## frps 节点
 
-管理后台的"节点"页可以管理 frps 节点：添加节点 → 复制安装命令到 VPS 上用 root 执行 → 之后在网页上改 frps 配置、看状态、执行命令、升级和卸载。镜像里已经带了 amd64 和 arm64 两个架构的节点 agent，安装和升级都从面板下载，不依赖 GitHub。
+管理后台的"节点"页可以管理 frps 节点：添加节点 → 复制安装命令到 VPS 上用 root 执行 → 之后在网页上改 frps 配置、看状态、执行命令、升级和卸载。节点 agent 程序从本仓库的 GitHub Release（`agent-v*` 标签）下载，面板负责查最新版本和校验和。
+
+节点连不上 GitHub（国内机器常见）时，在 `data/config.toml` 里配一个 GitHub 下载代理，下载地址会变成"代理前缀 + GitHub 地址"：
+
+```toml
+agent_mirror = "https://ghproxy.example.com/"
+```
+
+完全离线的环境可以改用本地目录：`agent_dist_dir = "/data/agent"`，把 `moefrp-agent-linux-amd64`、`moefrp-agent-linux-arm64` 和写着版本号的 `VERSION` 文件放进 `./data/agent`。
 
 安装命令里的面板地址默认取你打开后台时的地址。节点要通过别的地址访问面板时（例如你在内网打开后台），在 `data/config.toml` 里写：
 

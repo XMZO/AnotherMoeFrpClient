@@ -81,6 +81,27 @@ type Server struct {
 	handler http.Handler
 }
 
+// agentSource 决定节点 agent 从哪里下载：配置了 agent_dist_dir 用本地目录，否则用 GitHub Release。
+func agentSource(cfg config.Config, version string, log *slog.Logger) (nodes.Source, error) {
+	if cfg.AgentDistDir != "" {
+		dist, err := nodes.LoadDist(cfg.AgentDistDir, version)
+		if err != nil {
+			return nil, err
+		}
+		if dist != nil {
+			log.Info("node agent source: local directory", "dir", cfg.AgentDistDir, "version", dist.Version())
+			return dist, nil
+		}
+		log.Warn("agent_dist_dir has no agent binaries, falling back to GitHub", "dir", cfg.AgentDistDir)
+	}
+	if cfg.AgentRepo == "" {
+		log.Info("node agent source not configured; node install and upgrade are unavailable")
+		return nil, nil
+	}
+	log.Info("node agent source: GitHub releases", "repo", cfg.AgentRepo, "mirror", cfg.AgentMirror)
+	return &nodes.GitHub{Repo: cfg.AgentRepo, Mirror: cfg.AgentMirror, Log: log}, nil
+}
+
 // New 创建 Server 并注册路由。
 func New(d Deps) (*Server, error) {
 	if d.Store == nil || d.Auth == nil || d.Profiles == nil {
@@ -113,14 +134,11 @@ func New(d Deps) (*Server, error) {
 	s.admin = admin.New(d.Store, d.Auth, s.now)
 	s.nodes = d.Nodes
 	if s.nodes == nil {
-		dist, err := nodes.LoadDist(d.Config.AgentDistDir, d.Version)
+		src, err := agentSource(d.Config, d.Version, s.log)
 		if err != nil {
 			return nil, err
 		}
-		if dist == nil {
-			s.log.Info("no bundled agent binaries; node install and upgrade are unavailable", "dir", d.Config.AgentDistDir)
-		}
-		s.nodes = nodes.New(nodes.Options{Store: d.Store, Log: s.log, Now: s.now, Dist: dist})
+		s.nodes = nodes.New(nodes.Options{Store: d.Store, Log: s.log, Now: s.now, Source: src})
 	}
 	if v := d.Config.Client.MinVersion; v != "" {
 		mv, err := api.ParseVersion(v)

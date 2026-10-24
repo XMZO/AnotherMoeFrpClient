@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -34,9 +35,13 @@ type Config struct {
 
 	// 节点 agent（docs/node-agent.md）：
 	// PublicURL 是节点访问面板用的地址（例如 https://frp.example.com），写进安装命令；
-	// 为空时按管理员访问后台时的地址生成。AgentDistDir 是打包的 agent 程序所在目录。
+	// 为空时按管理员访问后台时的地址生成。
+	// agent 程序默认从 GitHub 仓库 AgentRepo 的 Release（标签 agent-v*）下载，AgentMirror 是下载地址前缀
+	// （例如 https://ghproxy.example.com/，给连不上 GitHub 的机器用）；AgentDistDir 不为空时改用本地目录。
 	PublicURL    string `toml:"public_url"`
 	AgentDistDir string `toml:"agent_dist_dir"`
+	AgentRepo    string `toml:"agent_repo"`
+	AgentMirror  string `toml:"agent_mirror"`
 
 	Client Client `toml:"client"`
 }
@@ -86,7 +91,7 @@ func Default() Config {
 		SingleSession:  true,
 		SessionTTL:     Duration(30 * 24 * time.Hour),
 		LogLevel:       "info",
-		AgentDistDir:   "/usr/share/moefrp/agent",
+		AgentRepo:      "XMZO/AnotherMoeFrpClient",
 	}
 }
 
@@ -138,6 +143,8 @@ var envVars = []struct {
 	{"LOG_LEVEL", func(c *Config, v string) error { c.LogLevel = v; return nil }},
 	{"PUBLIC_URL", func(c *Config, v string) error { c.PublicURL = v; return nil }},
 	{"AGENT_DIST_DIR", func(c *Config, v string) error { c.AgentDistDir = v; return nil }},
+	{"AGENT_REPO", func(c *Config, v string) error { c.AgentRepo = v; return nil }},
+	{"AGENT_MIRROR", func(c *Config, v string) error { c.AgentMirror = v; return nil }},
 	{"ADMIN_SETUP_CODE", func(c *Config, v string) error { c.AdminSetupCode = v; return nil }},
 	{"ADMIN_RECOVERY", func(c *Config, v string) error {
 		b, err := strconv.ParseBool(v)
@@ -184,6 +191,8 @@ func splitList(v string) []string {
 	return out
 }
 
+var repoRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+
 // Validate 检查配置是否可用。
 func (c Config) Validate() error {
 	var errs []error
@@ -200,6 +209,15 @@ func (c Config) Validate() error {
 		if u, err := url.Parse(c.PublicURL); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" ||
 			(u.Path != "" && u.Path != "/") || u.RawQuery != "" || strings.ContainsAny(c.PublicURL, "'\"` $\\") {
 			errs = append(errs, fmt.Errorf("public_url %q 不正确，应类似 https://frp.example.com", c.PublicURL))
+		}
+	}
+	if c.AgentRepo != "" && !repoRe.MatchString(c.AgentRepo) {
+		errs = append(errs, fmt.Errorf("agent_repo %q 不正确，应类似 XMZO/AnotherMoeFrpClient", c.AgentRepo))
+	}
+	if m := c.AgentMirror; m != "" {
+		if u, err := url.Parse(m); err != nil || u.Scheme != "https" || u.Host == "" || !strings.HasSuffix(m, "/") ||
+			strings.ContainsAny(m, "'\"` $\\") {
+			errs = append(errs, fmt.Errorf("agent_mirror %q 不正确，应是以 / 结尾的 https 地址，例如 https://ghproxy.example.com/", m))
 		}
 	}
 	if code := c.AdminSetupCode; code != "" && (len(code) < 12 || len(code) > 128) {

@@ -1,5 +1,5 @@
 #!/bin/sh
-# MoeFrp 节点 agent 安装脚本（由面板生成，面板地址已写好）。
+# MoeFrp 节点 agent 安装脚本（由面板生成，面板地址、下载地址和校验和已写好）。
 #
 #   安装：curl -fsSL __SERVER__/agent/install.sh | sudo sh -s -- <安装码> [--no-exec]
 #   卸载：curl -fsSL __SERVER__/agent/install.sh | sudo sh -s -- --uninstall
@@ -9,6 +9,12 @@
 set -eu
 
 SERVER='__SERVER__'
+VERSION='__VERSION__'
+URL_AMD64='__URL_AMD64__'
+SHA_AMD64='__SHA_AMD64__'
+URL_ARM64='__URL_ARM64__'
+SHA_ARM64='__SHA_ARM64__'
+UNAVAILABLE='__UNAVAILABLE__'
 
 fail() { echo "错误：$*" >&2; exit 1; }
 
@@ -39,21 +45,23 @@ if [ "$ACTION" = uninstall ]; then
 	exit 0
 fi
 
+[ -z "$UNAVAILABLE" ] || fail "$UNAVAILABLE"
 [ "$(uname -s)" = Linux ] || fail "只支持 Linux"
 [ -d /run/systemd/system ] || fail "这台机器没有用 systemd，暂不支持"
 case "$(uname -m)" in
-x86_64 | amd64) ARCH=amd64 ;;
-aarch64 | arm64) ARCH=arm64 ;;
+x86_64 | amd64) URL=$URL_AMD64 SHA=$SHA_AMD64 ARCH=amd64 ;;
+aarch64 | arm64) URL=$URL_ARM64 SHA=$SHA_ARM64 ARCH=arm64 ;;
 *) fail "不支持的架构 $(uname -m)，只支持 amd64 和 arm64" ;;
 esac
+[ -n "$URL" ] || fail "agent $VERSION 没有 linux-$ARCH 的程序"
 if [ -z "$CODE" ] && [ ! -f /etc/moefrp-agent/agent.toml ]; then
 	fail "缺少安装码。请在面板的“节点”页复制完整的安装命令"
 fi
 
 if command -v curl >/dev/null 2>&1; then
-	fetch() { curl -fsSL --retry 3 -o "$2" "$1"; }
+	fetch() { curl -fL --retry 3 --connect-timeout 15 -o "$2" "$1"; }
 elif command -v wget >/dev/null 2>&1; then
-	fetch() { wget -q -O "$2" "$1"; }
+	fetch() { wget -O "$2" "$1"; }
 else
 	fail "需要 curl 或 wget"
 fi
@@ -64,16 +72,14 @@ chmod 700 /var/lib/moefrp-agent
 TMP=$(mktemp -d /var/lib/moefrp-agent/install.XXXXXX)
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
-echo "下载 moefrp-agent（linux-$ARCH）……"
-fetch "$SERVER/agent/download/linux-$ARCH" "$TMP/moefrp-agent" || fail "下载失败"
-fetch "$SERVER/agent/download/linux-$ARCH.sha256" "$TMP/sha256" || fail "下载校验和失败"
-WANT=$(cut -d ' ' -f 1 "$TMP/sha256")
+echo "下载 moefrp-agent $VERSION（linux-$ARCH）：$URL"
+fetch "$URL" "$TMP/moefrp-agent" || fail "下载失败。国内机器连不上 GitHub 时，可以在面板配置里设置 agent_mirror"
 if command -v sha256sum >/dev/null 2>&1; then
 	GOT=$(sha256sum "$TMP/moefrp-agent" | cut -d ' ' -f 1)
 else
 	GOT=$(openssl dgst -sha256 -r "$TMP/moefrp-agent" | cut -d ' ' -f 1)
 fi
-[ "$WANT" = "$GOT" ] || fail "校验失败：期望 $WANT，实际 $GOT"
+[ "$SHA" = "$GOT" ] || fail "校验失败：期望 $SHA，实际 $GOT"
 chmod 755 "$TMP/moefrp-agent"
 
 # shellcheck disable=SC2086

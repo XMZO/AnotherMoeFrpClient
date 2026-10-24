@@ -180,7 +180,7 @@ func (a *Agent) report() agentproto.Report {
 	return agentproto.Report{
 		Uptime: u.Uptime, CPU: u.CPU, Load: u.Load,
 		MemTotal: u.MemTotal, MemUsed: u.MemUsed, DiskTotal: u.DiskTotal, DiskUsed: u.DiskUsed,
-		NetRx: u.NetRx, NetTx: u.NetTx,
+		NetRx: u.NetRx, NetTx: u.NetTx, At: time.Now().UnixMilli(),
 		Frps: a.frps.Status(),
 	}
 }

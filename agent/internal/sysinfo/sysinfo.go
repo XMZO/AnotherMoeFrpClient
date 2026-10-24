@@ -126,7 +126,7 @@ func parseNetDev(s string) (rx, tx uint64) {
 			continue
 		}
 		name = strings.TrimSpace(name)
-		if name == "lo" {
+		if virtualNIC(name) {
 			continue
 		}
 		f := strings.Fields(rest)
@@ -139,6 +139,20 @@ func parseNetDev(s string) (rx, tx uint64) {
 		tx += t
 	}
 	return rx, tx
+}
+
+// virtualNICPrefixes 是不计入流量的网卡：回环，以及容器、网桥、虚拟机、隧道这些虚拟网卡——
+// 经过它们的流量也会经过物理网卡，加在一起就重复计算了（容器的流量会被算三遍）。
+var virtualNICPrefixes = []string{"lo", "docker", "veth", "br-", "virbr", "vnet", "vmbr", "cni", "flannel", "cali", "kube",
+	"tun", "tap", "wg", "tailscale", "zt", "ifb", "dummy"}
+
+func virtualNIC(name string) bool {
+	for _, p := range virtualNICPrefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseOSRelease 取 /etc/os-release 的 PRETTY_NAME。

@@ -69,7 +69,8 @@ type liveState struct {
 	report         agentproto.Report
 	at             time.Time
 	rxRate, txRate float64
-	touchedAt      time.Time // 最后一次写 last_seen_at
+	conn           *agentConn // 上一份 report 来自哪条连接：换了连接（重连、升级）就重新开始算速率
+	touchedAt      time.Time  // 最后一次写 last_seen_at
 }
 
 func (c *agentConn) send(ctx context.Context, m agentproto.Message) error {
@@ -200,7 +201,7 @@ func (s *Service) Serve(ctx context.Context, ws *websocket.Conn, node store.Node
 		case m.Type == agentproto.TypeEvent && m.Method == agentproto.MethodReport:
 			var r agentproto.Report
 			if json.Unmarshal(m.Data, &r) == nil {
-				s.recordReport(node.ID, r)
+				s.recordReport(node.ID, c, r)
 			}
 		case m.Type == agentproto.TypeResponse:
 			c.mu.Lock()
@@ -322,7 +323,11 @@ func (s *Service) afterHello(id string, h agentproto.Hello) {
 	}
 }
 
-func (s *Service) recordReport(id string, r agentproto.Report) {
+// minRateInterval：两次采样至少隔这么久才算速率。旧版 agent 没有采样时间，只能用面板收到的时间差，
+// 网络抖动时两次上报会挤在一起到达，时间差太小就跳过，保留上一次的速率。
+const minRateInterval = 1.5
+
+func (s *Service) recordReport(id string, c *agentConn, r agentproto.Report) {
 	now := s.now()
 	s.mu.Lock()
 	l := s.live[id]
@@ -330,13 +335,20 @@ func (s *Service) recordReport(id string, r agentproto.Report) {
 		l = &liveState{}
 		s.live[id] = l
 	}
-	if !l.at.IsZero() {
-		if dt := now.Sub(l.at).Seconds(); dt > 0 && r.NetRx >= l.report.NetRx && r.NetTx >= l.report.NetTx {
+	if l.conn != c {
+		// 新连接（重连、升级）：上一份 report 不能当基准，速率先归零，下一次再算
+		l.rxRate, l.txRate = 0, 0
+	} else if !l.at.IsZero() && r.NetRx >= l.report.NetRx && r.NetTx >= l.report.NetTx {
+		dt := now.Sub(l.at).Seconds()
+		if r.At > 0 && l.report.At > 0 {
+			dt = float64(r.At-l.report.At) / 1000 // agent 的采样时间差，不受网络抖动影响
+		}
+		if dt >= minRateInterval {
 			l.rxRate = float64(r.NetRx-l.report.NetRx) / dt
 			l.txRate = float64(r.NetTx-l.report.NetTx) / dt
 		}
 	}
-	l.report, l.at = r, now
+	l.report, l.at, l.conn = r, now, c
 	touch := now.Sub(l.touchedAt) > time.Minute
 	if touch {
 		l.touchedAt = now

@@ -143,9 +143,12 @@ type Report struct {
 	MemUsed   uint64     `json:"memUsed"`
 	DiskTotal uint64     `json:"diskTotal"`
 	DiskUsed  uint64     `json:"diskUsed"`
-	NetRx     uint64     `json:"netRx"` // 累计字节数，面板自己算速率
+	NetRx     uint64     `json:"netRx"` // 累计字节数（只算物理网卡，见 sysinfo.parseNetDev），面板自己算速率
 	NetTx     uint64     `json:"netTx"`
-	Frps      FrpsStatus `json:"frps"`
+	// At 是采样时间（agent 本机的 Unix 毫秒，1.4.3 起）。面板用两次采样的时间差算速率，
+	// 不用收到上报的时间差：网络抖动时两次上报可能前后脚到达，会把速率放大几十倍。
+	At   int64      `json:"at,omitempty"`
+	Frps FrpsStatus `json:"frps"`
 }
 
 // frps 状态。

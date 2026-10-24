@@ -136,7 +136,11 @@ type ticketDiscarder interface{ Discard(nodeID string) }
 
 // staleTicketHints 是节点因为票据本身无效而拒绝登录时的原文片段（agent/internal/access）：
 // 面板轮换了密钥、重置了凭证，预取的票据全都不能用了，扔掉重新领，不用一张张试完。
-var staleTicketHints = []string{"没有有效的登录票据", "节点凭证已被管理员重置", "登录票据已过期", "登录票据已失效"}
+// 会话被吊销（退出登录、被踢下线）后重新登录的话，池子里还可能有旧会话的票据，也一起扔掉。
+var staleTicketHints = []string{"没有有效的登录票据", "节点凭证已被管理员重置", "登录票据已过期", "登录票据已失效", "退出登录或被踢下线"}
+
+// networkHints 是登录时网络层出错的原文片段（yamux、net 包的英文错误）：不是节点拒绝，是数据发不过去或连接被断开。
+var networkHints = []string{"connection write timeout", "i/o timeout", "connection reset", "broken pipe", "EOF", "keepalive timeout", "use of closed network connection"}
 
 // dropStaleTickets 在官方节点拒绝登录时检查原因，票据无效就扔掉这个节点预取的票据。
 func (e *Engine) dropStaleTickets(nodeID, msg string) {
@@ -701,6 +705,9 @@ func classifyFailure(node model.Node, msg string, pr PingResult) *apierr.Error {
 	case !pr.OK:
 		ae.Code = pr.Code
 		ae.Details["probe"] = pr.Message
+	case slices.ContainsFunc(networkHints, func(h string) bool { return strings.Contains(msg, h) }):
+		ae.Code = apperr.NodeUnstable
+		ae.Details["reason"] = msg
 	case strings.HasPrefix(node.ID, api.OfficialNodePrefix):
 		ae.Code = apperr.OfficialDenied
 		ae.Details["reason"] = msg

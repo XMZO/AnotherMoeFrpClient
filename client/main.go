@@ -216,6 +216,8 @@ func main() {
 		},
 		OnOfficial: tunnelCtl.SetOfficial,
 		OnImages:   imageCtl.SetSources, // 图源只给登录的用户
+		// 票据按会话发：换了会话（重新登录、被踢下线、退出）旧票据都不能用，清空重新领
+		OnSessionChange: nodeTickets.Clear,
 	})
 	profileSvc := services.NewProfileService(profiles, settings, eng, syncMgr)
 	authSvc := services.NewAuthService(syncMgr, profiles, eng)

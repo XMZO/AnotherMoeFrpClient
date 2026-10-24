@@ -138,6 +138,9 @@ type Options struct {
 	OnOfficial func([]api.OfficialNode)
 	// OnImages 在拿到图片面板的图源时调用（图源只给登录的用户；退出登录、会话失效时传 nil）。
 	OnImages func([]api.ImageSource)
+	// OnSessionChange 在登录（新会话开始）、退出登录、会话被服务端结束时调用：
+	// 官方节点的登录票据是按会话发的，换了会话旧的都不能用了（main 用它清空票据池）。
+	OnSessionChange func()
 }
 
 type pushErr struct {
@@ -158,6 +161,7 @@ type Manager struct {
 	logf        func(string, ...any)
 	onOfficial  func([]api.OfficialNode)
 	onImages    func([]api.ImageSource)
+	onSession   func()
 	imagesStale atomic.Bool // 面板改了客户端配置，下次同步重新拉图源
 
 	mu        sync.Mutex
@@ -209,6 +213,7 @@ func New(o Options) *Manager {
 	m := &Manager{
 		api: o.API, creds: o.Creds, profiles: o.Profiles, eng: o.Engine, device: apiclient.DeviceName(o.DeviceName),
 		poll: o.PollInterval, retry: o.OfflineRetry, delay: o.PushDelay, logf: o.Logf, onOfficial: o.OnOfficial, onImages: o.OnImages,
+		onSession: o.OnSessionChange,
 		conflicts: map[string]*Conflict{}, remote: map[string]RemoteUpdate{}, pushErrs: map[string]pushErr{},
 	}
 	m.acct.CacheOwner = o.Profiles.Sync().Nickname
@@ -363,6 +368,7 @@ func (m *Manager) start(token string, user *api.UserInfo, keep, interactive bool
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &session{ctx: ctx, cancel: cancel, kickCh: make(chan string, 1), done: make(chan struct{}), etag: -1, wantDefault: interactive}
+	m.sessionChanged()
 	m.mu.Lock()
 	m.cur = s
 	m.acct = AccountState{LoggedIn: true, User: user, KeepLoggedIn: keep, CacheOwner: user.Nickname}
@@ -422,6 +428,7 @@ func (m *Manager) endSession(s *session, err error) {
 	m.mu.Unlock()
 	m.logf("session ended by server: %s", ae.Code)
 	m.clearImages()
+	m.sessionChanged()
 	if derr := m.creds.Delete(); derr != nil {
 		m.logf("delete credential: %v", derr)
 	}
@@ -461,6 +468,7 @@ func (m *Manager) Logout(ctx context.Context) error {
 	m.status = Status{State: StateOff}
 	m.mu.Unlock()
 	m.clearImages()
+	m.sessionChanged()
 	m.logf("logged out, %d cloud profiles removed from cache", len(ids))
 	m.emitAccount()
 	m.fire(EventSyncChanged, Changed{ProfileIDs: ids})
@@ -581,6 +589,12 @@ func (m *Manager) SyncNow() {
 func (m *Manager) RefreshImages() {
 	m.imagesStale.Store(true)
 	m.SyncNow()
+}
+
+func (m *Manager) sessionChanged() {
+	if m.onSession != nil {
+		m.onSession()
+	}
 }
 
 func (m *Manager) clearImages() {

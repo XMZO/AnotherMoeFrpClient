@@ -35,6 +35,7 @@ const (
 	NodeUDPUnprobed     apierr.Code = "node_udp_unprobed"     // kcp / quic 走 UDP，没法用 TCP 探测
 	NodeTicketFailed    apierr.Code = "node_ticket_failed"    // 官方节点：领不到登录票据（details.reason）
 	OfficialDenied      apierr.Code = "official_denied"       // 官方节点拒绝了登录（details.reason 是节点给的原因）
+	NodeUnstable        apierr.Code = "node_unstable"         // TCP 能连上，但登录时数据发不过去或连接被断开（网络不稳定，details.reason 是原文）
 
 	// 代理状态（frps 拒绝了某个代理）
 	ProxyPortInUse      apierr.Code = "proxy_port_in_use"

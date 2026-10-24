@@ -117,4 +117,8 @@ func TestClassifyFailure(t *testing.T) {
 	if ae := classifyFailure(own, "x", ok); ae.Code != apperr.NodeHandshakeFailed || !strings.Contains(fmt.Sprint(ae.Details["target"]), "7000") {
 		t.Fatalf("自己的节点：%+v", ae)
 	}
+	// 能连上但数据发不过去（yamux 写超时）：是网络不稳定，不是节点拒绝
+	if ae := classifyFailure(official, "connection write timeout", ok); ae.Code != apperr.NodeUnstable || ae.Details["reason"] != "connection write timeout" {
+		t.Fatalf("网络不稳定：%+v", ae)
+	}
 }

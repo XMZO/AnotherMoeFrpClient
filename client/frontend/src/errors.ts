@@ -65,6 +65,7 @@ export const codeMessages: Record<string, string> = {
   node_dns: '无法连接节点：域名解析失败（{target}）',
   node_unreachable: '无法连接节点（{target}）',
   node_handshake_failed: '能连上 {target}，但登录失败：对方可能不是 frps，或协议、TLS 设置不一致',
+  node_unstable: '能连上 {target}，但网络不稳定，登录的数据发不过去（{reason}）：请稍后重试，或换一个节点',
   node_udp_unprobed: 'kcp / quic 走 UDP，无法测速',
   node_ticket_failed: '无法领取官方节点的登录票据：{reason}',
   official_denied: '官方节点拒绝了连接：{reason}',

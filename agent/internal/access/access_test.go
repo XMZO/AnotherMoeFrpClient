@@ -319,7 +319,9 @@ func TestWithFrps(t *testing.T) {
 	if r := m.ApplySettings(1, set); !r.Applied {
 		t.Fatalf("frps: %+v", r)
 	}
-	defer m.Close()
+	// 用 Cleanup 而不是 defer：Cleanup 后注册的先执行，下面每个 frpc 的 Close 会排在 frps 前面。
+	// 先关 frps 的话，还在重连的 frpc 正好连进来会撞上 frp 自己（golib mux）的数据竞争，-race 下偶尔报错
+	t.Cleanup(m.Close)
 	s.Kick, s.Alive = m.CloseClient, m.HasClient
 	echo := echoServer(t)
 

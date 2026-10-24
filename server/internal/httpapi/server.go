@@ -30,6 +30,7 @@ type Limits struct {
 	ResetPassword ratelimit.Rule // 每个 IP
 	Authenticated ratelimit.Rule // 每个用户，其他需要登录的接口
 	SharePreview  ratelimit.Rule // 每个用户，分享预览
+	NodeTickets   ratelimit.Rule // 每个客户端会话，领取官方节点登录票据
 }
 
 // DefaultLimits 按 PLAN 7.8。
@@ -39,6 +40,8 @@ var DefaultLimits = Limits{
 	ResetPassword: ratelimit.Rule{Limit: 5, Window: 10 * time.Minute},
 	Authenticated: ratelimit.Rule{Limit: 120, Window: time.Minute},
 	SharePreview:  ratelimit.Rule{Limit: 30, Window: time.Minute},
+	// 每次登录用一张，客户端一次领几张备用；断线重连频繁时也够用
+	NodeTickets: ratelimit.Rule{Limit: 120, Window: time.Hour},
 }
 
 // Deps 是创建 Server 需要的依赖。
@@ -72,7 +75,7 @@ type Server struct {
 	trustedProxies []netip.Prefix
 	minVersion     *api.Version
 
-	limLogin, limRegister, limReset, limUser, limPreview *ratelimit.Limiter
+	limLogin, limRegister, limReset, limUser, limPreview, limTickets *ratelimit.Limiter
 
 	setupMu   sync.Mutex
 	setupCode string // 管理后台初始化码，空串表示不开放初始化
@@ -158,6 +161,7 @@ func New(d Deps) (*Server, error) {
 	s.limReset = ratelimit.New(limits.ResetPassword)
 	s.limUser = ratelimit.New(limits.Authenticated)
 	s.limPreview = ratelimit.New(limits.SharePreview)
+	s.limTickets = ratelimit.New(limits.NodeTickets)
 
 	if err := s.initSetup(context.Background()); err != nil {
 		return nil, err
@@ -194,6 +198,8 @@ func (s *Server) routes() {
 	mux.Handle("GET "+api.RouteMe, authed(s.handleMe))
 	mux.Handle("GET "+api.RouteState, authed(s.handleState))
 	mux.Handle("GET "+api.RouteOfficialNodes, authed(s.handleOfficialNodes))
+	mux.Handle("POST "+api.RouteOfficialTickets, chain(http.HandlerFunc(s.handleNodeTickets),
+		s.requireAuth, s.limit(s.limUser, byUser), s.limit(s.limTickets, bySession)))
 
 	mux.Handle("POST "+api.RouteProfiles, authed(s.handleCreateProfile))
 	mux.Handle("GET "+api.RouteProfile, authed(s.handleGetProfile))
@@ -255,7 +261,7 @@ func (s *Server) handleV1Fallback(w http.ResponseWriter, r *http.Request) {
 // Sweep 清理限流器里过期的 key，由 serve 定期调用。
 func (s *Server) Sweep() {
 	now := s.now()
-	for _, l := range []*ratelimit.Limiter{s.limLogin, s.limRegister, s.limReset, s.limUser, s.limPreview} {
+	for _, l := range []*ratelimit.Limiter{s.limLogin, s.limRegister, s.limReset, s.limUser, s.limPreview, s.limTickets} {
 		l.Sweep(now)
 	}
 }

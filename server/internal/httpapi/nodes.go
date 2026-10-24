@@ -609,3 +609,19 @@ func (s *Server) handleOfficialNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
+
+// POST /api/v1/official-nodes/{id}/tickets：给当前客户端会话签发登录票据（docs/node-agent.md 第 12 节）。
+func (s *Server) handleNodeTickets(w http.ResponseWriter, r *http.Request) {
+	var req api.NodeTicketsRequest
+	if err := decodeJSON(r, &req); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	p := principalFrom(r)
+	list, err := s.nodes.IssueTickets(r.Context(), p.User.ID, p.Session.ID, r.PathValue("id"), req.Count)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, api.NodeTicketsResponse{Tickets: list})
+}

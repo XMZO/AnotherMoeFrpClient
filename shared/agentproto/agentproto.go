@@ -254,19 +254,27 @@ type UninstallRequest struct {
 // FeatureAccess：agent 支持官方节点的授权（access.sync 和 frps 插件）。
 const FeatureAccess = "access"
 
-// AccessTable 是一个节点的授权用户表，面板在变化时整表下发。
+// FeatureTickets：agent 用一次性登录票据（shared/nodeticket）校验官方节点的用户。
+// 官方节点要求 agent 支持它（agent 1.3.0 起）。
+const FeatureTickets = "tickets"
+
+// AccessTable 是一个节点的授权表，面板在变化时整表下发。
 // Enabled 为 false 时节点不是官方节点：agent 不挂插件，frps 只按 token 认证。
 type AccessTable struct {
-	Enabled bool         `json:"enabled"`
-	Users   []AccessUser `json:"users"`
+	Enabled   bool         `json:"enabled"`
+	NodeID    string       `json:"nodeId,omitempty"`
+	TicketKey string       `json:"ticketKey,omitempty"` // 这个节点的票据密钥（base64），由面板主密钥派生
+	Users     []AccessUser `json:"users"`
+	// RevokedSessions 是已经撤销、但还没到原本过期时间的客户端会话：
+	// 它们签发过的票据不能再登录，用它们登录的 frpc 也不再接受新代理和新连接。
+	RevokedSessions []string `json:"revokedSessions,omitempty"`
 }
 
-// AccessUser 是一个可以使用这个节点的用户。CredHash 是节点凭证的 SHA-256（十六进制），
-// 节点上不保存凭证本身。
+// AccessUser 是一个可以使用这个节点的用户。
 type AccessUser struct {
-	CredHash string      `json:"credHash"`
 	UserID   string      `json:"userId"`
 	Nickname string      `json:"nickname"` // 必须和 frpc 的 user 一致
+	Gen      int64       `json:"gen"`      // 节点凭证代数，和票据里的不一致就拒绝（管理员重置过）
 	Quota    quota.Quota `json:"quota"`
 }
 

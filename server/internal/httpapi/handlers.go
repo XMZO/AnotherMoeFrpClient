@@ -85,6 +85,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	infoFrom(r.Context()).UserID = res.User.ID
+	s.nodes.AccessChanged() // 单设备模式下旧会话被挤下线，它在官方节点上的票据和连接要失效
 	writeJSON(w, http.StatusOK, api.LoginResponse{
 		Token:     res.Token,
 		ExpiresAt: time.Unix(res.Session.ExpiresAt, 0).UTC(),
@@ -98,6 +99,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
+	s.nodes.AccessChanged() // 吊销的会话在官方节点上失效
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -117,6 +119,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
+	s.nodes.AccessChanged() // 其他设备的会话被吊销
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -136,6 +139,7 @@ func (s *Server) handleResetPassword(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
+	s.nodes.AccessChanged() // 所有会话被吊销
 	w.WriteHeader(http.StatusNoContent)
 }
 

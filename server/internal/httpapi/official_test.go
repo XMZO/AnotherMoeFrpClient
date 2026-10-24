@@ -1,16 +1,17 @@
 package httpapi
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"sync"
 	"testing"
 
 	"moefrp/shared/agentproto"
 	"moefrp/shared/api"
 	"moefrp/shared/apierr"
+	"moefrp/shared/nodeticket"
 	"moefrp/shared/quota"
 )
 
@@ -63,17 +64,35 @@ func (a *autoAgent) enabled() bool {
 	return a.table != nil && a.table.Enabled
 }
 
-func sha(s string) string {
-	sum := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(sum[:])
+func (a *autoAgent) last() agentproto.AccessTable {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.table == nil {
+		return agentproto.AccessTable{}
+	}
+	return *a.table
+}
+
+// claims 用节点收到的票据密钥校验票据，就像节点上的 agent 那样。
+func (a *autoAgent) claims(t *testing.T, ticket string) nodeticket.Claims {
+	t.Helper()
+	key, err := base64.StdEncoding.DecodeString(a.last().TicketKey)
+	if err != nil || len(key) == 0 {
+		t.Fatalf("票据密钥：%q", a.last().TicketKey)
+	}
+	c, err := nodeticket.Verify(key, ticket)
+	if err != nil {
+		t.Fatalf("节点应能校验面板签发的票据：%v", err)
+	}
+	return c
 }
 
 func TestOfficialNodes(t *testing.T) {
 	n := newNodeEnv(t)
 	id, code := n.createNode("东京")
 	en := n.enroll(code)
-	fa, _, err := dialAgent(t, n.http.URL, en.Token, agentproto.Hello{AgentVersion: "1.1.0", OS: "linux", Arch: "amd64",
-		Features: []string{agentproto.FeatureAccess}})
+	fa, _, err := dialAgent(t, n.http.URL, en.Token, agentproto.Hello{AgentVersion: "1.3.0", OS: "linux", Arch: "amd64",
+		Features: []string{agentproto.FeatureAccess, agentproto.FeatureTickets}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,6 +113,19 @@ func TestOfficialNodes(t *testing.T) {
 		n.do(req{method: "GET", path: api.RouteOfficialNodes, token: tok}).expect(http.StatusOK).decode(&out)
 		return out.Nodes
 	}
+	tickets := func(tok, node string, count int) resp {
+		t.Helper()
+		return n.do(req{method: "POST", path: "/api/v1/official-nodes/" + node + "/tickets", token: tok, body: api.NodeTicketsRequest{Count: count}})
+	}
+	issue := func(tok string) []api.NodeTicket {
+		t.Helper()
+		var out api.NodeTicketsResponse
+		tickets(tok, id, 3).expect(http.StatusOK).decode(&out)
+		if len(out.Tickets) != 3 {
+			t.Fatalf("票据：%+v", out)
+		}
+		return out.Tickets
+	}
 	if len(official("alice", aliceTok)) != 0 {
 		t.Fatal("没开官方节点时不下发")
 	}
@@ -113,12 +145,40 @@ func TestOfficialNodes(t *testing.T) {
 		!b.Online || b.Quota.MaxProxies != 20 {
 		t.Fatalf("下发的节点：%+v", b)
 	}
-	if a.users()["bob"].CredHash != sha(b.Credential) {
-		t.Fatal("节点上的凭证哈希应和下发给客户端的凭证对应")
-	}
-	if nd := b.ToNode(); nd.ID != api.OfficialNodePrefix+id || nd.Metadatas[api.MetaCredential] != b.Credential {
+	if nd := b.ToNode(); nd.ID != api.OfficialNodePrefix+id || len(nd.Metadatas) != 0 {
 		t.Fatalf("ToNode：%+v", nd)
 	}
+	if tb := a.last(); tb.NodeID != id || tb.TicketKey == "" {
+		t.Fatalf("授权表：%+v", tb)
+	}
+
+	// 票据：节点能用下发的密钥校验，绑定用户、会话、节点、代数，有效期 15 分钟，每张随机数不同
+	bt := issue(bobTok)
+	c0, c1 := a.claims(t, bt[0].Ticket), a.claims(t, bt[1].Ticket)
+	if c0.User != a.users()["bob"].UserID || c0.Node != id || c0.Session == "" || c0.Gen != a.users()["bob"].Gen ||
+		c0.Expires-c0.Issued != 15*60 || c0.Expires != bt[0].ExpiresAt || c0.Nonce == c1.Nonce || c0.Session != c1.Session {
+		t.Fatalf("票据声明：%+v %+v", c0, c1)
+	}
+	tickets(aliceTok, id, 1).apiErr(apierr.NotFound) // 没权限
+	tickets(bobTok, "no-such-node", 1).apiErr(apierr.NotFound)
+	tickets(bobTok, id, 0).apiErr(apierr.ValidationFailed)
+	tickets(bobTok, id, api.MaxTicketsPerRequest+1).apiErr(apierr.ValidationFailed)
+	tickets("", id, 1).expect(http.StatusUnauthorized)
+
+	// 另一台设备登录（测试环境是单设备模式）：新会话的票据绑定新会话，被挤下线的旧会话在节点上列为已撤销
+	bob2 := n.login("bob", "password-bob")
+	c2 := a.claims(t, issue(bob2)[0].Ticket)
+	if c2.Session == c0.Session {
+		t.Fatal("不同设备（会话）的票据应绑定各自的会话")
+	}
+	eventually(t, "挤下线的会话推给节点", func() bool { return slices.Contains(a.last().RevokedSessions, c0.Session) })
+	if slices.Contains(a.last().RevokedSessions, c2.Session) {
+		t.Fatal("在用的会话不应被撤销")
+	}
+	// 退出登录：这个会话也列为已撤销
+	n.do(req{method: "POST", path: api.RouteLogout, token: bob2}).expect(http.StatusNoContent)
+	eventually(t, "退出登录推给节点", func() bool { return slices.Contains(a.last().RevokedSessions, c2.Session) })
+	bobTok = n.login("bob", "password-bob")
 
 	// ETag：没变化时 304
 	r := n.do(req{method: "GET", path: api.RouteOfficialNodes, token: bobTok}).expect(http.StatusOK)
@@ -152,13 +212,18 @@ func TestOfficialNodes(t *testing.T) {
 	bad.VIP.Ports = "70000"
 	n.admin("PUT", "/quotas", bad).apiErr(apierr.ValidationFailed)
 
-	// 重置凭证：旧凭证在节点上失效
-	old := a.users()["alice"].CredHash
+	// 重置凭证：代数 +1，节点上旧票据失效，新票据带新代数
+	old := a.users()["alice"].Gen
+	oldTicket := a.claims(t, issue(aliceTok)[0].Ticket)
 	n.admin("POST", "/users/alice/reset-node-credential", nil).expect(http.StatusNoContent)
-	eventually(t, "凭证换代", func() bool { u := a.users()["alice"]; return u.CredHash != "" && u.CredHash != old })
-	if nodes := official("alice", aliceTok); sha(nodes[0].Credential) != a.users()["alice"].CredHash {
-		t.Fatal("客户端拿到的是新凭证")
+	eventually(t, "凭证换代", func() bool { return a.users()["alice"].Gen == old+1 })
+	if c := a.claims(t, issue(aliceTok)[0].Ticket); c.Gen != old+1 || oldTicket.Gen != old {
+		t.Fatalf("新票据的代数：%d（旧 %d）", c.Gen, oldTicket.Gen)
 	}
+
+	// 管理员踢下线：alice 的会话列为已撤销
+	n.admin("POST", "/users/alice/kick", nil).expect(http.StatusOK)
+	eventually(t, "踢下线推给节点", func() bool { return slices.Contains(a.last().RevokedSessions, oldTicket.Session) })
 
 	// 停用用户：从表里去掉
 	n.admin("PATCH", "/users/alice", updateUserRequest{Disabled: &yes}).expect(http.StatusNoContent)
@@ -177,7 +242,9 @@ func TestOfficialNeedsNewAgent(t *testing.T) {
 	n := newNodeEnv(t)
 	id, code := n.createNode("旧节点")
 	en := n.enroll(code)
-	fa, _, err := dialAgent(t, n.http.URL, en.Token, agentproto.Hello{AgentVersion: "1.0.0", OS: "linux", Arch: "amd64"})
+	// 1.2.0 支持授权表但不支持票据：也要先升级
+	fa, _, err := dialAgent(t, n.http.URL, en.Token, agentproto.Hello{AgentVersion: "1.2.0", OS: "linux", Arch: "amd64",
+		Features: []string{agentproto.FeatureAccess}})
 	if err != nil {
 		t.Fatal(err)
 	}

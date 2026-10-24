@@ -167,16 +167,15 @@ type LegacyErrorResponse struct {
 
 // ---- 官方节点 ----
 
-// OfficialNode 是面板下发的一个官方节点：连接参数里已经带上了当前用户的节点凭证。
+// OfficialNode 是面板下发的一个官方节点。登录用的票据不在这里，客户端每次连接前单独领取（RouteOfficialTickets）。
 type OfficialNode struct {
 	ID          string      `json:"id"`
 	Name        string      `json:"name"`
 	Description string      `json:"description,omitempty"`
 	ServerAddr  string      `json:"serverAddr"`
 	ServerPort  int         `json:"serverPort"`
-	Token       string      `json:"token"` // frps 的 auth.token；真正的准入由节点凭证决定
+	Token       string      `json:"token"` // frps 的 auth.token；真正的准入由登录票据决定
 	User        string      `json:"user"`  // frp 的 user，就是用户的昵称，代理名会加上这个前缀
-	Credential  string      `json:"credential"`
 	Online      bool        `json:"online"`
 	Quota       quota.Quota `json:"quota"` // 当前用户在这个节点上的限额
 }
@@ -186,14 +185,34 @@ type OfficialNodesResponse struct {
 	Nodes []OfficialNode `json:"nodes"`
 }
 
-// MetaCredential 是 frpc metadatas 里放节点凭证的键。
+// MetaCredential 是 frpc metadatas 里放登录票据的键。
 const MetaCredential = "moefrp_cred"
 
-// ToNode 把官方节点转换成客户端能直接运行的节点。ID 加上 OfficialNodePrefix，和用户自己的节点区分开。
+// MaxTicketsPerRequest 是一次最多领取的票据张数。
+const MaxTicketsPerRequest = 5
+
+// NodeTicketsRequest：POST /api/v1/official-nodes/{id}/tickets。
+type NodeTicketsRequest struct {
+	Count int `json:"count"` // 1–MaxTicketsPerRequest
+}
+
+// NodeTicket 是一张官方节点登录票据：只能登录一次，过期前要用掉。
+type NodeTicket struct {
+	Ticket    string `json:"ticket"`
+	ExpiresAt int64  `json:"expiresAt"` // Unix 秒
+}
+
+// NodeTicketsResponse 是领到的票据。
+type NodeTicketsResponse struct {
+	Tickets []NodeTicket `json:"tickets"`
+}
+
+// ToNode 把官方节点转换成客户端能直接运行的节点。ID 加上 OfficialNodePrefix，和用户自己的节点区分开；
+// 登录票据由客户端引擎在每次连接前填进 metadatas。
 func (o OfficialNode) ToNode() model.Node {
 	return model.Node{
 		ID: OfficialNodePrefix + o.ID, Remark: o.Name, ServerAddr: o.ServerAddr, ServerPort: o.ServerPort,
-		Token: o.Token, User: o.User, Metadatas: map[string]string{MetaCredential: o.Credential},
+		Token: o.Token, User: o.User,
 	}
 }
 

@@ -1409,7 +1409,7 @@
       onclick: async (e) => {
         const b = e.currentTarget;
         if (!(await confirmDialog({ title: '重置节点凭证', ok: '重置', danger: true,
-          message: u.nickname + ' 的旧凭证在所有官方节点上立即失效（正在运行的隧道不再接受新连接），客户端下次同步时自动拿到新凭证。用于凭证泄露。' }))) return;
+          message: u.nickname + ' 已领取的登录票据在所有官方节点上立即失效，正在运行的隧道不再接受新连接；客户端会自动领新票据重连。' }))) return;
         await busy(b, async () => {
           try {
             await api('POST', '/users/' + nick + '/reset-node-credential');
@@ -1440,7 +1440,7 @@
         qf.el,
         h('div', { class: 'gap' }),
         h('div', { class: 'setting' }, h('div', { class: 'setting-text' }, h('div', { class: 'setting-title' }, '节点凭证'),
-          h('div', { class: 'setting-desc' }, '客户端登录后自动获取，用于连接官方节点')), resetBtn),
+          h('div', { class: 'setting-desc' }, '客户端每次连接官方节点都会领一张一次性登录票据；重置后已领的全部作废')), resetBtn),
         err,
       ],
       actions: [button('取消', { onclick: () => d.close() }), submit],
@@ -2056,7 +2056,7 @@
           const officialChanged = official.official !== !!n.official || official.description !== (n.description || '') ||
             official.roles.join() !== ROLE_OPTIONS.map(([v]) => v).filter((v) => (n.roles || []).includes(v)).join();
           if (official.official && !n.official && !(await confirmDialog({ title: '设为官方节点', ok: '开启',
-            message: '开启后，这个节点只接受 MoeFrp 用户用自己的节点凭证登录：直接用 token 连接的 frpc 会被拒绝。节点上的 frps 会重启一次。' }))) return;
+            message: '开启后，这个节点只接受 MoeFrp 客户端用一次性登录票据登录：直接用 token 连接的 frpc 会被拒绝。节点上的 frps 会重启一次。' }))) return;
           try {
             await api('PATCH', '/nodes/' + encodeURIComponent(id), { name: name.value, publicAddr: addr.value, downloadMirror: mirror.value });
             if (officialChanged) await api('PUT', '/nodes/' + encodeURIComponent(id) + '/official', official);
@@ -2136,7 +2136,7 @@
               old ? h('div', { class: 'callout warn' }, icon('alert', 16), h('span', null, 'agent ' + n.info.agentVersion + ' 不支持官方节点，请先升级。')) : null,
               h('label', { class: 'check setting-title' }, on, '官方节点（下发给用户）'),
               h('div', { class: 'checks' }, h('span', { class: 'muted' }, '开放给'), roleBoxes),
-              field('给用户看的说明', desc, '开启后只接受用户凭证登录，frp 的 user 固定为昵称；限额在节点列表的"限额"里设置')))),
+              field('给用户看的说明', desc, '开启后只接受客户端用登录票据登录，frp 的 user 固定为昵称；限额在节点列表的"限额"里设置')))),
         h('section', { class: 'card' },
           h('div', { class: 'card-head' }, h('h2', null, '维护')),
           h('div', { class: 'card-body' }, h('div', { class: 'ops three' },

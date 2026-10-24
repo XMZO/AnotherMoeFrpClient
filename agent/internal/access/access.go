@@ -1,19 +1,24 @@
-// Package access 是官方节点的准入控制：面板下发授权用户表，agent 在本机起一个 frps HTTP 插件，
-// frps 在客户端登录、新建代理、收到用户连接时来问它（docs/node-agent.md 第 12 节）。
+// Package access 是官方节点的准入控制：面板下发授权表，agent 在本机起一个 frps HTTP 插件，
+// frps 在客户端登录、新建代理、新建工作连接、收到用户连接时来问它（docs/node-agent.md 第 12 节）。
 //
-//   - Login：metadatas 里的节点凭证必须在表里，frp 的 user 必须是这个用户的昵称
-//     （frps 会把它加在代理名前面，不同用户的代理名不会冲突）；
-//   - NewProxy：代理类型、远程端口、同时在线的代理数要在限额内；
-//   - NewUserConn：用户被撤销后，他的代理不再接受新连接（frps 没有踢掉已登录客户端的接口）。
+//   - Login：metadatas 里要有面板签发的登录票据（shared/nodeticket）。票据签名正确、没过期、没用过（每张只能登录一次），
+//     用户在表里、凭证代数一致、会话没被撤销，frp 的 user 必须是这个用户的昵称（frps 会把它加在代理名前面，
+//     不同用户的代理名不会冲突）。同一个会话（设备）后登录的生效：插件给新登录分配 run ID 并记住，
+//     之前那个 frpc 之后的新代理、新连接都会被拒绝（frps 没有踢掉已登录客户端的接口）；
+//   - NewProxy：同上校验身份（不看过期和是否用过：登录后票据一直留在 metadatas 里），再看代理类型、远程端口、
+//     同时在线的代理数是否在限额内；
+//   - NewWorkConn / NewUserConn：同上校验身份。用户被撤销、会话退出登录或被踢、凭证被重置后，他的代理不再接受新连接。
 //
 // 在线代理数取自 frps 自己的统计（按 user 字段），不靠插件计数：frps 注册代理失败时不会通知插件，
-// 自己计数会越算越多。
+// 自己计数会越算越多。被同一会话的新登录顶掉的 frpc 留下的代理不算。
 //
-// 表保存在 /etc/moefrp-agent/access.json，面板离线时节点照样按最后的表执行。
+// 表保存在 /etc/moefrp-agent/access.json，用过的票据和见过的已撤销会话保存在 access-state.json，
+// 面板离线、agent 重启后照样执行。
 package access
 
 import (
-	"crypto/sha256"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -24,6 +29,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/fatedier/frp/pkg/metrics/mem"
 	plugin "github.com/fatedier/frp/pkg/plugin/server"
@@ -31,32 +37,56 @@ import (
 	"moefrp/agent/internal/agentcfg"
 	"moefrp/shared/agentproto"
 	"moefrp/shared/api"
+	"moefrp/shared/nodeticket"
 	"moefrp/shared/quota"
 )
 
 // PluginOps 是挂到 frps 上的插件操作。
-var PluginOps = []string{plugin.OpLogin, plugin.OpNewProxy, plugin.OpNewUserConn}
+var PluginOps = []string{plugin.OpLogin, plugin.OpNewProxy, plugin.OpNewWorkConn, plugin.OpNewUserConn}
 
-// Store 是授权用户表。
+const (
+	// clockSkew 容忍面板和节点的时钟误差。
+	clockSkew = time.Minute
+	// revokedKeep 是本地记住已撤销会话的时间。面板会定期删掉很久以前吊销的会话，节点自己多记一阵，
+	// 防止用老会话登录、一直没断的 frpc 在面板删掉记录后又能新建代理。
+	revokedKeep = 90 * 24 * time.Hour
+)
+
+// Store 是授权表和准入状态。
 type Store struct {
-	path string
-	// Online 返回某个 frp user 当前在线的代理数，不算名字为 except 的那个（同名代理重新注册）。
-	// 默认读 frps 的内存统计，测试时替换。
-	Online func(user, except string) int
+	path      string
+	statePath string
+	// Online 返回某个 frp user 当前在线的代理数，不算名字为 except 的那个（同名代理重新注册），
+	// 也不算 live 返回 false 的 frpc（按 run ID）留下的。默认读 frps 的内存统计，测试时替换。
+	Online func(user, except string, live func(runID string) bool) int
+	// Now 返回当前时间，测试时替换。
+	Now func() time.Time
 
-	mu      sync.RWMutex
+	mu      sync.Mutex
 	enabled bool
-	byCred  map[string]agentproto.AccessUser // 凭证哈希 → 用户
+	nodeID  string
+	key     []byte
+	users   map[string]agentproto.AccessUser // 用户 ID → 用户
+	revoked map[string]int64                 // 已撤销的会话 → 第一次见到的时间
+	used    map[string]int64                 // 用过的票据随机数 → 票据过期时间
+	active  map[string]string                // 会话 → 当前生效的 run ID（同一会话后登录的生效）
+	runs    map[string]bool                  // 生效中的 run ID
+}
+
+// state 是需要跨重启保存的准入状态。
+type state struct {
+	Used    map[string]int64 `json:"used"`
+	Revoked map[string]int64 `json:"revoked"`
 }
 
 var proxyTypes = []string{"tcp", "udp", "http", "https", "tcpmux", "stcp", "sudp", "xtcp"}
 
 // onlineFromStats 按 frps 的统计数某个 user 的在线代理。
-func onlineFromStats(user, except string) int {
+func onlineFromStats(user, except string, live func(string) bool) int {
 	n := 0
 	for _, t := range proxyTypes {
 		for _, p := range mem.StatsCollector.GetProxiesByType(t) {
-			if p.User == user && p.Name != except && p.LastStartAt > 0 && p.LastStartAt >= p.LastCloseAt {
+			if p.User == user && p.Name != except && p.LastStartAt > 0 && p.LastStartAt >= p.LastCloseAt && live(p.ClientID) {
 				n++
 			}
 		}
@@ -64,9 +94,25 @@ func onlineFromStats(user, except string) int {
 	return n
 }
 
-// Load 读取保存的表；文件不存在时是"非官方节点"。
+// Load 读取保存的表和状态；文件不存在时是"非官方节点"。
 func Load(path string) (*Store, error) {
-	s := &Store{path: path, Online: onlineFromStats, byCred: map[string]agentproto.AccessUser{}}
+	s := &Store{
+		path: path, statePath: strings.TrimSuffix(path, ".json") + "-state.json",
+		Online: onlineFromStats, Now: time.Now,
+		users: map[string]agentproto.AccessUser{}, revoked: map[string]int64{}, used: map[string]int64{},
+		active: map[string]string{}, runs: map[string]bool{},
+	}
+	if b, err := os.ReadFile(s.statePath); err == nil {
+		var st state
+		if json.Unmarshal(b, &st) == nil {
+			if st.Used != nil {
+				s.used = st.Used
+			}
+			if st.Revoked != nil {
+				s.revoked = st.Revoked
+			}
+		}
+	}
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil
@@ -84,9 +130,17 @@ func Load(path string) (*Store, error) {
 
 func (s *Store) set(t agentproto.AccessTable) {
 	s.enabled = t.Enabled
-	s.byCred = make(map[string]agentproto.AccessUser, len(t.Users))
+	s.nodeID = t.NodeID
+	s.key, _ = base64.StdEncoding.DecodeString(t.TicketKey)
+	s.users = make(map[string]agentproto.AccessUser, len(t.Users))
 	for _, u := range t.Users {
-		s.byCred[strings.ToLower(u.CredHash)] = u
+		s.users[u.UserID] = u
+	}
+	now := s.Now().Unix()
+	for _, id := range t.RevokedSessions {
+		if _, ok := s.revoked[id]; !ok {
+			s.revoked[id] = now
+		}
 	}
 }
 
@@ -103,39 +157,73 @@ func (s *Store) Apply(t agentproto.AccessTable) (enabledChanged bool, err error)
 	defer s.mu.Unlock()
 	enabledChanged = s.enabled != t.Enabled
 	s.set(t)
-	return enabledChanged, nil
+	return enabledChanged, s.saveLocked()
+}
+
+// saveLocked 清理过期的记录并保存状态。调用方持有锁。
+func (s *Store) saveLocked() error {
+	now := s.Now()
+	for n, exp := range s.used {
+		if time.Unix(exp, 0).Add(clockSkew).Before(now) {
+			delete(s.used, n) // 票据过期后本来就不能登录，不用再记
+		}
+	}
+	for id, seen := range s.revoked {
+		if time.Unix(seen, 0).Add(revokedKeep).Before(now) {
+			delete(s.revoked, id)
+		}
+	}
+	b, err := json.Marshal(state{Used: s.used, Revoked: s.revoked})
+	if err != nil {
+		return err
+	}
+	return agentcfg.WriteFileAtomic(s.statePath, b, 0o600)
 }
 
 // Enabled 判断是不是官方节点。
 func (s *Store) Enabled() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.enabled
 }
 
 // Users 返回表里的用户数。
 func (s *Store) Users() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return len(s.byCred)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.users)
 }
 
-// HashCredential 是节点凭证在表里的形式。
-func HashCredential(cred string) string {
-	sum := sha256.Sum256([]byte(cred))
-	return hex.EncodeToString(sum[:])
-}
+const (
+	denied     = "这是 MoeFrp 官方节点：请在 MoeFrp 客户端登录后，从「官方节点」里选择它（没有有效的登录票据）"
+	noAccess   = "你的账号不能使用这个官方节点（没有权限、已被停用，或管理员撤销了授权）"
+	revoked    = "这台设备已经退出登录或被踢下线，请在客户端重新登录"
+	resetCred  = "你的节点凭证已被管理员重置，请重新连接（客户端会自动领取新的登录票据）"
+	superseded = "这台设备的账号在别处重新连接了这个节点，这个连接已停用"
+)
 
-func (s *Store) lookup(metas map[string]string) (agentproto.AccessUser, bool) {
-	cred := metas[api.MetaCredential]
-	if cred == "" {
-		return agentproto.AccessUser{}, false
+// identify 校验票据代表的身份（不看过期和是否用过），返回声明和用户。调用方持有锁。
+func (s *Store) identify(metas map[string]string) (nodeticket.Claims, agentproto.AccessUser, string) {
+	ticket := metas[api.MetaCredential]
+	if ticket == "" || len(s.key) == 0 {
+		return nodeticket.Claims{}, agentproto.AccessUser{}, denied
 	}
-	u, ok := s.byCred[HashCredential(cred)]
-	return u, ok
+	c, err := nodeticket.Verify(s.key, ticket)
+	if err != nil || c.Node != s.nodeID {
+		return c, agentproto.AccessUser{}, denied
+	}
+	u, ok := s.users[c.User]
+	switch {
+	case !ok:
+		return c, u, noAccess
+	case u.Gen != c.Gen:
+		return c, u, resetCred
+	}
+	if _, ok := s.revoked[c.Session]; ok {
+		return c, u, revoked
+	}
+	return c, u, ""
 }
-
-const denied = "这是 MoeFrp 官方节点：请在 MoeFrp 客户端登录后，从「官方节点」里选择它（凭证无效或已被撤销）"
 
 // Listen 在本机回环地址上起插件服务，返回给 frps 用的插件配置地址（127.0.0.1:端口）。
 func (s *Store) Listen() (addr string, err error) {
@@ -158,73 +246,116 @@ func (s *Store) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	reject := s.decide(req.Op, req.Content)
+	reject, content := s.decide(req.Op, req.Content)
 	res := plugin.Response{Unchange: true}
-	if reject != "" {
+	switch {
+	case reject != "":
 		res = plugin.Response{Reject: true, RejectReason: reject}
+	case content != nil:
+		res = plugin.Response{Unchange: false, Content: content}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(res)
 }
 
-// decide 返回拒绝原因，空串表示放行。
-func (s *Store) decide(op string, raw json.RawMessage) string {
+// decide 返回拒绝原因（空串表示放行），需要改写请求时同时返回改写后的内容。
+func (s *Store) decide(op string, raw json.RawMessage) (string, any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.enabled {
+		return "", nil
+	}
 	switch op {
 	case plugin.OpLogin:
 		var c plugin.LoginContent
 		if json.Unmarshal(raw, &c) != nil {
-			return "请求无法解析"
+			return "请求无法解析", nil
 		}
-		s.mu.RLock()
-		defer s.mu.RUnlock()
-		if !s.enabled {
-			return ""
-		}
-		u, ok := s.lookup(c.Metas)
-		if !ok {
-			return denied
-		}
-		if c.User != u.Nickname {
-			return fmt.Sprintf("frp 的 user 必须是你的昵称 %s", u.Nickname)
-		}
-		return ""
+		return s.login(&c)
 
 	case plugin.OpNewProxy:
 		var c plugin.NewProxyContent
 		if json.Unmarshal(raw, &c) != nil {
-			return "请求无法解析"
+			return "请求无法解析", nil
 		}
-		s.mu.RLock()
-		enabled := s.enabled
-		u, ok := s.lookup(c.User.Metas)
-		s.mu.RUnlock()
-		if !enabled {
-			return ""
+		u, reject := s.check(c.User)
+		if reject != "" {
+			return reject, nil
 		}
-		if !ok {
-			return denied
+		return s.admit(u, c), nil
+
+	case plugin.OpNewWorkConn:
+		var c plugin.NewWorkConnContent
+		if json.Unmarshal(raw, &c) != nil {
+			return "请求无法解析", nil
 		}
-		return s.admit(u, c)
+		_, reject := s.check(c.User)
+		return reject, nil
 
 	case plugin.OpNewUserConn:
 		var c plugin.NewUserConnContent
 		if json.Unmarshal(raw, &c) != nil {
-			return "请求无法解析"
+			return "请求无法解析", nil
 		}
-		s.mu.RLock()
-		defer s.mu.RUnlock()
-		if !s.enabled {
-			return ""
-		}
-		if _, ok := s.lookup(c.User.Metas); !ok {
-			return denied
-		}
-		return ""
+		_, reject := s.check(c.User)
+		return reject, nil
 	}
-	return ""
+	return "", nil
 }
 
-// admit 检查新代理是否在限额内。
+// login 处理登录：票据必须没过期、没用过。新登录（没有 run ID）由插件分配 run ID，
+// 同一会话之前登录的 frpc 从此失效。
+func (s *Store) login(c *plugin.LoginContent) (string, any) {
+	claims, u, reject := s.identify(c.Metas)
+	if reject != "" {
+		return reject, nil
+	}
+	now := s.Now()
+	if time.Unix(claims.Expires, 0).Add(clockSkew).Before(now) {
+		return "登录票据已过期，请重新连接（客户端会自动领取新的登录票据）", nil
+	}
+	if _, ok := s.used[claims.Nonce]; ok {
+		return "登录票据已经用过：每张票据只能登录一次", nil
+	}
+	if c.User != u.Nickname {
+		return fmt.Sprintf("frp 的 user 必须是你的昵称 %s", u.Nickname), nil
+	}
+	s.used[claims.Nonce] = claims.Expires
+	if err := s.saveLocked(); err != nil {
+		return "节点无法记录登录票据，请稍后再试", nil
+	}
+	var content any
+	if c.RunID == "" {
+		c.RunID = newRunID()
+		content = c
+	}
+	if old := s.active[claims.Session]; old != "" && old != c.RunID {
+		delete(s.runs, old)
+	}
+	s.active[claims.Session] = c.RunID
+	s.runs[c.RunID] = true
+	return "", content
+}
+
+// check 校验已登录 frpc 的身份，并且必须是这个会话当前生效的那个 frpc。
+func (s *Store) check(ui plugin.UserInfo) (agentproto.AccessUser, string) {
+	claims, u, reject := s.identify(ui.Metas)
+	if reject != "" {
+		return u, reject
+	}
+	if s.active[claims.Session] != ui.RunID {
+		return u, superseded
+	}
+	return u, ""
+}
+
+func newRunID() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// admit 检查新代理是否在限额内。调用方持有锁。
 func (s *Store) admit(u agentproto.AccessUser, c plugin.NewProxyContent) string {
 	q := u.Quota
 	if !q.AllowsType(c.ProxyType) {
@@ -241,7 +372,8 @@ func (s *Store) admit(u agentproto.AccessUser, c plugin.NewProxyContent) string 
 			}
 		}
 	}
-	if q.MaxProxies > 0 && s.Online(c.User.User, c.ProxyName) >= q.MaxProxies {
+	live := func(runID string) bool { return s.runs[runID] }
+	if q.MaxProxies > 0 && s.Online(c.User.User, c.ProxyName, live) >= q.MaxProxies {
 		return fmt.Sprintf("你的账号在这个节点上最多同时运行 %d 个代理", q.MaxProxies)
 	}
 	return ""

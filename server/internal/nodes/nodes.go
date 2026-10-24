@@ -136,7 +136,7 @@ type View struct {
 	Official         bool               `json:"official"`              // 下发给用户
 	Roles            []string           `json:"roles"`                 // 开放给哪些角色
 	Description      string             `json:"description,omitempty"` // 给用户看的说明
-	AccessSupported  bool               `json:"accessSupported"`       // agent 支持官方节点（不知道版本时为 false）
+	AccessSupported  bool               `json:"accessSupported"`       // agent 支持官方节点的登录票据（不知道版本时为 false）
 }
 
 // 节点状态。
@@ -198,7 +198,7 @@ func (s *Service) view(n store.Node, withConfig bool) View {
 		v.UpgradeTo = b.Version
 	}
 	v.Official, v.Roles, v.Description = n.Official, parseRoles(n.Roles), n.Description
-	v.AccessSupported = hasFeature(v.Info, agentproto.FeatureAccess)
+	v.AccessSupported = hasFeature(v.Info, agentproto.FeatureTickets)
 	if withConfig {
 		c := n.FrpsConfig
 		v.FrpsConfig = &c

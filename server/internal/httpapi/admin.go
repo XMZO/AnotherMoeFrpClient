@@ -369,6 +369,7 @@ func (s *Server) handleAdminKick(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
+	s.nodes.AccessChanged() // 被踢的会话在官方节点上的票据和连接一起失效
 	writeJSON(w, http.StatusOK, map[string]any{"revokedSessions": n})
 }
 

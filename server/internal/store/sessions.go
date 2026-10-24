@@ -160,6 +160,26 @@ func DeleteStaleSessions(ctx context.Context, q Querier, expiredBefore, revokedB
 	return res.RowsAffected()
 }
 
+// ListRevokedClientSessions 返回库里所有已吊销的客户端会话 ID（官方节点据此拒绝它们的票据和连接）。
+// 吊销的会话由 DeleteStaleSessions 定期清掉，所以数量有限；节点自己也会记住见过的。
+func ListRevokedClientSessions(ctx context.Context, q Querier) ([]string, error) {
+	rows, err := q.QueryContext(ctx,
+		`SELECT id FROM sessions WHERE kind = ? AND revoked_at IS NOT NULL ORDER BY id`, SessionClient)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // SessionRevoked 判断会话是否已被吊销或已不存在。
 func SessionRevoked(ctx context.Context, q Querier, sessionID string) (bool, error) {
 	var revokedAt sql.NullInt64

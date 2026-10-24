@@ -134,7 +134,7 @@ func (a *Agent) hello() agentproto.Hello {
 		OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Distro: a.static.Distro, Kernel: a.static.Kernel, Hostname: a.static.Hostname, BootTime: a.static.BootTime,
 		ExecEnabled: a.cfg.Exec, AppliedRev: a.frps.AppliedRev(),
-		Features: []string{agentproto.FeatureAccess},
+		Features: []string{agentproto.FeatureAccess, agentproto.FeatureTickets},
 	}
 	if a.pending != nil && !a.confirmed.Load() {
 		h.Upgrade = selfupdate.Result(a.pending, a.version)

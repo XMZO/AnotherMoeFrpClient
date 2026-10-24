@@ -276,6 +276,7 @@ type limitKey int
 const (
 	byIP limitKey = iota
 	byUser
+	bySession // 按客户端会话（同一用户的不同设备分开算）
 )
 
 func (s *Server) limit(l *ratelimit.Limiter, by limitKey) middleware {
@@ -285,6 +286,9 @@ func (s *Server) limit(l *ratelimit.Limiter, by limitKey) middleware {
 			key := ipKey(info.IP)
 			if by == byUser && info.UserID != "" {
 				key = info.UserID
+			}
+			if by == bySession && info.principal != nil {
+				key = "s:" + info.principal.Session.ID
 			}
 			if ok, wait := l.Allow(key, s.now()); !ok {
 				secs := int64((wait + time.Second - 1) / time.Second)

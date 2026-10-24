@@ -27,6 +27,8 @@ const (
 
 	// RouteOfficialNodes 是面板下发给当前用户的官方节点（docs/node-agent.md 第 12 节），支持 ETag。
 	RouteOfficialNodes = Prefix + "/official-nodes"
+	// RouteOfficialTickets 领取官方节点的登录票据（POST），{id} 是面板上的节点 ID。
+	RouteOfficialTickets = Prefix + "/official-nodes/{id}/tickets"
 
 	RouteProfiles = Prefix + "/profiles"
 	RouteProfile  = Prefix + "/profiles/{id}"
@@ -64,6 +66,9 @@ const (
 
 // ProfilePath 返回单个配置的路径。
 func ProfilePath(id string) string { return withID(RouteProfile, id) }
+
+// OfficialTicketsPath 返回领取某个官方节点登录票据的路径。
+func OfficialTicketsPath(nodeID string) string { return withID(RouteOfficialTickets, nodeID) }
 
 // SharePath 返回单个分享的路径。
 func SharePath(id string) string { return withID(RouteShare, id) }

@@ -1,28 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import {
-  NAlert,
-  NButton,
-  NCheckbox,
-  NCheckboxGroup,
-  NDatePicker,
-  NForm,
-  NFormItem,
-  NInput,
-  NInputNumber,
-  NModal,
-  NRadio,
-  NRadioGroup,
-  NSelect,
-  NSpace,
-  NTag,
-  NText,
-} from 'naive-ui'
+import Icon from '../ui/Icon.vue'
+import Modal from '../ui/Modal.vue'
+import Check from '../ui/Check.vue'
+import type { IconName } from '../ui/icons'
 import { ProfileService, ShareService, type Profile, type Share } from '../api'
 import { useProfilesStore } from '../stores/profiles'
 import { describeError, toAppError } from '../errors'
-import { isP2PType, shareKindHints, shareKindLabels } from '../labels'
-import { nodeLabel } from '../util'
+import { isDomainType, isP2PType, shareKindHints, shareKindLabels } from '../labels'
+import { nodeLabel, portValue } from '../util'
 
 // 创建分享向导（PLAN 6.7）：选配置 → 选类型 → 选节点和代理 → 过期时间、人数上限。
 const show = defineModel<boolean>('show', { default: false })
@@ -31,25 +17,31 @@ const emit = defineEmits<{ created: [Share] }>()
 
 const profiles = useProfilesStore()
 const cloudProfiles = computed(() => profiles.list.filter((p) => p.origin === 'cloud'))
-const profileOptions = computed(() => cloudProfiles.value.map((p) => ({ label: p.name, value: p.id })))
+
+type Kind = 'template' | 'full' | 'p2p'
+const kinds: { value: Kind; icon: IconName; tone: string }[] = [
+  { value: 'full', icon: 'layers', tone: '' },
+  { value: 'template', icon: 'server', tone: 'info' },
+  { value: 'p2p', icon: 'radar', tone: 'gold' },
+]
 
 const profileId = ref('')
 const profile = ref<Profile | null>(null)
-const kind = ref<'template' | 'full' | 'p2p'>('full')
+const kind = ref<Kind>('full')
 const name = ref('')
 const nodeIds = ref<string[]>([])
 const p2pNode = ref('')
 const proxyIds = ref<string[]>([])
-const expiresAt = ref<number | null>(null)
-const maxSubscribers = ref<number | null>(0)
+const expiresAt = ref('')
+const maxSubscribers = ref('0')
 const error = ref('')
 const saving = ref(false)
 
 watch(show, (v) => {
   if (!v) return
   error.value = ''
-  expiresAt.value = null
-  maxSubscribers.value = 0
+  expiresAt.value = ''
+  maxSubscribers.value = '0'
   kind.value = 'full'
   const pick = props.profileId && cloudProfiles.value.some((p) => p.id === props.profileId) ? props.profileId : cloudProfiles.value[0]?.id
   profileId.value = pick ?? ''
@@ -84,6 +76,18 @@ watch(kind, () => resetSelection())
 
 const candidateProxies = computed(() => (profile.value?.proxies ?? []).filter((x) => (kind.value === 'p2p' ? isP2PType(x.type) : true)))
 
+function toggleIn(which: 'nodes' | 'proxies', id: string, on: boolean) {
+  const list = which === 'nodes' ? nodeIds : proxyIds
+  list.value = on ? [...list.value.filter((x) => x !== id), id] : list.value.filter((x) => x !== id)
+}
+
+// 今天之前的日期不能选
+const minDate = (() => {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T00:00`
+})()
+
 async function submit() {
   error.value = ''
   if (!profileId.value) {
@@ -107,7 +111,7 @@ async function submit() {
       nodeIds: kind.value === 'p2p' ? [p2pNode.value] : nodeIds.value,
       proxyIds: kind.value === 'template' ? [] : proxyIds.value,
       expiresAt: expiresAt.value ? new Date(expiresAt.value).toISOString() : null,
-      maxSubscribers: maxSubscribers.value ?? 0,
+      maxSubscribers: portValue(maxSubscribers.value),
     })
     show.value = false
     emit('created', sh)
@@ -120,69 +124,152 @@ async function submit() {
 </script>
 
 <template>
-  <n-modal v-model:show="show" preset="card" title="创建分享" style="width: 640px" :mask-closable="!saving" data-testid="share-create-modal">
-    <n-alert v-if="!cloudProfiles.length" type="warning" :show-icon="false" style="margin-bottom: 12px">
-      只能分享云端配置。先在"隧道"页新建云端配置，或把本地配置上传到云端。
-    </n-alert>
-    <n-form label-placement="left" label-width="90" size="small">
-      <n-form-item label="来源配置">
-        <n-select v-model:value="profileId" :options="profileOptions" placeholder="选择一份云端配置" data-testid="share-create-profile" />
-      </n-form-item>
-      <n-form-item label="分享类型">
-        <n-space vertical :size="2">
-          <n-radio-group v-model:value="kind" data-testid="share-create-kind">
-            <n-space>
-              <n-radio value="full" data-testid="share-kind-full">{{ shareKindLabels.full }}</n-radio>
-              <n-radio value="template" data-testid="share-kind-template">{{ shareKindLabels.template }}</n-radio>
-              <n-radio value="p2p" data-testid="share-kind-p2p">{{ shareKindLabels.p2p }}</n-radio>
-            </n-space>
-          </n-radio-group>
-          <n-text depth="3" style="font-size: 12px">{{ shareKindHints[kind] }}</n-text>
-        </n-space>
-      </n-form-item>
-      <n-form-item label="名称">
-        <n-input v-model:value="name" maxlength="50" placeholder="对方看到的分享名称" data-testid="share-create-name" />
-      </n-form-item>
-      <n-form-item v-if="profile" label="节点">
-        <n-radio-group v-if="kind === 'p2p'" v-model:value="p2pNode">
-          <n-space vertical :size="4">
-            <n-radio v-for="n in profile.nodes ?? []" :key="n.id" :value="n.id">{{ nodeLabel(n) }}</n-radio>
-          </n-space>
-        </n-radio-group>
-        <n-checkbox-group v-else v-model:value="nodeIds">
-          <n-space vertical :size="4">
-            <n-checkbox v-for="n in profile.nodes ?? []" :key="n.id" :value="n.id" :label="nodeLabel(n)" />
-          </n-space>
-        </n-checkbox-group>
-        <n-text v-if="!(profile.nodes ?? []).length" depth="3">这份配置还没有节点</n-text>
-      </n-form-item>
-      <n-form-item v-if="profile && kind !== 'template'" :label="kind === 'p2p' ? 'P2P 目标' : '代理'">
-        <n-checkbox-group v-model:value="proxyIds">
-          <n-space vertical :size="4">
-            <n-checkbox v-for="x in candidateProxies" :key="x.id" :value="x.id" :data-testid="`share-create-proxy-${x.name}`">
-              {{ x.name }} <n-tag size="tiny" :bordered="false">{{ x.type }}</n-tag>
-            </n-checkbox>
-          </n-space>
-        </n-checkbox-group>
-        <n-text v-if="!candidateProxies.length" depth="3">{{ kind === 'p2p' ? '这份配置里没有 stcp/xtcp/sudp 代理' : '这份配置还没有代理' }}</n-text>
-      </n-form-item>
-      <n-form-item label="过期时间">
-        <n-date-picker v-model:value="expiresAt" type="datetime" clearable placeholder="不过期" :is-date-disabled="(ts: number) => ts < Date.now() - 86400000" />
-      </n-form-item>
-      <n-form-item label="人数上限">
-        <n-input-number v-model:value="maxSubscribers" :min="0" :max="10000" style="width: 160px" />
-        <n-text depth="3" style="margin-left: 8px; font-size: 12px">0 表示不限</n-text>
-      </n-form-item>
-    </n-form>
-    <n-text depth="3" style="font-size: 12px; display: block">
-      注意：订阅者运行隧道时一定能拿到节点的 token（frp 的设计如此）。分享就等于允许对方使用你的节点；撤销后对方会停止，但已经拿到的 token 收不回来，必要时请更换节点 token。
-    </n-text>
-    <n-text v-if="error" type="error" style="display: block; margin-top: 8px" data-testid="share-create-error">{{ error }}</n-text>
+  <Modal v-model:show="show" title="创建分享" subtitle="只能分享云端配置" icon="share" :width="660" :mask-closable="!saving" data-testid="share-create-modal">
+    <div v-if="!cloudProfiles.length" class="alert gold" style="margin-bottom: 14px">
+      <Icon name="info" size="s" /><span>只能分享云端配置。先在“隧道”页新建云端配置，或把本地配置上传到云端。</span>
+    </div>
+    <div class="grid2">
+      <div class="fld">
+        <label for="cs-src">来源配置</label>
+        <select id="cs-src" v-model="profileId" class="inp" data-testid="share-create-profile">
+          <option v-if="!cloudProfiles.length" value="">没有云端配置</option>
+          <option v-for="p in cloudProfiles" :key="p.id" :value="p.id">{{ p.name }}</option>
+        </select>
+      </div>
+      <div class="fld">
+        <label for="cs-name">名称</label>
+        <input id="cs-name" v-model="name" class="inp" maxlength="50" placeholder="对方看到的分享名称" data-testid="share-create-name" />
+      </div>
+    </div>
+    <div class="fld">
+      <span class="lbl">分享类型</span>
+      <div class="kinds" role="radiogroup" aria-label="分享类型" data-testid="share-create-kind">
+        <button
+          v-for="k in kinds"
+          :key="k.value"
+          type="button"
+          role="radio"
+          class="kind radio"
+          :class="{ on: kind === k.value }"
+          :aria-checked="kind === k.value"
+          :data-testid="`share-kind-${k.value}`"
+          @click="kind = k.value"
+        >
+          <span class="tile-ic" :class="k.tone"><Icon :name="k.icon" size="s" /></span>
+          <b>{{ shareKindLabels[k.value] }}</b>
+          <small>{{ shareKindHints[k.value] }}</small>
+        </button>
+      </div>
+    </div>
+    <div v-if="profile" class="grid2 eq">
+      <div class="fld">
+        <span class="lbl">节点</span>
+        <div class="checks">
+          <template v-if="kind === 'p2p'">
+            <Check v-for="n in profile.nodes ?? []" :key="n.id" radio :model-value="p2pNode === n.id" @update:model-value="p2pNode = n.id">
+              <span class="ck-t">{{ nodeLabel(n) }}</span>
+            </Check>
+          </template>
+          <template v-else>
+            <Check v-for="n in profile.nodes ?? []" :key="n.id" :model-value="nodeIds.includes(n.id)" @update:model-value="(v: boolean) => toggleIn('nodes', n.id, v)">
+              <span class="ck-t">{{ nodeLabel(n) }}</span>
+            </Check>
+          </template>
+          <span v-if="!(profile.nodes ?? []).length" class="fld-help">这份配置还没有节点</span>
+        </div>
+      </div>
+      <div v-if="kind !== 'template'" class="fld">
+        <span class="lbl">{{ kind === 'p2p' ? 'P2P 目标' : '代理' }}</span>
+        <div class="checks">
+          <Check
+            v-for="x in candidateProxies"
+            :key="x.id"
+            :model-value="proxyIds.includes(x.id)"
+            :data-testid="`share-create-proxy-${x.name}`"
+            @update:model-value="(v: boolean) => toggleIn('proxies', x.id, v)"
+          >
+            <span class="ck-t">{{ x.name }}</span>
+            <span class="type" :class="isP2PType(x.type) ? 'p2p' : isDomainType(x.type) ? 'web' : ''">{{ x.type }}</span>
+          </Check>
+          <span v-if="!candidateProxies.length" class="fld-help">{{ kind === 'p2p' ? '这份配置里没有 stcp/xtcp/sudp 代理' : '这份配置还没有代理' }}</span>
+        </div>
+      </div>
+    </div>
+    <div class="grid2 eq">
+      <div class="fld">
+        <label for="cs-exp">过期时间</label>
+        <input id="cs-exp" v-model="expiresAt" class="inp" type="datetime-local" :min="minDate" />
+        <span class="fld-help">留空表示不过期</span>
+      </div>
+      <div class="fld">
+        <label for="cs-max">人数上限</label>
+        <input id="cs-max" v-model="maxSubscribers" class="inp" inputmode="numeric" />
+        <span class="fld-help">0 表示不限</span>
+      </div>
+    </div>
+    <div class="alert gold">
+      <Icon name="alert" size="s" />
+      <span>注意：订阅者运行隧道时一定能拿到节点的 token（frp 的设计如此）。分享就等于允许对方使用你的节点；撤销后对方会停止，但已经拿到的 token 收不回来，必要时请更换节点 token。</span>
+    </div>
+    <div v-if="error" class="alert bad" style="margin-top: 10px" data-testid="share-create-error"><Icon name="alert" size="s" /><span>{{ error }}</span></div>
     <template #footer>
-      <n-space justify="end">
-        <n-button @click="show = false">取消</n-button>
-        <n-button type="primary" :loading="saving" :disabled="!profileId" data-testid="share-create-submit" @click="submit">创建</n-button>
-      </n-space>
+      <button type="button" class="btn quiet sm" @click="show = false">取消</button>
+      <button type="button" class="btn pri sm" :disabled="saving || !profileId" data-testid="share-create-submit" @click="submit">
+        <Icon :name="saving ? 'refresh' : 'share'" size="s" :class="{ spin: saving }" />创建
+      </button>
     </template>
-  </n-modal>
+  </Modal>
 </template>
+
+<style>
+.kinds {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.kind {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 2px solid var(--line-2);
+  text-align: left;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s var(--ease-spring);
+}
+.kind:hover {
+  transform: translateY(-2px);
+}
+.kind b {
+  font-size: 13.5px;
+  font-weight: 900;
+}
+.kind small {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-3);
+  font-weight: 600;
+}
+.kind.on {
+  border-color: var(--pri);
+  box-shadow: 0 0 0 4px var(--pri-soft);
+}
+.checks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ck-t {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 620px) {
+  .kinds {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

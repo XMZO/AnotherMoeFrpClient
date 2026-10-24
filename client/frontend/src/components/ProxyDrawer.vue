@@ -1,35 +1,23 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import {
-  NAlert,
-  NButton,
-  NCheckbox,
-  NDrawer,
-  NDrawerContent,
-  NDynamicTags,
-  NForm,
-  NFormItem,
-  NInput,
-  NInputGroup,
-  NInputNumber,
-  NSelect,
-  NSpace,
-  NSwitch,
-  useMessage,
-} from 'naive-ui'
+import Drawer from '../ui/Drawer.vue'
+import Icon from '../ui/Icon.vue'
+import Switch from '../ui/Switch.vue'
+import Check from '../ui/Check.vue'
+import TagInput from '../ui/TagInput.vue'
+import { message } from '../ui/feedback'
 import type { Proxy } from '../api'
 import { ProfileService } from '../api'
 import { useProfilesStore } from '../stores/profiles'
 import { describeError, fieldErrorsFor, fieldErrorsOf, type AppError } from '../errors'
 import { hasRemotePort, isDomainType, isP2PType, proxyTypeHints, proxyTypes } from '../labels'
 import { saveFeedback } from './saveFeedback'
-import { clone } from '../util'
+import { clone, portValue } from '../util'
 
 const props = defineProps<{ show: boolean; index: number }>()
 const emit = defineEmits<{ 'update:show': [boolean] }>()
 
 const profiles = useProfilesStore()
-const message = useMessage()
 
 const empty = (): Proxy => ({
   id: '',
@@ -48,6 +36,8 @@ const empty = (): Proxy => ({
 })
 
 const form = ref<Proxy>(empty())
+const localPort = ref('')
+const remotePort = ref('')
 const error = ref<AppError | null>(null)
 const saving = ref(false)
 const editIndex = ref(-1) // 保存时这一项在列表里的下标，用来对应字段错误
@@ -59,6 +49,8 @@ watch(
     error.value = null
     const src = props.index >= 0 ? profiles.current?.proxies?.[props.index] : null
     form.value = src ? { ...empty(), ...clone(src) } : empty()
+    localPort.value = form.value.localPort ? String(form.value.localPort) : ''
+    remotePort.value = form.value.remotePort ? String(form.value.remotePort) : ''
     editIndex.value = props.index >= 0 ? props.index : profiles.indexForNew('proxies')
   },
 )
@@ -71,18 +63,21 @@ const otherError = computed(() => {
   if (fields.length && Object.keys(fieldErr.value).length === fields.length) return ''
   return describeError(error.value)
 })
-const status = (k: string) => (fieldErr.value[k] ? 'error' : undefined)
-const typeOptions = proxyTypes.map((t) => ({ label: t, value: t }))
-const port = (v: number | null) => (v ?? 0) as number
 
 async function genSecret() {
-  form.value.secretKey = await ProfileService.GenerateSecret()
+  try {
+    form.value.secretKey = await ProfileService.GenerateSecret()
+  } catch (e) {
+    message.error(describeError(e))
+  }
 }
 
 async function save() {
   saving.value = true
   error.value = null
   const p = clone(form.value)
+  p.localPort = portValue(localPort.value)
+  p.remotePort = portValue(remotePort.value)
   if (!hasRemotePort(p.type)) p.remotePort = 0
   if (!isDomainType(p.type)) {
     p.customDomains = []
@@ -105,85 +100,162 @@ async function save() {
 </script>
 
 <template>
-  <n-drawer :show="show" :width="460" placement="right" @update:show="(v: boolean) => emit('update:show', v)">
-    <n-drawer-content :title="index >= 0 ? '编辑代理' : '添加代理'" closable>
-      <n-alert v-if="otherError" type="error" :show-icon="false" style="margin-bottom: 12px" data-testid="proxy-form-error">
-        {{ otherError }}
-      </n-alert>
-      <n-form label-placement="left" label-width="90" :show-require-mark="false" size="small">
-        <n-form-item label="名称" :validation-status="status('name')" :feedback="fieldErr.name">
-          <n-input v-model:value="form.name" placeholder="例如 ssh、web" maxlength="50" data-testid="proxy-form-name" />
-        </n-form-item>
-        <n-form-item label="类型" :feedback="proxyTypeHints[form.type]">
-          <n-select v-model:value="form.type" :options="typeOptions" data-testid="proxy-form-type" />
-        </n-form-item>
-        <n-form-item label="本地地址" :validation-status="status('localIP')" :feedback="fieldErr.localIP">
-          <n-input v-model:value="form.localIP" placeholder="127.0.0.1" data-testid="proxy-form-localIP" />
-        </n-form-item>
-        <n-form-item label="本地端口" :validation-status="status('localPort')" :feedback="fieldErr.localPort">
-          <n-input-number
-            :value="form.localPort || null"
-            :min="1"
-            :max="65535"
-            :show-button="false"
-            placeholder="1–65535"
-            style="width: 100%"
-            data-testid="proxy-form-localPort"
-            @update:value="(v: number | null) => (form.localPort = port(v))"
-          />
-        </n-form-item>
-        <n-form-item
-          v-if="hasRemotePort(form.type)"
-          label="远程端口"
-          :validation-status="status('remotePort')"
-          :feedback="fieldErr.remotePort ?? '留空表示由节点分配'"
-        >
-          <n-input-number
-            :value="form.remotePort || null"
-            :min="1"
-            :max="65535"
-            :show-button="false"
-            placeholder="留空自动分配"
-            style="width: 100%"
-            data-testid="proxy-form-remotePort"
-            @update:value="(v: number | null) => (form.remotePort = port(v))"
-          />
-        </n-form-item>
-        <template v-if="isDomainType(form.type)">
-          <n-form-item label="自定义域名" :validation-status="status('customDomains')" :feedback="fieldErr.customDomains">
-            <n-dynamic-tags v-model:value="form.customDomains as string[]" data-testid="proxy-form-customDomains" />
-          </n-form-item>
-          <n-form-item label="子域名" :validation-status="status('subdomain')" :feedback="fieldErr.subdomain ?? '需要节点设置了 subDomainHost'">
-            <n-input v-model:value="form.subdomain" placeholder="可选" data-testid="proxy-form-subdomain" />
-          </n-form-item>
-        </template>
-        <template v-if="isP2PType(form.type)">
-          <n-form-item label="密钥" :validation-status="status('secretKey')" :feedback="fieldErr.secretKey ?? '访问方要填同一个密钥；留空时自动生成'">
-            <n-input-group>
-              <n-input v-model:value="form.secretKey" type="password" show-password-on="click" placeholder="留空自动生成" data-testid="proxy-form-secretKey" />
-              <n-button @click="genSecret">生成</n-button>
-            </n-input-group>
-          </n-form-item>
-          <n-form-item label="允许的用户" :validation-status="status('allowUsers')" :feedback="fieldErr.allowUsers ?? '填 * 允许所有用户；留空只允许自己'">
-            <n-dynamic-tags v-model:value="form.allowUsers as string[]" />
-          </n-form-item>
-        </template>
-        <n-form-item label="传输">
-          <n-space>
-            <n-checkbox v-model:checked="form.useEncryption">加密</n-checkbox>
-            <n-checkbox v-model:checked="form.useCompression">压缩</n-checkbox>
-          </n-space>
-        </n-form-item>
-        <n-form-item label="启用">
-          <n-switch v-model:value="form.enabled" />
-        </n-form-item>
-      </n-form>
-      <template #footer>
-        <n-space>
-          <n-button @click="emit('update:show', false)">取消</n-button>
-          <n-button type="primary" :loading="saving" data-testid="proxy-form-save" @click="save">保存</n-button>
-        </n-space>
-      </template>
-    </n-drawer-content>
-  </n-drawer>
+  <Drawer
+    :show="show"
+    :title="index >= 0 ? '编辑代理' : '添加代理'"
+    :subtitle="profiles.current ? `保存在「${profiles.current.name}」` : undefined"
+    icon="tunnel"
+    @update:show="(v: boolean) => emit('update:show', v)"
+  >
+    <form @submit.prevent="save">
+      <div v-if="otherError" class="alert bad" style="margin-bottom: 14px" data-testid="proxy-form-error"><Icon name="alert" size="s" /><span>{{ otherError }}</span></div>
+      <div class="fld">
+        <label for="px-name">名称</label>
+        <input id="px-name" v-model="form.name" class="inp" :class="{ err: fieldErr.name }" placeholder="例如 ssh、web" maxlength="50" data-testid="proxy-form-name" />
+        <span v-if="fieldErr.name" class="fld-help err">{{ fieldErr.name }}</span>
+      </div>
+      <div class="fld">
+        <span class="lbl">类型</span>
+        <div class="chips" role="radiogroup" aria-label="代理类型" data-testid="proxy-form-type">
+          <button
+            v-for="t in proxyTypes"
+            :key="t"
+            type="button"
+            role="radio"
+            class="chip-opt"
+            :class="{ on: form.type === t }"
+            :aria-checked="form.type === t"
+            @click="form.type = t"
+          >
+            {{ t }}
+          </button>
+        </div>
+        <Transition name="fade" mode="out-in">
+          <div :key="form.type" class="type-hint"><Icon name="info" size="xs" /><span>{{ proxyTypeHints[form.type] }}</span></div>
+        </Transition>
+      </div>
+      <div class="grid2">
+        <div class="fld">
+          <label for="px-lip">本地地址</label>
+          <input id="px-lip" v-model="form.localIP" class="inp mono" :class="{ err: fieldErr.localIP }" placeholder="127.0.0.1" data-testid="proxy-form-localIP" />
+          <span v-if="fieldErr.localIP" class="fld-help err">{{ fieldErr.localIP }}</span>
+        </div>
+        <div class="fld">
+          <label for="px-lport">本地端口</label>
+          <input id="px-lport" v-model="localPort" class="inp mono" :class="{ err: fieldErr.localPort }" inputmode="numeric" placeholder="1–65535" data-testid="proxy-form-localPort" />
+          <span v-if="fieldErr.localPort" class="fld-help err">{{ fieldErr.localPort }}</span>
+        </div>
+      </div>
+      <Transition name="collapse">
+        <div v-if="hasRemotePort(form.type)" class="fld">
+          <label for="px-rport">远程端口</label>
+          <input id="px-rport" v-model="remotePort" class="inp mono" :class="{ err: fieldErr.remotePort }" inputmode="numeric" placeholder="留空自动分配" data-testid="proxy-form-remotePort" />
+          <span class="fld-help" :class="{ err: fieldErr.remotePort }">{{ fieldErr.remotePort ?? '留空表示由节点分配' }}</span>
+        </div>
+      </Transition>
+      <Transition name="collapse">
+        <div v-if="isDomainType(form.type)">
+          <div class="fld">
+            <span class="lbl">自定义域名</span>
+            <TagInput v-model="form.customDomains as string[]" placeholder="输入域名后回车" label="自定义域名" :invalid="!!fieldErr.customDomains" data-testid="proxy-form-customDomains" />
+            <span v-if="fieldErr.customDomains" class="fld-help err">{{ fieldErr.customDomains }}</span>
+          </div>
+          <div class="fld">
+            <label for="px-sub">子域名</label>
+            <input id="px-sub" v-model="form.subdomain" class="inp" :class="{ err: fieldErr.subdomain }" placeholder="可选" data-testid="proxy-form-subdomain" />
+            <span class="fld-help" :class="{ err: fieldErr.subdomain }">{{ fieldErr.subdomain ?? '需要节点设置了 subDomainHost' }}</span>
+          </div>
+        </div>
+      </Transition>
+      <Transition name="collapse">
+        <div v-if="isP2PType(form.type)">
+          <div class="fld">
+            <label for="px-key">密钥</label>
+            <div class="inp-group">
+              <input id="px-key" v-model="form.secretKey" class="inp mono" :class="{ err: fieldErr.secretKey }" type="password" placeholder="留空自动生成" data-testid="proxy-form-secretKey" />
+              <button type="button" class="btn soft sm" style="height: 40px" @click="genSecret"><Icon name="key" size="xs" />生成</button>
+            </div>
+            <span class="fld-help" :class="{ err: fieldErr.secretKey }">{{ fieldErr.secretKey ?? '访问方要填同一个密钥；留空时自动生成' }}</span>
+          </div>
+          <div class="fld">
+            <span class="lbl">允许的用户</span>
+            <TagInput v-model="form.allowUsers as string[]" placeholder="输入用户名后回车" label="允许的用户" :invalid="!!fieldErr.allowUsers" />
+            <span class="fld-help" :class="{ err: fieldErr.allowUsers }">{{ fieldErr.allowUsers ?? '填 * 允许所有用户；留空只允许自己' }}</span>
+          </div>
+        </div>
+      </Transition>
+      <div class="fld">
+        <span class="lbl">传输</span>
+        <div class="toggles">
+          <Check v-model="form.useEncryption">加密</Check>
+          <Check v-model="form.useCompression">压缩</Check>
+        </div>
+      </div>
+      <div class="sw-line">
+        <div class="set-txt"><b>启用</b><small>关掉后保留配置，但不运行</small></div>
+        <Switch v-model="form.enabled" label="启用" />
+      </div>
+      <button type="submit" hidden />
+    </form>
+    <template #footer>
+      <button type="button" class="btn quiet sm" @click="emit('update:show', false)">取消</button>
+      <button type="button" class="btn pri sm" :disabled="saving" data-testid="proxy-form-save" @click="save">
+        <Icon :name="saving ? 'refresh' : 'check'" size="s" :class="{ spin: saving }" />保存
+      </button>
+    </template>
+  </Drawer>
 </template>
+
+<style>
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip-opt {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 99px;
+  border: 1.5px solid var(--line);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-2);
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+}
+.chip-opt:hover {
+  border-color: color-mix(in oklab, var(--pri) 50%, var(--line));
+  color: var(--text);
+}
+.chip-opt.on {
+  background: var(--pri);
+  border-color: var(--pri);
+  color: #fff;
+  animation: boing 0.45s var(--ease-spring);
+}
+.type-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: var(--pri-soft);
+  color: var(--pri-text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+.type-hint .ic {
+  margin-top: 2px;
+}
+.toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.toggles .check {
+  padding: 7px 14px 7px 9px;
+}
+</style>

@@ -11,6 +11,8 @@ export const useTunnelStore = defineStore('tunnel', () => {
   /** 面板下发的官方节点（订阅来的配置不能用）。 */
   const official = shallowRef<OfficialNodeView[]>([])
   const acting = ref(false) // 正在等 Start / Stop 调用返回
+  /** 顶部节点选择框当前选中的节点（节点页的"用这个节点"也会改它）。 */
+  const selectedNodeId = ref('')
   let started = false
 
   const active = computed(() => ['connecting', 'running', 'reconnecting'].includes(status.value.state))
@@ -56,6 +58,13 @@ export const useTunnelStore = defineStore('tunnel', () => {
   const start = (profileId: string, nodeId: string) => run(() => TunnelService.Start(profileId, nodeId))
   const stop = () => run(() => TunnelService.Stop())
 
+  /** 选节点：正在运行这份配置时换了节点，就按 6.3.5 停掉再用新节点重启。 */
+  async function chooseNode(profileId: string, id: string) {
+    selectedNodeId.value = id
+    const s = status.value
+    if (runningProfileId.value === profileId && s.state !== 'stopping' && id !== s.nodeId) await start(profileId, id)
+  }
+
   async function ping(profileId: string) {
     pinging.value = true
     try {
@@ -70,5 +79,5 @@ export const useTunnelStore = defineStore('tunnel', () => {
     }
   }
 
-  return { status, proxies, proxyById, pings, pinging, official, acting, active, busy, runningProfileId, init, start, stop, ping }
+  return { status, proxies, proxyById, pings, pinging, official, acting, active, busy, runningProfileId, selectedNodeId, init, start, stop, chooseNode, ping }
 })

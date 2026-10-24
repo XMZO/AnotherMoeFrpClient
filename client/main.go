@@ -331,8 +331,10 @@ func main() {
 			MinWidth:         900,
 			MinHeight:        600,
 			BackgroundColour: bg,
-			URL:              "/",
-			Hidden:           !visible,
+			// 标题栏由前端自绘（frontend/src/components/TitleBar.vue），保留系统的阴影、圆角、贴边和拖边改大小
+			Frameless: true,
+			URL:       "/",
+			Hidden:    !visible,
 		})
 		// 点关闭按钮：默认最小化到托盘，设置里可改为退出（PLAN 6.8）。
 		// 最小化到托盘时默认关闭窗口、释放 WebView2，从托盘打开时重新创建；设置里关掉则只是隐藏。

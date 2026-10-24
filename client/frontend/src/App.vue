@@ -1,43 +1,31 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
-import {
-  NConfigProvider,
-  NDialogProvider,
-  NGlobalStyle,
-  NMessageProvider,
-  NNotificationProvider,
-  darkTheme,
-  dateZhCN,
-  useOsTheme,
-  zhCN,
-} from 'naive-ui'
+import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
 import Shell from './Shell.vue'
+import UiHost from './ui/UiHost.vue'
 import { useSettingsStore } from './stores/settings'
 
 const settings = useSettingsStore()
-const osTheme = useOsTheme()
 
-// 主题：跟随系统 / 浅色 / 深色（PLAN 6.7），默认跟随系统
-const theme = computed(() => {
+// 主题：跟随系统 / 浅色 / 深色（PLAN 6.7），默认跟随系统。颜色变量挂在 <html data-theme> 上。
+const mq = window.matchMedia('(prefers-color-scheme: dark)')
+const sysDark = ref(mq.matches)
+const onChange = (e: MediaQueryListEvent) => (sysDark.value = e.matches)
+const dark = computed(() => {
   const t = settings.settings?.theme ?? 'system'
-  const dark = t === 'dark' || (t === 'system' && osTheme.value === 'dark')
-  return dark ? darkTheme : null
+  return t === 'dark' || (t === 'system' && sysDark.value)
+})
+watchEffect(() => {
+  document.documentElement.dataset.theme = dark.value ? 'dark' : 'light'
 })
 
 onMounted(() => {
+  mq.addEventListener('change', onChange)
   settings.load().catch(() => {})
 })
+onBeforeUnmount(() => mq.removeEventListener('change', onChange))
 </script>
 
 <template>
-  <n-config-provider :theme="theme" :locale="zhCN" :date-locale="dateZhCN" style="height: 100%">
-    <n-global-style />
-    <n-message-provider :max="3">
-      <n-notification-provider>
-        <n-dialog-provider>
-          <Shell :dark="theme !== null" />
-        </n-dialog-provider>
-      </n-notification-provider>
-    </n-message-provider>
-  </n-config-provider>
+  <Shell />
+  <UiHost />
 </template>

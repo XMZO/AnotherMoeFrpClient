@@ -101,13 +101,13 @@ async function shot(name) {
   fs.writeFileSync(file, Buffer.from(r.result.data, 'base64'))
   return file
 }
-const drawerOpen = () => exists('.n-drawer')
+const drawerOpen = () => exists('.drawer')
 const runState = () => attr(tid('run-state'), 'data-state')
 const proxyPhase = (name) => attr(tid(`proxy-status-${name}`), 'data-phase')
 const proxyCode = (name) => attr(tid(`proxy-status-${name}`), 'data-code')
 
 async function openTab(label) {
-  await clickText('.n-tabs-tab', label)
+  await clickText('.tab', label)
   await sleep(150)
 }
 
@@ -138,8 +138,8 @@ async function addProxy(name, localPort, remotePort) {
   await waitFor(`proxy ${name} saved`, async () => !(await drawerOpen()) && (await exists(tid(`proxy-row-${name}`))))
 }
 
-// 最近一条消息提示（n-message）
-const lastToast = () => evaluate(`[...document.querySelectorAll('.n-message__content')].map(e => e.textContent.trim()).pop() ?? ''`)
+// 最近一条消息提示（顶部的 toast）
+const lastToast = () => evaluate(`[...document.querySelectorAll('.toast-text')].map(e => e.textContent.trim()).pop() ?? ''`)
 
 function echoOnce(port, msg) {
   return new Promise((resolve, reject) => {
@@ -221,7 +221,7 @@ async function mainScenario() {
   await click(tid('profile-new'))
   await waitFor('name modal', () => exists(tid('profile-name-input')))
   await type(tid('profile-name-input'), 'e2e')
-  await clickText('.n-dialog .n-button', '确定')
+  await clickText('.dlg-actions button', '确定')
   await waitFor('profile created', () => exists(tid('profile-item-e2e')))
   check('createLocalProfile', true)
 
@@ -284,14 +284,14 @@ async function mainScenario() {
   await openTab('代理')
   await fillProxy('echo', ECHO_PORT, 0)
   await waitFor('duplicate feedback', () =>
-    evaluate(`[...document.querySelectorAll('.n-drawer .n-form-item-feedback')].some(e => e.textContent.includes('重复'))`),
+    evaluate(`[...document.querySelectorAll('.drawer .fld-help')].some(e => e.textContent.includes('重复'))`),
   )
   const dupText = await evaluate(
-    `[...document.querySelectorAll('.n-drawer .n-form-item-feedback')].map(e => e.textContent.trim()).find(t => t.includes('重复'))`,
+    `[...document.querySelectorAll('.drawer .fld-help')].map(e => e.textContent.trim()).find(t => t.includes('重复'))`,
   )
   check('duplicateNameShown', !!dupText && (await drawerOpen()), { dupText })
   await shot('02-duplicate-name.png')
-  await clickText('.n-drawer .n-button', '取消')
+  await clickText('.drawer button', '取消')
   await waitFor('drawer closed', async () => !(await drawerOpen()))
   check('duplicateNotSaved', (await evaluate(`document.querySelectorAll(${js(tid('proxy-row-echo'))}).length`)) === 1)
 
@@ -312,7 +312,7 @@ async function mainScenario() {
 
   // 删掉冲突的代理（热更新），echo 不受影响
   await click(tid('proxy-delete-clash'))
-  await clickText('.n-popconfirm .n-button', '确认')
+  await clickText('.dlg-actions button', '删除')
   await waitFor('clash removed', async () => !(await exists(tid('proxy-row-clash'))))
   check('deleteProxyHot', (await proxyPhase('echo')) === 'running' && (await echoOnce(R_ECHO, 'after-delete')) === 'after-delete')
 
@@ -322,7 +322,9 @@ async function mainScenario() {
   await waitFor('idle', async () => (await runState()) === 'idle')
   result.timings.stopClickToIdleMs = Date.now() - t1
   check('stopReleasesPort', await waitPortFree(R_ECHO), { port: R_ECHO })
-  check('statusColumnClearedAfterStop', (await text(tid('proxy-status-echo'))) === '—')
+  // 停止后状态列只剩"未运行"徽标，不再残留运行中的阶段和远程地址
+  const stoppedText = await text(tid('proxy-status-echo'))
+  check('statusColumnClearedAfterStop', stoppedText === '未运行' && !(await proxyPhase('echo')), { text: stoppedText })
 
   // 7. 再启动（新的 Service），保持运行，交给 PowerShell 测"运行中从托盘退出"
   await click(tid('run-toggle'))
@@ -335,7 +337,7 @@ async function mainScenario() {
 async function relaunchScenario() {
   await waitFor('app mounted', () => exists(tid('profile-item-e2e')), 20000)
   check('profilePersisted', true)
-  await click(tid('profile-item-e2e'))
+  await click(`${tid('profile-item-e2e')} .pitem-main`) // testid 在外层，点击处理在里面的按钮上
   await waitFor('proxies loaded', () => exists(tid('proxy-row-echo')))
   const rows = await evaluate(`document.querySelectorAll('[data-testid^="proxy-row-"]').length`)
   check('proxiesPersisted', rows === 3, { rows })
@@ -353,13 +355,13 @@ async function relaunchScenario() {
   await waitFor('failed', async () => (await runState()) === 'failed', 20000)
   const detail = await text(tid('run-detail'))
   check('connectFailureExplained', detail.includes('连接被拒绝') && detail.includes(String(DEAD_PORT)), { detail })
-  await sleep(600) // 等 Naive UI 的颜色过渡（0.3s）结束
+  await sleep(600) // 等颜色过渡（0.3s）结束
   const colors = await evaluate(`(() => {
     const tag = document.querySelector(${js(tid('run-state'))}), btn = document.querySelector(${js(tid('run-toggle'))})
-    return { tagBg: getComputedStyle(tag).backgroundColor, btnBg: getComputedStyle(btn).backgroundColor }
+    return { tagClass: tag.className, btnClass: btn.className, tagBg: getComputedStyle(tag).backgroundColor, btnBg: getComputedStyle(btn).backgroundColor }
   })()`)
-  // 失败：标签是红色系（error），按钮是"启动"的绿色（primary）
-  check('failedStateColors', colors.tagBg.startsWith('rgba(208, 48, 80') && colors.btnBg === 'rgb(24, 160, 88)', colors)
+  // 失败：状态标签是红色系（failed），按钮回到主色的"启动"（idle）
+  check('failedStateColors', colors.tagClass.split(' ').includes('failed') && colors.btnClass.split(' ').includes('idle') && colors.tagBg !== colors.btnBg, colors)
   await shot('04-node-refused.png')
 
   // 测速：同样的原因

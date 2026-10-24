@@ -1,4 +1,4 @@
-import type { MessageApi } from 'naive-ui'
+import type { MessageApi } from '../ui/feedback'
 import type { SaveResult } from '../api'
 import { describeError } from '../errors'
 

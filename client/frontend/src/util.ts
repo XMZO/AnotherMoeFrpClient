@@ -26,3 +26,9 @@ export function proxyRemote(p: Proxy): string {
 export function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T
 }
+
+/** 输入框里的端口：空或不是正整数时返回 0（交给保存时的校验报错）。 */
+export function portValue(v: string | number | null | undefined): number {
+  const n = Number(String(v ?? '').trim())
+  return Number.isInteger(n) && n > 0 ? n : 0
+}

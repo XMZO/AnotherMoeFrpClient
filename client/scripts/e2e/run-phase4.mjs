@@ -160,7 +160,7 @@ const runState = (p) => p.attr(tid('run-state'), 'data-state')
 
 async function setCloseToQuit(p) {
   await p.click(tid('nav-settings'))
-  await p.clickText('.n-radio', '退出程序')
+  await p.clickText('.radio', '退出程序')
   await sleep(300)
   await p.click(tid('nav-tunnel'))
 }
@@ -168,11 +168,11 @@ async function setCloseToQuit(p) {
 async function login(p, nick) {
   await p.click(tid('account-login'))
   await p.waitFor('auth modal', () => p.exists(tid('login-nickname')))
-  await p.clickText('.n-tabs-tab', '登录')
+  await p.clickText('.tab', '登录')
   await sleep(150)
   await p.type(tid('login-nickname'), nick)
   await p.type(tid('login-password'), PW)
-  const checked = await p.evaluate(`document.querySelector('[data-testid=login-keep]')?.classList.contains('n-checkbox--checked')`)
+  const checked = await p.evaluate(`document.querySelector('[data-testid=login-keep]')?.getAttribute('aria-checked') === 'true'`)
   if (checked) await p.click(tid('login-keep')) // 不保存令牌，测试结束不用清理凭据管理器
   await p.click(tid('login-submit'))
   await p.waitFor('logged in', () => loggedIn(p), 15000)
@@ -180,7 +180,7 @@ async function login(p, nick) {
 }
 
 async function selectProfile(p, name) {
-  await p.click(tid(`profile-item-${name}`))
+  await p.click(`${tid(`profile-item-${name}`)} .pitem-main`) // testid 在外层，点击处理在里面的按钮上
   await p.waitFor(`editor shows ${name}`, async () => (await p.text('.editor .title'))?.startsWith(name))
 }
 
@@ -231,7 +231,7 @@ async function createShare(p, { name, kind, uncheck = [] }) {
   await p.waitFor('share created', () => p.exists(tid('share-created-id')), 15000)
   const id = await p.text(tid('share-created-id'))
   await shot(p, `share-created-${kind}.png`)
-  await p.clickText('.n-dialog__action button', '关闭')
+  await p.clickText('.dlg-actions button', '关闭')
   await sleep(300)
   return id
 }
@@ -243,7 +243,7 @@ async function subscribe(p, shareId, { port } = {}) {
   await p.type(tid('subscribe-id'), shareId)
   await p.click(tid('subscribe-preview'))
   await p.waitFor('preview loaded', () => p.exists(tid('subscribe-preview-name')), 10000)
-  const modalText = await p.evaluate(`[...document.querySelectorAll('.n-modal')].map(e => e.innerText).join('\\n')`)
+  const modalText = await p.evaluate(`[...document.querySelectorAll('.modal')].map(e => e.innerText).join('\\n')`)
   if (port) {
     const portTid = await p.evaluate(`document.querySelector('[data-testid^="subscribe-port-"]')?.getAttribute('data-testid')`)
     await p.type(tid(portTid), port)
@@ -312,9 +312,9 @@ async function main() {
   check('full_subscription_is_read_only', (await B.attr(tid(`profile-item-${FULL}`), 'data-origin')) === 'subscription' && !(await B.exists(tid('proxy-add'))) && !(await B.exists(tid('node-add'))))
   await B.click(tid(`profile-more-${FULL}`))
   await sleep(300)
-  const menu = await B.evaluate(`[...document.querySelectorAll('.n-dropdown-option-body')].filter(e => e.offsetParent).map(e => e.textContent.trim())`)
+  const menu = await B.evaluate(`[...document.querySelectorAll('.menu-item')].filter(e => e.offsetParent).map(e => e.textContent.trim())`)
   await B.click(tid(`profile-more-${FULL}`)) // 再点一次收起菜单
-  await B.waitFor('menu closed', async () => !(await B.evaluate(`[...document.querySelectorAll('.n-dropdown-option-body')].some(e => e.offsetParent)`)), 5000)
+  await B.waitFor('menu closed', async () => !(await B.evaluate(`[...document.querySelectorAll('.menu-item')].some(e => e.offsetParent)`)), 5000)
   check('subscription_menu_only_unsubscribe', JSON.stringify(menu) === JSON.stringify(['取消订阅']), { menu })
   await startTunnel(B, 'B full')
   const fullOk = await echoEventually(FULL_REMOTE)
@@ -325,7 +325,7 @@ async function main() {
   // ---- 2b. B 订阅 template，加自己的代理后真实转发 ----
   await subscribe(B, tplId)
   await selectProfile(B, TPL)
-  await B.clickText('.n-tabs-tab', '代理')
+  await B.clickText('.tab', '代理')
   await B.click(tid('proxy-add'))
   await B.waitFor('proxy drawer', () => B.drawerOpen())
   await B.type(tid('proxy-form-name'), 'tpl-echo')
@@ -362,7 +362,7 @@ async function main() {
 
   // ---- 3. A 撤销 p2p，B 下一次同步时停止并显示"已撤销" ----
   await A.click(tid(`share-revoke-${P2P}`))
-  await A.clickText('.n-popconfirm__action button', '确认')
+  await A.clickText('.dlg-actions button', '撤销')
   await A.waitFor('revoked state', async () => (await A.text(tid(`share-state-${P2P}`))) === '已撤销', 10000)
   const tRevoke = Date.now()
   let tStopped = null
@@ -385,9 +385,9 @@ async function main() {
 
   // ---- 取消订阅 ----
   await B.click(tid(`profile-more-${FULL}`))
-  await B.waitFor('menu open', () => B.evaluate(`[...document.querySelectorAll('.n-dropdown-option-body')].some(e => e.offsetParent)`), 5000)
-  await B.clickText('.n-dropdown-option-body', '取消订阅')
-  await B.clickText('.n-dialog__action button', '取消订阅')
+  await B.waitFor('menu open', () => B.evaluate(`[...document.querySelectorAll('.menu-item')].some(e => e.offsetParent)`), 5000)
+  await B.clickText('.menu-item', '取消订阅')
+  await B.clickText('.dlg-actions button', '取消订阅')
   await B.waitFor('full unsubscribed', async () => !(await B.exists(tid(`profile-item-${FULL}`))), 10000)
   check('unsubscribe_removes_entry', true)
 

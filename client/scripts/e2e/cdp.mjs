@@ -88,9 +88,9 @@ export async function connect(port, label = String(port), timeout = 30000) {
       fs.writeFileSync(file, Buffer.from(r.result.data, 'base64'))
       return file
     },
-    /** 最近的消息提示（n-message）。 */
-    toasts: () => p.evaluate(`[...document.querySelectorAll('.n-message__content')].map(e => e.textContent.trim())`),
-    drawerOpen: () => p.exists('.n-drawer'),
+    /** 最近的消息提示（顶部的 toast）。 */
+    toasts: () => p.evaluate(`[...document.querySelectorAll('.toast-text')].map(e => e.textContent.trim())`),
+    drawerOpen: () => p.exists('.drawer'),
   }
   return p
 }

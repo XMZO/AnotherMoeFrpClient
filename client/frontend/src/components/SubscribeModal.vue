@@ -1,39 +1,27 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import {
-  NAlert,
-  NButton,
-  NCheckbox,
-  NDescriptions,
-  NDescriptionsItem,
-  NInput,
-  NInputNumber,
-  NModal,
-  NSelect,
-  NSpace,
-  NTable,
-  NTag,
-  NText,
-  useMessage,
-} from 'naive-ui'
+import Icon from '../ui/Icon.vue'
+import Modal from '../ui/Modal.vue'
+import Check from '../ui/Check.vue'
+import { message } from '../ui/feedback'
 import { ShareService, type SharePreview, type P2PBind } from '../api'
 import { useProfilesStore } from '../stores/profiles'
 import { describeError, toAppError } from '../errors'
 import { shareKindHints, shareKindLabels } from '../labels'
 import { formatTime } from './shareFormat'
+import { portValue } from '../util'
 
 // 添加订阅（PLAN 6.7）：输入分享 ID → 预览（不含机密）→ 按类型填参数 → 订阅。
 const show = defineModel<boolean>('show', { default: false })
 
 const profiles = useProfilesStore()
-const message = useMessage()
 
 const shareId = ref('')
 const preview = ref<SharePreview | null>(null)
 const loading = ref(false)
 const error = ref('')
 const nodeId = ref('')
-type BindRow = { targetId: string; serverName: string; type: string; on: boolean; name: string; port: number | null }
+type BindRow = { targetId: string; serverName: string; type: string; on: boolean; name: string; port: string }
 const binds = ref<BindRow[]>([])
 
 watch(show, (v) => {
@@ -44,7 +32,6 @@ watch(show, (v) => {
 })
 
 const kind = computed(() => preview.value?.kind ?? '')
-const nodeOptions = computed(() => (preview.value?.nodes ?? []).map((n) => ({ label: n.remark || n.id, value: n.id })))
 
 async function load() {
   error.value = ''
@@ -65,7 +52,7 @@ async function load() {
       type: t.type,
       on: true,
       name: `p2p-${t.serverName}`,
-      port: t.localPort ? Math.min(t.localPort + 10000, 65535) : null,
+      port: t.localPort ? String(Math.min(t.localPort + 10000, 65535)) : '',
     }))
   } catch (e) {
     error.value = describeError(toAppError(e))
@@ -101,16 +88,16 @@ async function subscribe() {
       error.value = '至少选择一个要访问的目标'
       return
     }
-    if (chosen.some((b) => !b.port)) {
+    if (chosen.some((b) => !portValue(b.port))) {
       error.value = '请为选中的目标填写本地端口'
       return
     }
-    params.binds = chosen.map((b) => ({ id: '', targetId: b.targetId, name: b.name.trim(), enabled: true, bindAddr: '127.0.0.1', bindPort: b.port ?? 0 }))
+    params.binds = chosen.map((b) => ({ id: '', targetId: b.targetId, name: b.name.trim(), enabled: true, bindAddr: '127.0.0.1', bindPort: portValue(b.port) }))
   }
   loading.value = true
   try {
     const sum = await ShareService.Subscribe(pv.id, params as any)
-    message.success(`已订阅"${sum.shareName}"`)
+    message.success(`已订阅“${sum.shareName}”`)
     show.value = false
     await profiles.loadList()
     await profiles.select(sum.id)
@@ -123,112 +110,159 @@ async function subscribe() {
 </script>
 
 <template>
-  <n-modal v-model:show="show" preset="card" title="添加订阅" style="width: 620px" :mask-closable="!loading" data-testid="subscribe-modal">
-    <n-space vertical :size="12">
-      <n-space :wrap="false">
-        <n-input
-          v-model:value="shareId"
-          placeholder="粘贴别人给你的分享 ID"
-          clearable
-          style="width: 420px"
-          data-testid="subscribe-id"
-          @keyup.enter="load"
-        />
-        <n-button :loading="loading && !preview" data-testid="subscribe-preview" @click="load">预览</n-button>
-      </n-space>
+  <Modal v-model:show="show" title="添加订阅" subtitle="输入别人给你的分享 ID，先预览再订阅" icon="link" tone="gold" :width="620" :mask-closable="!loading" data-testid="subscribe-modal">
+    <form class="inp-group" style="margin-bottom: 12px" @submit.prevent="load">
+      <label for="sb-id" class="sr-only">分享 ID</label>
+      <input id="sb-id" v-model="shareId" class="inp mono" placeholder="粘贴别人给你的分享 ID" data-testid="subscribe-id" />
+      <button type="submit" class="btn ghost sm" style="height: 40px" :disabled="loading && !preview" data-testid="subscribe-preview">
+        <Icon :name="loading && !preview ? 'refresh' : 'eye'" size="s" :class="{ spin: loading && !preview }" />预览
+      </button>
+    </form>
 
-      <template v-if="preview">
-        <n-descriptions :column="2" size="small" label-placement="left" bordered>
-          <n-descriptions-item label="名称">
-            <span data-testid="subscribe-preview-name">{{ preview.name }}</span>
-          </n-descriptions-item>
-          <n-descriptions-item label="类型">
-            <n-tag size="small" :bordered="false" type="success" data-testid="subscribe-preview-kind">{{ shareKindLabels[preview.kind] ?? preview.kind }}</n-tag>
-          </n-descriptions-item>
-          <n-descriptions-item label="分享者">{{ preview.ownerNickname }}</n-descriptions-item>
-          <n-descriptions-item label="订阅人数">
-            {{ preview.subscribers }}{{ preview.maxSubscribers ? ` / ${preview.maxSubscribers}` : '' }}
-          </n-descriptions-item>
-          <n-descriptions-item v-if="preview.expiresAt" label="过期时间" :span="2">{{ formatTime(preview.expiresAt) }}</n-descriptions-item>
-        </n-descriptions>
-        <n-text depth="3" style="font-size: 12px">{{ shareKindHints[preview.kind] }}</n-text>
+    <Transition name="collapse">
+      <div v-if="preview">
+        <div class="pv-grid">
+          <div class="stat"><small>名称</small><b data-testid="subscribe-preview-name">{{ preview.name }}</b></div>
+          <div class="stat"><small>类型</small><b><span class="bdg gold" data-testid="subscribe-preview-kind">{{ shareKindLabels[preview.kind] ?? preview.kind }}</span></b></div>
+          <div class="stat"><small>分享者</small><b>{{ preview.ownerNickname }}</b></div>
+          <div class="stat"><small>订阅人数</small><b>{{ preview.subscribers }}{{ preview.maxSubscribers ? ` / ${preview.maxSubscribers}` : '' }}</b></div>
+          <div v-if="preview.expiresAt" class="stat wide"><small>过期时间</small><b>{{ formatTime(preview.expiresAt) }}</b></div>
+        </div>
+        <div class="type-hint" style="margin: 0 0 14px"><Icon name="info" size="xs" /><span>{{ shareKindHints[preview.kind] }}</span></div>
 
-        <n-alert v-if="preview.subscription" type="info" :show-icon="false">
-          你已经订阅过这个分享。
-          <n-button text type="primary" @click="openExisting">查看</n-button>
-        </n-alert>
+        <div v-if="preview.subscription" class="alert info">
+          <Icon name="info" size="s" />
+          <span>你已经订阅过这个分享。<button type="button" class="link-btn" @click="openExisting">查看</button></span>
+        </div>
 
         <template v-else>
-          <div v-if="kind !== 'p2p'">
-            <n-text strong>节点</n-text>
-            <n-select
-              v-model:value="nodeId"
-              :options="nodeOptions"
-              style="margin-top: 6px"
-              :placeholder="kind === 'template' ? '选择一个节点' : '默认第一个节点，启动时也可以换'"
-              data-testid="subscribe-node"
-            />
+          <div v-if="kind !== 'p2p'" class="fld">
+            <label for="sb-node">节点</label>
+            <select id="sb-node" v-model="nodeId" class="inp" data-testid="subscribe-node">
+              <option v-if="kind !== 'template'" value="">默认第一个节点，启动时也可以换</option>
+              <option v-for="n in preview.nodes ?? []" :key="n.id" :value="n.id">{{ n.remark || n.id }}</option>
+            </select>
           </div>
 
-          <div v-if="kind === 'full'">
-            <n-text strong>会运行的代理</n-text>
-            <n-table size="small" :bordered="false" style="margin-top: 6px">
-              <tbody>
-                <tr v-for="p in preview.proxies ?? []" :key="p.name">
-                  <td>{{ p.name }}</td>
-                  <td><n-tag size="small" :bordered="false">{{ p.type }}</n-tag></td>
-                  <td>{{ p.remotePort ? `:${p.remotePort}` : (p.customDomains ?? []).join(', ') || p.subdomain || '' }}</td>
-                </tr>
-              </tbody>
-            </n-table>
+          <div v-if="kind === 'full'" class="fld">
+            <span class="lbl">会运行的代理</span>
+            <div class="pv-list">
+              <div v-for="p in preview.proxies ?? []" :key="p.name" class="pv-item">
+                <b>{{ p.name }}</b><span class="type">{{ p.type }}</span>
+                <span class="mono pv-remote">{{ p.remotePort ? `:${p.remotePort}` : (p.customDomains ?? []).join(', ') || p.subdomain || '' }}</span>
+              </div>
+            </div>
           </div>
 
-          <n-text v-if="kind === 'template'" depth="3" style="font-size: 12px">订阅后，在编辑区添加你自己的代理规则。</n-text>
+          <p v-if="kind === 'template'" class="fld-help">订阅后，在编辑区添加你自己的代理规则。</p>
 
-          <div v-if="kind === 'p2p'">
-            <n-text strong>要访问的目标</n-text>
-            <n-table size="small" :bordered="false" style="margin-top: 6px">
-              <thead>
-                <tr><th style="width: 40px" /><th>目标</th><th>本机访问名</th><th style="width: 130px">本地端口</th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="b in binds" :key="b.targetId">
-                  <td><n-checkbox v-model:checked="b.on" /></td>
-                  <td>{{ b.serverName }} <n-tag size="tiny" :bordered="false">{{ b.type }}</n-tag></td>
-                  <td><n-input v-model:value="b.name" size="small" :disabled="!b.on" maxlength="50" /></td>
-                  <td>
-                    <n-input-number
-                      v-model:value="b.port"
-                      size="small"
-                      :min="1"
-                      :max="65535"
-                      :show-button="false"
-                      :disabled="!b.on"
-                      placeholder="例如 13389"
-                      :data-testid="`subscribe-port-${b.serverName}`"
-                    />
-                  </td>
-                </tr>
-              </tbody>
-            </n-table>
-            <n-text depth="3" style="font-size: 12px">启动后，在本机访问 127.0.0.1:本地端口 就能连到分享者的服务。</n-text>
+          <div v-if="kind === 'p2p'" class="fld">
+            <span class="lbl">要访问的目标</span>
+            <div class="pv-binds">
+              <div class="pv-bind head"><span /><span>目标</span><span>本机访问名</span><span>本地端口</span></div>
+              <div v-for="b in binds" :key="b.targetId" class="pv-bind">
+                <Check v-model="b.on" plain :aria-label="`访问 ${b.serverName}`" />
+                <span class="pv-target"><b>{{ b.serverName }}</b><span class="type p2p">{{ b.type }}</span></span>
+                <input v-model="b.name" class="inp mono" :disabled="!b.on" maxlength="50" :aria-label="`${b.serverName} 的本机访问名`" />
+                <input
+                  v-model="b.port"
+                  class="inp mono"
+                  :disabled="!b.on"
+                  inputmode="numeric"
+                  placeholder="例如 13389"
+                  :aria-label="`${b.serverName} 的本地端口`"
+                  :data-testid="`subscribe-port-${b.serverName}`"
+                />
+              </div>
+            </div>
+            <span class="fld-help">启动后，在本机访问 127.0.0.1:本地端口 就能连到分享者的服务。</span>
           </div>
         </template>
-      </template>
+      </div>
+    </Transition>
 
-      <n-text v-if="error" type="error" data-testid="subscribe-error">{{ error }}</n-text>
-    </n-space>
+    <div v-if="error" class="alert bad" style="margin-top: 12px" data-testid="subscribe-error"><Icon name="alert" size="s" /><span>{{ error }}</span></div>
     <template #footer>
-      <n-space justify="end">
-        <n-button @click="show = false">取消</n-button>
-        <n-button
-          type="primary"
-          :disabled="!preview || !!preview.subscription"
-          :loading="loading && !!preview"
-          data-testid="subscribe-submit"
-          @click="subscribe"
-        >订阅</n-button>
-      </n-space>
+      <button type="button" class="btn quiet sm" @click="show = false">取消</button>
+      <button type="button" class="btn pri sm" :disabled="!preview || !!preview.subscription || loading" data-testid="subscribe-submit" @click="subscribe">
+        <Icon v-if="loading && preview" name="refresh" size="s" class="spin" />订阅
+      </button>
     </template>
-  </n-modal>
+  </Modal>
 </template>
+
+<style>
+.pv-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.pv-grid .wide {
+  grid-column: span 2;
+}
+.pv-grid .stat b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pv-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--fill);
+}
+.pv-remote {
+  margin-left: auto;
+  color: var(--text-2);
+}
+.pv-binds {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pv-bind {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr) 120px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 12px;
+  background: var(--fill);
+}
+.pv-bind.head {
+  background: none;
+  padding: 0 8px;
+  font-size: 11.5px;
+  font-weight: 800;
+  color: var(--text-3);
+}
+.pv-bind .inp {
+  height: 34px;
+  border-radius: 10px;
+}
+.pv-target {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.pv-target b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.link-btn {
+  color: var(--pri-text);
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+</style>

@@ -1,7 +1,8 @@
 // 官方节点端到端（docs/node-agent.md 第 12 节）：面板 + 真实 agent（Windows 版，文件放在临时目录）+ 真实客户端界面。
 //
 //   管理员把节点设为官方节点、开放给普通用户、设限额 → 用户在客户端登录后看到官方节点 → 选它启动隧道 →
-//   代理名带上昵称前缀、流量能通 → 超过数量、端口不在范围时代理被拒绝并显示原因 → 停用用户后新连接被拒绝。
+//   代理名带上昵称前缀、流量能通 → 超过数量时代理被拒绝并显示原因 → 节点 frps 重启后客户端带新的登录票据重连 →
+//   管理员踢下线后节点拒绝这台设备的新连接。
 //
 //   node scripts/e2e/run-official.mjs [--keep]
 //
@@ -43,7 +44,11 @@ function check(name, ok, extra) {
 
 const serverExe = path.join(T, 'moefrp-server.exe')
 const agentExe = path.join(T, 'moefrp-agent.exe')
-log('building server, agent')
+const credtool = path.join(T, 'credtool.exe')
+// 端到端构建把登录令牌存在凭据管理器的 MoeFrp/session/e2e-<数据目录哈希> 下，结束时要删掉，否则 run-phase3 开头会报残留
+const CRED_PREFIX = 'MoeFrp/session/e2e-'
+log('building server, agent, credtool')
+execFileSync('go', ['build', '-o', credtool, './scripts/e2e/credtool'], { cwd: client, stdio: 'inherit' })
 execFileSync('go', ['build', '-o', serverExe, './cmd/moefrp-server'], { cwd: path.join(gogogo, 'server'), stdio: 'inherit' })
 execFileSync('go', ['build', '-ldflags', '-X main.version=e2e', '-o', agentExe, './cmd/moefrp-agent'], { cwd: path.join(gogogo, 'agent'), stdio: 'inherit' })
 
@@ -85,19 +90,19 @@ async function main() {
   execFileSync(agentExe, ['install', '--server', API, '--code', created.enrollCode], { env: { ...process.env, ...agentEnv }, stdio: 'ignore' })
   start(agentExe, ['run'], agentEnv, 'agent.log')
   await waitUntil('agent online', async () => (await admin.request('GET', `/nodes/${nodeId}`)).status === 'online', 15000, 200)
-  const cfg = await admin.request('PUT', `/nodes/${nodeId}/config`, {
-    config: `bindAddr = "127.0.0.1"\nbindPort = ${FRPS_PORT}\nauth.token = "public-token"\nallowPorts = [{ start = 20000, end = 20100 }]\n`,
-  })
+  // 结构化配置，节点没有 token（只认登录票据）
+  const { defaults } = await admin.request('GET', '/frps-schema')
+  const cfg = await admin.request('PUT', `/nodes/${nodeId}/settings`, { ...defaults, bindAddr: '127.0.0.1', bindPort: FRPS_PORT, allowPorts: '20000-20100' })
   check('frps_config_applied', cfg.result?.applied, cfg.result)
   await admin.request('PATCH', `/nodes/${nodeId}`, { name: '东京', publicAddr: '127.0.0.1' })
   await admin.request('PUT', '/quotas', {
-    user: { maxProxies: 1, ports: '20000-20050', types: ['tcp'] }, vip: { maxProxies: 20, ports: '', types: [] }, admin: { maxProxies: 0, ports: '', types: [] },
+    user: { maxProxies: 1, ports: '20000-20050', types: ['tcp'] }, admin: { maxProxies: 0, ports: '', types: [] },
   })
-  await admin.request('PUT', `/nodes/${nodeId}/official`, { official: true, roles: ['user'], description: '端到端测试节点' })
-  await waitUntil('frps restarted with plugin', async () => listening(FRPS_PORT), 10000, 200)
+  await admin.request('PUT', `/nodes/${nodeId}/official`, { roles: ['user'], description: '端到端测试节点' })
+  await waitUntil('frps listening', async () => listening(FRPS_PORT), 10000, 200)
   check('node_official', (await admin.request('GET', `/nodes/${nodeId}`)).official === true)
 
-  // 不带凭证、直接用 token 的 frpc 会被拒绝（这里只检查节点日志里有插件的拒绝，界面部分下面测）
+  // 不带登录票据、直接用 token 的 frpc 会被拒绝（agent/internal/access 的 TestWithFrps 用真的 frpc 测过）
   const [invite] = await admin.createInvites(1)
   const reg = await fetch(`${API}/api/v1/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nickname: NICK, password: PW, inviteCode: invite }) })
   check('user_registered', reg.status === 201)
@@ -118,7 +123,7 @@ async function main() {
   // 登录
   await p.click(tid('account-login'))
   await p.waitFor('auth modal', () => p.exists(tid('login-nickname')))
-  await p.clickText('.n-tabs-tab', '登录')
+  await p.clickText('.tab', '登录')
   await sleep(150)
   await p.type(tid('login-nickname'), NICK)
   await p.type(tid('login-password'), PW)
@@ -127,14 +132,14 @@ async function main() {
   await p.waitFor('synced', async () => (await p.attr(tid('sync-status'), 'data-state')) === 'synced', 20000)
 
   // 官方节点出现在节点页
-  await p.clickText('.n-tabs-tab', '节点')
+  await p.clickText('.tab', '节点')
   await p.waitFor('official node listed', () => p.exists(tid('official-node-东京')), 15000)
   check('official_node_listed', true)
   await p.shot(path.join(OUT, '01-official-node.png'))
 
   // 添加两个代理：一个在范围内，一个超过数量
   async function addProxy(name, remotePort) {
-    await p.clickText('.n-tabs-tab', '代理')
+    await p.clickText('.tab', '代理')
     await sleep(150)
     await p.click(tid('proxy-add'))
     await p.waitFor('proxy drawer', () => p.drawerOpen())
@@ -147,7 +152,7 @@ async function main() {
   await addProxy('web', 20010)
 
   // 运行栏选中的应是官方节点（配置里没有自己的节点）
-  const runNode = await p.text(`${tid('run-node')} .n-base-selection-label`)
+  const runNode = await p.text(`${tid('run-node')} .ns-name`)
   check('run_bar_selects_official', (runNode || '').includes('东京'), runNode)
   await p.click(tid('run-toggle'))
   await p.waitFor('running', async () => (await p.attr(tid('run-state'), 'data-state')) === 'running', 20000)
@@ -163,12 +168,24 @@ async function main() {
   check('quota_max_proxies_enforced', true, await p.text(tid('proxy-status-web2')))
   await p.shot(path.join(OUT, '02-quota.png'))
 
-  // 停用用户：新连接被拒绝
-  await admin.request('PATCH', `/users/${NICK}`, { disabled: true })
-  await waitUntil('access revoked', async () => !(await echoOnce(20010, 'after-disable')).includes('after-disable'), 10000, 300).then(
-    () => check('disabled_user_connections_refused', true),
-    () => check('disabled_user_connections_refused', false),
+  // 节点上的 frps 重启：客户端自动重连。每次登录都要一张新票据（旧的已经用过），重连成功说明换票据生效。
+  // 重连后 web 和 web2 重新注册的先后不定，限额只有 1 个，哪个先注册上哪个能通
+  await admin.request('POST', `/nodes/${nodeId}/restart`)
+  await p.waitFor('reconnecting', async () => ['reconnecting', 'connecting'].includes(await p.attr(tid('run-state'), 'data-state')), 10000).catch(() => {})
+  const echoAny = async (msg) => (await echoOnce(20010, msg)).includes(msg) || (await echoOnce(20011, msg)).includes(msg)
+  await waitUntil('reconnected with a fresh ticket', async () => (await p.attr(tid('run-state'), 'data-state')) === 'running' &&
+    (await echoAny('after-restart')), 30000, 300).then(
+    () => check('reconnect_with_fresh_ticket', true),
+    () => check('reconnect_with_fresh_ticket', false),
   )
+
+  // 管理员踢下线：这台设备的会话被撤销，节点马上拒绝它的新连接（以前踢下线不影响节点上的连接）
+  await admin.request('POST', `/users/${NICK}/kick`)
+  await waitUntil('kicked session refused', async () => !(await echoOnce(20010, 'after-kick')).includes('after-kick'), 10000, 300).then(
+    () => check('kicked_session_connections_refused', true),
+    () => check('kicked_session_connections_refused', false),
+  )
+  await p.shot(path.join(OUT, '03-kicked.png'))
 }
 
 try {
@@ -183,6 +200,13 @@ try {
     if (app?.proc) { try { execFileSync('taskkill', ['/F', '/PID', String(app.proc.pid)], { stdio: 'ignore' }) } catch {} }
     for (const pr of procs) pr.kill()
     echo.close()
+    try {
+      execFileSync(credtool, ['delete', CRED_PREFIX], { stdio: 'ignore' })
+      const left = JSON.parse(execFileSync(credtool, ['list', CRED_PREFIX], { encoding: 'utf8' }))
+      check('cleanup_test_credentials_removed', left.length === 0, { left: left.length })
+    } catch (e) {
+      check('cleanup_test_credentials_removed', false, String(e))
+    }
   }
   console.log(failures ? `${failures} FAILED` : 'ALL PASSED')
   process.exit(failures ? 1 : 0)

@@ -1,13 +1,21 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import { NButton, NCard, NForm, NFormItem, NInput, NRadio, NRadioGroup, NSelect, NSpace, NSwitch, NText, useMessage } from 'naive-ui'
+import { computed, ref, watch } from 'vue'
+import Icon from '../ui/Icon.vue'
+import Switch from '../ui/Switch.vue'
+import Options from '../ui/Options.vue'
+import { message } from '../ui/feedback'
 import { useSettingsStore } from '../stores/settings'
 import { describeError } from '../errors'
 import type { Settings } from '../api'
 
 const settings = useSettingsStore()
-const message = useMessage()
-const levels = ['trace', 'debug', 'info', 'warn', 'error'].map((l) => ({ label: l, value: l }))
+const s = computed(() => settings.settings)
+const levels = ['trace', 'debug', 'info', 'warn', 'error'].map((l) => ({ value: l, label: l }))
+const themes = [
+  { value: 'system', label: '跟随系统' },
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' },
+]
 
 // 自定义代理：先填地址，点"应用"才切过去（地址不对时服务端请求会全部失败，所以单独确认）
 const proxyUrl = ref('')
@@ -22,6 +30,7 @@ watch(
   (v) => (customSelected.value = v === 'custom'),
   { immediate: true },
 )
+const netMode = computed(() => (customSelected.value ? 'custom' : (s.value?.networkProxy ?? 'system')))
 
 async function set(patch: Partial<Settings>) {
   try {
@@ -48,79 +57,231 @@ async function applyCustom() {
 </script>
 
 <template>
-  <div class="page">
-    <n-card title="设置" :bordered="false">
-      <n-form v-if="settings.settings" label-placement="left" label-width="140">
-        <n-form-item label="主题">
-          <n-radio-group :value="settings.settings.theme" data-testid="settings-theme" @update:value="(v: string) => set({ theme: v })">
-            <n-space>
-              <n-radio value="system">跟随系统</n-radio>
-              <n-radio value="light">浅色</n-radio>
-              <n-radio value="dark">深色</n-radio>
-            </n-space>
-          </n-radio-group>
-        </n-form-item>
-        <n-form-item label="点关闭按钮时">
-          <n-radio-group :value="settings.settings.closeAction" @update:value="(v: string) => set({ closeAction: v })">
-            <n-space>
-              <n-radio value="tray">最小化到托盘</n-radio>
-              <n-radio value="quit">退出程序</n-radio>
-            </n-space>
-          </n-radio-group>
-        </n-form-item>
-        <n-form-item v-if="settings.settings.closeAction === 'tray'" label="最小化到托盘时">
-          <n-space vertical :size="2">
-            <n-switch :value="settings.settings.releaseOnHide" data-testid="settings-release-on-hide" @update:value="(v: boolean) => set({ releaseOnHide: v })">
-              <template #checked>释放界面内存</template>
-              <template #unchecked>只隐藏窗口</template>
-            </n-switch>
-            <n-text depth="3" style="font-size: 12px">释放后后台只占几十 MB 内存（隧道照常运行），再次打开窗口约需半秒</n-text>
-          </n-space>
-        </n-form-item>
-        <n-form-item label="开机自启">
-          <n-switch :value="settings.settings.autoStart" data-testid="settings-autostart" @update:value="(v: boolean) => set({ autoStart: v })" />
-          <n-text depth="3" style="margin-left: 10px; font-size: 12px">开机后只在托盘显示图标，不弹出窗口</n-text>
-        </n-form-item>
-        <n-form-item label="启动后自动连接">
-          <n-switch :value="settings.settings.autoConnect" data-testid="settings-autoconnect" @update:value="(v: boolean) => set({ autoConnect: v })" />
-          <n-text depth="3" style="margin-left: 10px; font-size: 12px">启动时自动运行上次使用的配置和节点</n-text>
-        </n-form-item>
-        <n-form-item label="图片面板">
-          <n-switch :value="settings.settings.imagePanel" data-testid="settings-image-panel" @update:value="(v: boolean) => set({ imagePanel: v })" />
-          <n-text depth="3" style="margin-left: 10px; font-size: 12px">关闭后不会发出任何图片请求</n-text>
-        </n-form-item>
-        <n-form-item label="frp 日志级别">
-          <n-select :value="settings.settings.logLevel" :options="levels" style="width: 160px" @update:value="(v: string) => set({ logLevel: v })" />
-        </n-form-item>
-        <n-form-item label="网络代理">
-          <n-space vertical :size="6">
-            <n-radio-group :value="customSelected ? 'custom' : settings.settings.networkProxy" data-testid="settings-network-proxy" @update:value="onProxyMode">
-              <n-space>
-                <n-radio value="system">跟随系统</n-radio>
-                <n-radio value="none">不使用代理</n-radio>
-                <n-radio value="custom" data-testid="settings-proxy-custom">自定义</n-radio>
-              </n-space>
-            </n-radio-group>
-            <n-space v-if="customSelected" :wrap="false">
-              <n-input v-model:value="proxyUrl" placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080" style="width: 320px" data-testid="settings-proxy-url" />
-              <n-button type="primary" size="medium" data-testid="settings-proxy-apply" @click="applyCustom">应用</n-button>
-            </n-space>
-          </n-space>
-        </n-form-item>
-        <n-form-item label=" ">
-          <n-text depth="3" style="font-size: 12px">
-            网络代理用于登录、云同步、检查更新和图片面板。"跟随系统"读取 Windows"Internet 选项"里的手动代理（不支持自动配置脚本）。
-            frp 连接节点不受影响，节点的代理在节点设置里单独填写。
-          </n-text>
-        </n-form-item>
-      </n-form>
-    </n-card>
+  <div class="page dotted-bg">
+    <div class="inner">
+      <div class="pg-head">
+        <div>
+          <h1>设置</h1>
+          <p>改动会立即生效并自动保存。</p>
+        </div>
+      </div>
+      <div v-if="s" class="set-grid">
+        <section class="card">
+          <div class="card-h"><span class="tile-ic"><Icon name="sun" size="s" /></span>外观</div>
+          <div class="tiles" role="radiogroup" aria-label="主题" data-testid="settings-theme">
+            <button
+              v-for="t in themes"
+              :key="t.value"
+              type="button"
+              role="radio"
+              class="tile radio"
+              :class="{ on: s.theme === t.value }"
+              :aria-checked="s.theme === t.value"
+              @click="set({ theme: t.value })"
+            >
+              <span class="mini" :class="t.value">
+                <span class="m-half l"><span class="mr" /><span class="mc"><i class="p" /><i /><i /></span></span>
+                <span class="m-half d"><span class="mr" /><span class="mc"><i class="p" /><i /><i /></span></span>
+              </span>
+              {{ t.label }}
+            </button>
+          </div>
+          <div class="set-row">
+            <div class="set-txt"><b>图片面板</b><small>侧栏里每分钟换一张图；关闭后不会发出任何图片请求</small></div>
+            <Switch :model-value="s.imagePanel" label="图片面板" data-testid="settings-image-panel" @change="(v: boolean) => set({ imagePanel: v })" />
+          </div>
+        </section>
+
+        <section class="card" style="animation-delay: 0.05s">
+          <div class="card-h"><span class="tile-ic"><Icon name="power" size="s" /></span>窗口与启动</div>
+          <div class="set-row first">
+            <div class="set-txt"><b>点关闭按钮时</b></div>
+            <Options
+              :model-value="s.closeAction"
+              :options="[
+                { value: 'tray', label: '最小化到托盘' },
+                { value: 'quit', label: '退出程序' },
+              ]"
+              label="点关闭按钮时"
+              @pick="(v: string) => set({ closeAction: v })"
+            />
+          </div>
+          <Transition name="collapse">
+            <div v-if="s.closeAction === 'tray'" class="set-row">
+              <div class="set-txt"><b>最小化到托盘时释放界面内存</b><small>后台只占几十 MB（隧道照常运行），再次打开窗口约需半秒</small></div>
+              <Switch :model-value="s.releaseOnHide" label="释放界面内存" data-testid="settings-release-on-hide" @change="(v: boolean) => set({ releaseOnHide: v })" />
+            </div>
+          </Transition>
+          <div class="set-row">
+            <div class="set-txt"><b>开机自启</b><small>开机后只在托盘显示图标，不弹出窗口</small></div>
+            <Switch :model-value="s.autoStart" label="开机自启" data-testid="settings-autostart" @change="(v: boolean) => set({ autoStart: v })" />
+          </div>
+          <div class="set-row">
+            <div class="set-txt"><b>启动后自动连接</b><small>启动时自动运行上次使用的配置和节点</small></div>
+            <Switch :model-value="s.autoConnect" label="启动后自动连接" data-testid="settings-autoconnect" @change="(v: boolean) => set({ autoConnect: v })" />
+          </div>
+        </section>
+
+        <section class="card" style="animation-delay: 0.1s">
+          <div class="card-h"><span class="tile-ic"><Icon name="globe" size="s" /></span>网络代理</div>
+          <p class="set-note">
+            用于登录、云同步、检查更新和图片面板。“跟随系统”读取 Windows“Internet 选项”里的手动代理（不支持自动配置脚本）。frp 连接节点不受影响，节点的代理在节点设置里单独填写。
+          </p>
+          <div class="net-row">
+            <Options
+              :model-value="netMode"
+              :options="[
+                { value: 'system', label: '跟随系统' },
+                { value: 'none', label: '不使用代理' },
+                { value: 'custom', label: '自定义', testid: 'settings-proxy-custom' },
+              ]"
+              label="网络代理"
+              data-testid="settings-network-proxy"
+              @pick="onProxyMode"
+            />
+            <Transition name="collapse">
+              <form v-if="customSelected" class="inp-group" @submit.prevent="applyCustom">
+                <label for="proxy-url" class="sr-only">代理地址</label>
+                <input id="proxy-url" v-model="proxyUrl" class="inp mono" placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080" data-testid="settings-proxy-url" />
+                <button type="submit" class="btn pri sm" style="height: 40px" data-testid="settings-proxy-apply">应用</button>
+              </form>
+            </Transition>
+          </div>
+        </section>
+
+        <section class="card" style="animation-delay: 0.15s">
+          <div class="card-h"><span class="tile-ic"><Icon name="terminal" size="s" /></span>日志</div>
+          <div class="set-row first">
+            <div class="set-txt"><b>frp 日志级别</b><small>排查问题时调到 debug，平时 info 就够了</small></div>
+            <Options :model-value="s.logLevel" :options="levels" mono label="frp 日志级别" @pick="(v: string) => set({ logLevel: v })" />
+          </div>
+        </section>
+      </div>
+    </div>
   </div>
 </template>
 
-<style scoped>
-.page {
-  padding: 12px;
-  overflow: auto;
+<style>
+.set-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.set-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 13px 0;
+  border-top: 1.5px dashed var(--line-2);
+}
+.set-row.first {
+  border-top: 0;
+}
+.set-note {
+  font-size: 12px;
+  color: var(--text-3);
+  font-weight: 600;
+  line-height: 1.6;
+  padding-bottom: 12px;
+}
+.net-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding-bottom: 14px;
+}
+.net-row .inp-group {
+  width: 100%;
+}
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 4px 0 16px;
+}
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 10px;
+  border-radius: 16px;
+  border: 2px solid var(--line-2);
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--text-2);
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s var(--ease-spring);
+}
+.tile:hover {
+  transform: translateY(-2px);
+}
+.tile.on {
+  border-color: var(--pri);
+  color: var(--pri-text);
+  box-shadow: 0 0 0 4px var(--pri-soft);
+}
+.mini {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(120, 100, 180, 0.25);
+}
+.m-half {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+.mini.light .m-half.d,
+.mini.dark .m-half.l {
+  display: none;
+}
+.mini.system .m-half.d {
+  clip-path: polygon(60% 0, 100% 0, 100% 100%, 40% 100%);
+}
+.mr {
+  width: 22%;
+}
+.mc {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 7px;
+}
+.mc i {
+  display: block;
+  height: 6px;
+  border-radius: 4px;
+}
+.m-half.l .mr {
+  background: #eeeaf9;
+}
+.m-half.l .mc {
+  background: #f6f4fc;
+}
+.m-half.l .mc i {
+  background: #fff;
+  box-shadow: 0 0 0 1px #e2dcf1;
+}
+.m-half.d .mr {
+  background: #100d18;
+}
+.m-half.d .mc {
+  background: #14111d;
+}
+.m-half.d .mc i {
+  background: #1f1a2d;
+  box-shadow: 0 0 0 1px #352e4c;
+}
+.mc i.p {
+  width: 45%;
+  background: var(--pri) !important;
+  box-shadow: none !important;
 }
 </style>

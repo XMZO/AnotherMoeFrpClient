@@ -150,14 +150,11 @@ func (c *TunnelControl) SetTicketPool(p TicketPool) {
 	c.t.mu.Unlock()
 }
 
-// OfficialNodeView 是给前端看的官方节点（不含 token）。ID 带 official- 前缀，和运行栏里的节点 ID 一致。
+// OfficialNodeView 是给前端看的官方节点：不含地址、端口和登录用的东西，对用户是黑盒。ID 带 official- 前缀，和运行栏里的节点 ID 一致。
 type OfficialNodeView struct {
 	ID          string      `json:"id"`
 	Name        string      `json:"name"`
 	Description string      `json:"description,omitempty"`
-	ServerAddr  string      `json:"serverAddr"`
-	ServerPort  int         `json:"serverPort"`
-	User        string      `json:"user"`
 	Online      bool        `json:"online"`
 	Quota       quota.Quota `json:"quota"`
 }
@@ -170,7 +167,7 @@ func (t *TunnelService) OfficialNodes() []OfficialNodeView {
 	out := make([]OfficialNodeView, 0, len(t.official))
 	for _, o := range t.official {
 		out = append(out, OfficialNodeView{ID: api.OfficialNodePrefix + o.ID, Name: o.Name, Description: o.Description,
-			ServerAddr: o.ServerAddr, ServerPort: o.ServerPort, User: o.User, Online: o.Online, Quota: o.Quota})
+			Online: o.Online, Quota: o.Quota})
 	}
 	return out
 }

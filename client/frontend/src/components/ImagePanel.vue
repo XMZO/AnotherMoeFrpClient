@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NDropdown, NModal, NSpin, NText, useMessage } from 'naive-ui'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import Icon from '../ui/Icon.vue'
+import Menu from '../ui/Menu.vue'
+import Modal from '../ui/Modal.vue'
+import { message } from '../ui/feedback'
 import { AppService, ImageService, type ImageInfo } from '../api'
 import { useSettingsStore } from '../stores/settings'
 import { codeText, describeError, toAppError } from '../errors'
@@ -10,13 +13,12 @@ import { codeText, describeError, toAppError } from '../errors'
 const REFRESH_MS = 60_000
 
 const settings = useSettingsStore()
-const message = useMessage()
 const img = ref<ImageInfo | null>(null)
 const loading = ref(false)
 const error = ref('')
 const viewer = ref(false)
 const zoom = ref(1)
-const menu = ref({ show: false, x: 0, y: 0 })
+const menuAt = ref<{ x: number; y: number } | null>(null)
 let timer: ReturnType<typeof setInterval> | undefined
 let retry: ReturnType<typeof setTimeout> | undefined
 
@@ -72,15 +74,15 @@ onMounted(start)
 onBeforeUnmount(stop)
 watch(on, (v) => (v ? start() : (stop(), (img.value = null))))
 
-const options = computed(() => [
-  { label: '换一张', key: 'next' },
-  { label: '复制', key: 'copy', disabled: !img.value },
-  { label: '另存为…', key: 'save', disabled: !img.value },
-  { label: '在浏览器打开原图', key: 'source', disabled: !img.value?.source },
+const items = computed(() => [
+  { key: 'next', label: '换一张', icon: 'refresh' as const },
+  { key: 'copy', label: '复制', icon: 'copy' as const, disabled: !img.value },
+  { key: 'save', label: '另存为…', icon: 'save' as const, disabled: !img.value },
+  { key: 'source', label: '在浏览器打开原图', icon: 'ext' as const, disabled: !img.value?.source },
 ])
 
-async function onMenu(key: string) {
-  menu.value.show = false
+async function act(key: string) {
+  menuAt.value = null
   const cur = img.value
   try {
     if (key === 'next') await next(true)
@@ -96,81 +98,136 @@ async function onMenu(key: string) {
   }
 }
 
-async function contextMenu(e: MouseEvent) {
+function contextMenu(e: MouseEvent) {
   e.preventDefault()
-  menu.value.show = false
-  await nextTick()
-  menu.value = { show: true, x: e.clientX, y: e.clientY }
+  menuAt.value = { x: e.clientX, y: e.clientY }
 }
 
+function openViewer() {
+  zoom.value = 1
+  viewer.value = true
+}
 function wheel(e: WheelEvent) {
-  e.preventDefault()
   zoom.value = Math.min(5, Math.max(0.2, zoom.value * (e.deltaY < 0 ? 1.15 : 1 / 1.15)))
 }
 </script>
 
 <template>
   <div v-if="on" class="image-panel" data-testid="image-panel" @contextmenu="contextMenu">
-    <img
-      v-if="img"
-      :src="img.url"
-      class="thumb"
-      alt=""
-      title="点击查看大图，右键更多操作"
-      data-testid="image-panel-img"
-      :data-id="img.id"
-      @click="
-        zoom = 1;
-        viewer = true
-      "
-    />
-    <div v-else class="placeholder" @click="next(true)">
-      <n-spin v-if="loading" size="small" />
-      <n-text v-else depth="3" style="font-size: 12px">{{ error || '图片加载中…' }}</n-text>
-    </div>
-    <n-dropdown placement="bottom-start" trigger="manual" :x="menu.x" :y="menu.y" :options="options" :show="menu.show" @clickoutside="menu.show = false" @select="onMenu" />
-    <n-modal v-model:show="viewer" :mask-closable="true">
-      <div class="viewer" @wheel="wheel" @contextmenu="contextMenu" @click.self="viewer = false">
-        <img v-if="img" :src="img.url" :style="{ transform: `scale(${zoom})` }" alt="" />
+    <Transition name="img-swap" mode="out-in">
+      <button v-if="img" :key="img.id" type="button" class="img-card" title="点击查看大图，右键更多操作" @click="openViewer">
+        <img :src="img.url" alt="图片面板" data-testid="image-panel-img" :data-id="img.id" />
+        <span class="img-cap">点击放大 · 右键更多</span>
+      </button>
+      <button v-else type="button" class="img-card placeholder" :title="error || '点击重试'" @click="next(true)">
+        <Icon v-if="loading" name="refresh" class="spin" />
+        <Icon v-else :name="error ? 'alert' : 'image'" />
+        <span class="img-ph-text">{{ error || '图片加载中…' }}</span>
+      </button>
+    </Transition>
+    <Menu :items="items" :at="menuAt" label="图片操作" @select="act" @close="menuAt = null" />
+
+    <Modal v-model:show="viewer" :width="760" class="img-viewer" title="查看图片">
+      <div class="viewer-stage" @wheel.prevent="wheel" @contextmenu="contextMenu">
+        <img v-if="img" :src="img.url" :style="{ transform: `scale(${zoom})` }" alt="图片面板的大图" />
       </div>
-    </n-modal>
+      <template #footer>
+        <span class="grow fld-help">滚轮缩放 · 右键也能操作</span>
+        <button type="button" class="btn quiet xs" @click="act('next')"><Icon name="refresh" size="xs" />换一张</button>
+        <button type="button" class="btn quiet xs" :disabled="!img" @click="act('copy')"><Icon name="copy" size="xs" />复制</button>
+        <button type="button" class="btn quiet xs" :disabled="!img" @click="act('save')"><Icon name="save" size="xs" />另存为…</button>
+        <button type="button" class="btn quiet xs" :disabled="!img?.source" @click="act('source')"><Icon name="ext" size="xs" />打开原图</button>
+      </template>
+    </Modal>
   </div>
 </template>
 
-<style scoped>
+<style>
 .image-panel {
-  margin: 8px 10px 4px;
+  display: flex;
 }
-.thumb {
+.img-card {
+  position: relative;
+  display: grid;
+  place-items: center;
   width: 100%;
-  max-height: 180px;
+  aspect-ratio: 1 / 1;
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--fill);
+  color: var(--text-3);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.25s var(--ease-spring);
+}
+.img-card:hover {
+  transform: translateY(-2px) rotate(-1deg);
+}
+.img-card img {
+  width: 100%;
+  height: 100%;
   object-fit: cover;
-  border-radius: 8px;
-  cursor: zoom-in;
   display: block;
 }
-.placeholder {
-  height: 90px;
-  border-radius: 8px;
-  border: 1px dashed rgba(128, 128, 128, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.img-cap {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 16px 10px 7px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(transparent, rgba(20, 10, 40, 0.6));
+  text-align: left;
+}
+.img-card.placeholder {
+  border: 1.5px dashed var(--line);
+  box-shadow: none;
+}
+.img-ph-text {
+  display: none;
+  padding: 0 10px;
+  font-size: 11.5px;
+  font-weight: 700;
   text-align: center;
-  padding: 6px;
-  cursor: pointer;
 }
-.viewer {
-  width: 90vw;
-  height: 88vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.img-swap-enter-active,
+.img-swap-leave-active {
+  transition: opacity 0.35s, transform 0.35s var(--ease-out);
+}
+.img-swap-enter-from {
+  opacity: 0;
+  transform: scale(0.94);
+}
+.img-swap-leave-to {
+  opacity: 0;
+}
+.viewer-stage {
+  display: grid;
+  place-items: center;
+  height: min(62vh, 560px);
   overflow: hidden;
+  border-radius: 16px;
+  background: var(--fill);
 }
-.viewer img {
+.viewer-stage img {
   max-width: 100%;
   max-height: 100%;
-  transition: transform 0.1s;
+  transition: transform 0.15s;
+}
+@media (min-width: 1360px) {
+  .img-card {
+    aspect-ratio: 4 / 3;
+  }
+  .img-cap,
+  .img-ph-text {
+    display: block;
+  }
+}
+@media (max-height: 640px) {
+  .img-card {
+    aspect-ratio: 16 / 10;
+  }
 }
 </style>

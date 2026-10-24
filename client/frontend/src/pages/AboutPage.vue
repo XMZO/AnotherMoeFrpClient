@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { NAlert, NButton, NCard, NDescriptions, NDescriptionsItem, NSpace, NTable, NText } from 'naive-ui'
+import { Clipboard } from '@wailsio/runtime'
+import Icon from '../ui/Icon.vue'
+import { message } from '../ui/feedback'
 import { AppService, type License, type StartupInfo, type UpdateInfo } from '../api'
 import { describeError, toAppError } from '../errors'
 import { formatTime } from '../components/shareFormat'
+import mascot from '../assets/mascot.png'
 
 const info = ref<StartupInfo | null>(null)
 const update = ref<UpdateInfo | null>(null)
@@ -30,66 +33,288 @@ async function check() {
     checking.value = false
   }
 }
+
+async function copy(text: string) {
+  try {
+    await Clipboard.SetText(text)
+    message.success('已复制')
+  } catch {
+    message.info(text)
+  }
+}
 </script>
 
 <template>
-  <div class="page">
-    <n-card title="关于" :bordered="false">
-      <n-descriptions v-if="info" :column="1" label-placement="left" bordered size="small">
-        <n-descriptions-item label="客户端版本"><span data-testid="about-version">{{ info.version.app }}</span></n-descriptions-item>
-        <n-descriptions-item label="frp 版本">{{ info.version.frp }}</n-descriptions-item>
-        <n-descriptions-item label="Wails">{{ info.version.wails }}</n-descriptions-item>
-        <n-descriptions-item label="Go">{{ info.version.go }}</n-descriptions-item>
-        <n-descriptions-item label="设置和配置缓存"><span class="mono">{{ info.dataDir }}</span></n-descriptions-item>
-        <n-descriptions-item label="WebView2 数据和日志"><span class="mono">{{ info.localDir }}</span></n-descriptions-item>
-      </n-descriptions>
+  <div class="page dotted-bg">
+    <div class="inner">
+      <section class="about-hero">
+        <Icon name="sparkle" fill class="deco a" />
+        <Icon name="sparkle" fill class="deco b" />
+        <Icon name="sparkle" fill class="deco c" />
+        <img :src="mascot" alt="MoeFrp 图标" />
+        <div class="hero-txt">
+          <h1>MoeFrp</h1>
+          <p>萌！FRP 高级客户端 · frp 以库的形式内嵌</p>
+          <div v-if="info" class="hero-meta">
+            <span class="bdg pri lg">客户端 <span data-testid="about-version">{{ info.version.app }}</span></span>
+            <span class="bdg lg">frp {{ info.version.frp }}</span>
+            <span class="bdg lg">Wails {{ info.version.wails }}</span>
+            <span class="bdg lg">{{ info.version.go }}</span>
+          </div>
+        </div>
+        <div class="hero-act">
+          <button type="button" class="btn pri" :disabled="checking" data-testid="about-check-update" @click="check">
+            <Icon name="refresh" size="s" :class="{ spin: checking }" />{{ checking ? '检查中…' : '检查更新' }}
+          </button>
+          <small v-if="update?.checkedAt">上次检查：{{ formatTime(update.checkedAt) }}</small>
+        </div>
+      </section>
 
-      <div class="section">
-        <n-space align="center">
-          <n-button size="small" :loading="checking" data-testid="about-check-update" @click="check">检查更新</n-button>
-          <n-text v-if="update?.checkedAt" depth="3" style="font-size: 12px">上次检查：{{ formatTime(update.checkedAt) }}</n-text>
-        </n-space>
-        <n-alert v-if="update?.available" type="info" :show-icon="false" style="margin-top: 8px" data-testid="about-update-available">
-          有新版本 {{ update.latest }}（当前 {{ update.current }}）。
-          <n-button v-if="update.downloadUrl" text type="primary" @click="open(update.downloadUrl)">下载</n-button>
-          <div v-if="update.releaseNotes" style="white-space: pre-wrap; margin-top: 4px">{{ update.releaseNotes }}</div>
-          <div v-if="update.sha256" class="mono" style="margin-top: 4px; font-size: 12px">SHA256：{{ update.sha256 }}</div>
-        </n-alert>
-        <n-text v-else-if="update?.checkedAt && !update.error" depth="3" style="display: block; margin-top: 8px" data-testid="about-up-to-date">已是最新版本</n-text>
-        <n-text v-if="checkError" type="error" style="display: block; margin-top: 8px">{{ checkError }}</n-text>
-        <n-alert v-if="update?.announcement" type="default" title="公告" style="margin-top: 8px" data-testid="about-announcement">
-          <div style="white-space: pre-wrap">{{ update.announcement }}</div>
-        </n-alert>
-      </div>
+      <Transition name="collapse">
+        <section v-if="update?.available" class="update-card" data-testid="about-update-available">
+          <div class="uc-head">
+            <span class="tile-ic lg gold"><Icon name="sparkle" fill /></span>
+            <div class="uc-t">
+              <b>有新版本 {{ update.latest }}</b>
+              <small>当前 {{ update.current }}{{ update.required ? ' · 已低于最低要求，请尽快更新' : '' }}</small>
+            </div>
+            <button v-if="update.downloadUrl" type="button" class="btn pri sm" @click="open(update.downloadUrl)"><Icon name="download" size="s" />下载</button>
+          </div>
+          <div v-if="update.releaseNotes" class="uc-notes">{{ update.releaseNotes }}</div>
+          <div v-if="update.sha256" class="uc-sha mono">SHA256：{{ update.sha256 }}</div>
+        </section>
+      </Transition>
+      <div v-if="!update?.available && update?.checkedAt && !update.error" class="alert ok about-note" data-testid="about-up-to-date"><Icon name="check" size="s" /><span>已是最新版本</span></div>
+      <div v-if="checkError" class="alert bad about-note"><Icon name="alert" size="s" /><span>{{ checkError }}</span></div>
 
-      <div class="section">
-        <n-text strong>开源许可</n-text>
-        <n-table size="small" :bordered="false" style="margin-top: 6px" data-testid="about-licenses">
-          <tbody>
-            <tr v-for="l in licenses" :key="l.name">
-              <td>
-                <n-button text type="primary" @click="open(l.url)">{{ l.name }}</n-button>
-              </td>
-              <td>{{ l.license }}</td>
-              <td><n-text depth="3">{{ l.note }}</n-text></td>
-            </tr>
-          </tbody>
-        </n-table>
+      <div class="about-grid">
+        <div class="about-col">
+          <section v-if="update?.announcement" class="card" data-testid="about-announcement">
+            <div class="card-h"><span class="tile-ic gold"><Icon name="bell" size="s" /></span>公告</div>
+            <p class="ann-text">{{ update.announcement }}</p>
+          </section>
+          <section v-if="info" class="card" style="animation-delay: 0.05s">
+            <div class="card-h"><span class="tile-ic"><Icon name="folder" size="s" /></span>数据位置</div>
+            <div class="kv-row first">
+              <small>设置和配置缓存</small>
+              <span class="mono" :title="info.dataDir">{{ info.dataDir }}</span>
+              <button type="button" class="icon-btn sm" title="复制路径" aria-label="复制设置和配置缓存的路径" @click="copy(info.dataDir)"><Icon name="copy" size="s" /></button>
+            </div>
+            <div class="kv-row">
+              <small>WebView2 数据和日志</small>
+              <span class="mono" :title="info.localDir">{{ info.localDir }}</span>
+              <button type="button" class="icon-btn sm" title="复制路径" aria-label="复制 WebView2 数据和日志的路径" @click="copy(info.localDir)"><Icon name="copy" size="s" /></button>
+            </div>
+          </section>
+        </div>
+        <section class="card" style="animation-delay: 0.1s">
+          <div class="card-h"><span class="tile-ic"><Icon name="heart" size="s" /></span>开源许可</div>
+          <div data-testid="about-licenses">
+            <div v-for="l in licenses" :key="l.name" class="lic">
+              <a :href="l.url" @click.prevent="open(l.url)">{{ l.name }}</a>
+              <span class="bdg">{{ l.license }}</span>
+              <small>{{ l.note }}</small>
+            </div>
+          </div>
+          <div style="height: 8px" />
+        </section>
       </div>
-    </n-card>
+    </div>
   </div>
 </template>
 
-<style scoped>
-.page {
-  padding: 12px;
-  overflow: auto;
+<style>
+.about-hero {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px 24px;
+  padding: 24px;
+  border-radius: 26px;
+  background: var(--surface);
+  border: 1.5px solid var(--line-2);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  animation: rowIn 0.5s var(--ease-out) backwards;
 }
-.section {
-  margin-top: 16px;
+.about-hero img {
+  width: 104px;
+  height: 104px;
+  border-radius: 32px;
+  box-shadow: 0 0 0 4px var(--surface), 0 16px 34px -12px color-mix(in oklab, var(--pri) 70%, transparent);
+  animation: floaty 4.5s ease-in-out infinite;
 }
-.mono {
-  font-family: Consolas, monospace;
+.about-hero h1 {
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+.about-hero p {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--text-2);
+  font-weight: 700;
+}
+.hero-txt {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.hero-act {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.hero-act small {
+  font-size: 12px;
+  color: var(--text-3);
+  font-weight: 600;
+}
+.deco {
+  position: absolute;
+  color: var(--gold);
+  pointer-events: none;
+}
+.deco.a {
+  top: 18px;
+  right: 30%;
+  width: 16px;
+  height: 16px;
+  animation: twinkle 2.6s ease-in-out infinite;
+}
+.deco.b {
+  bottom: 22px;
+  right: 36%;
+  width: 10px;
+  height: 10px;
+  animation: twinkle 3.2s ease-in-out infinite 0.8s;
+}
+.deco.c {
+  top: 30px;
+  left: 120px;
+  width: 12px;
+  height: 12px;
+  animation: twinkle 2.9s ease-in-out infinite 0.4s;
+}
+.update-card {
+  margin-top: 14px;
+  padding: 16px;
+  border-radius: 22px;
+  background: var(--gold-soft);
+  border: 1.5px solid color-mix(in oklab, var(--gold) 40%, transparent);
+}
+.uc-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.uc-t {
+  flex: 1;
+  min-width: 0;
+}
+.uc-t b {
+  display: block;
+  font-size: 15.5px;
+  font-weight: 900;
+}
+.uc-t small {
+  display: block;
+  font-size: 12px;
+  color: var(--gold-text);
+  font-weight: 700;
+}
+.uc-notes {
+  margin-top: 10px;
+  white-space: pre-wrap;
+  font-size: 12.5px;
+  color: var(--text-2);
+  font-weight: 600;
+  line-height: 1.6;
+}
+.uc-sha {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--text-3);
   word-break: break-all;
+}
+.about-note {
+  margin-top: 14px;
+}
+.about-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
+  gap: 14px;
+  margin-top: 14px;
+  align-items: start;
+}
+.about-col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ann-text {
+  padding-bottom: 14px;
+  white-space: pre-wrap;
+  font-size: 13px;
+  color: var(--text-2);
+  font-weight: 600;
+  line-height: 1.65;
+}
+.kv-row {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1.5px dashed var(--line-2);
+}
+.kv-row.first {
+  border-top: 0;
+}
+.kv-row small {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text-3);
+}
+.kv-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lic {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1.5px dashed var(--line-2);
+}
+.lic:first-child {
+  border-top: 0;
+}
+.lic a {
+  font-weight: 800;
+  text-decoration: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lic a:hover {
+  text-decoration: underline;
+}
+.lic small {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-weight: 600;
+  text-align: right;
 }
 </style>

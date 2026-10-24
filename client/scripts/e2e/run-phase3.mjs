@@ -173,7 +173,7 @@ const loggedIn = async (p) => (await p.attr(tid('account-area'), 'data-logged-in
 
 async function setCloseToQuit(p) {
   await p.click(tid('nav-settings'))
-  await p.clickText('.n-radio', '退出程序')
+  await p.clickText('.radio', '退出程序')
   await sleep(300)
   await p.click(tid('nav-tunnel'))
 }
@@ -181,12 +181,12 @@ async function setCloseToQuit(p) {
 async function openAuth(p, tab) {
   await p.click(tid('account-login'))
   await p.waitFor('auth modal', () => p.exists(tid('login-nickname')))
-  await p.clickText('.n-tabs-tab', tab)
+  await p.clickText('.tab', tab)
   await sleep(150)
 }
 
 async function setCheckbox(p, testid, want) {
-  const checked = await p.evaluate(`document.querySelector('[data-testid=${testid}]')?.classList.contains('n-checkbox--checked')`)
+  const checked = await p.evaluate(`document.querySelector('[data-testid=${testid}]')?.getAttribute('aria-checked') === 'true'`)
   if (!!checked !== want) await p.click(tid(testid))
 }
 
@@ -202,18 +202,18 @@ async function login(p, pw, keepLogged = true) {
 
 async function logout(p) {
   await p.click(tid('account-menu'))
-  await p.clickText('.n-dropdown-option-body', '退出登录')
-  await p.clickText('.n-dialog__action button', '退出登录')
+  await p.clickText('.menu-item', '退出登录')
+  await p.clickText('.dlg-actions button', '退出登录')
   await p.waitFor('logged out', async () => !(await loggedIn(p)), 15000)
 }
 
 async function selectProfile(p, name) {
-  await p.click(tid(`profile-item-${name}`))
+  await p.click(`${tid(`profile-item-${name}`)} .pitem-main`) // testid 在外层，点击处理在里面的按钮上
   await p.waitFor(`editor shows ${name}`, async () => (await p.text('.editor .title'))?.startsWith(name))
 }
 
 async function openTab(p, label) {
-  await p.clickText('.n-tabs-tab', label)
+  await p.clickText('.tab', label)
   await sleep(150)
 }
 
@@ -339,10 +339,10 @@ async function main() {
   await sleep(150)
   check('register_frontend_accepts_valid_code', (await A.attr(tid('reg-invite-state'), 'data-state')) === '')
   await A.click(tid('reg-submit'))
-  await A.waitFor('switched to login tab', async () => (await A.evaluate(`document.querySelector('[data-testid=login-nickname] input')?.value`)) === NICK)
+  await A.waitFor('switched to login tab', async () => (await A.evaluate(`document.querySelector('input[data-testid=login-nickname]')?.value`)) === NICK)
   check('register_ok', true)
   // 关掉弹窗后从头走登录
-  await A.evaluate(`document.querySelector('.n-card-header__close')?.click()`)
+  await A.evaluate(`document.querySelector('.modal-close')?.click()`)
   await sleep(300)
 
   // ---- A、B 登录（保持登录），A 上建本地配置 ----
@@ -361,8 +361,8 @@ async function main() {
   // B 上建一个本地配置（之后验证退出登录时本地配置保留）
   await B.click(tid('profile-new'))
   await B.type(tid('profile-name-input'), 'B的本地配置')
-  await B.clickText('.n-radio', '本地配置')
-  await B.clickText('.n-dialog__action button', '确定')
+  await B.clickText('.radio', '本地配置')
+  await B.clickText('.dlg-actions button', '确定')
   await B.waitFor('local profile', () => B.exists(tid('profile-item-B的本地配置')))
   check('local_and_cloud_coexist', (await B.attr(tid('profile-item-B的本地配置'), 'data-origin')) === 'local' && (await B.exists(tid('profile-group-cloud'))))
   await selectProfile(B, CLOUD)
@@ -491,16 +491,16 @@ async function main() {
 
   // ---- 改密码：旧密码错误不下线；正确后成功 ----
   await B.click(tid('account-menu'))
-  await B.clickText('.n-dropdown-option-body', '修改密码')
+  await B.clickText('.menu-item', '修改密码')
   await B.type(tid('cp-old'), 'definitely-wrong')
   await B.type(tid('cp-new'), PW2)
   await B.type(tid('cp-new2'), PW2)
-  await B.clickText('.n-dialog__action button', '修改')
+  await B.clickText('.dlg-actions button', '修改')
   await B.waitFor('cp error', () => B.exists(tid('cp-error')), 10000)
   const cpErr = await B.text(tid('cp-error'))
   check('change_password_wrong_old_stays_logged_in', /当前密码不正确/.test(cpErr ?? '') && (await loggedIn(B)), { cpErr })
   await B.type(tid('cp-old'), PW1)
-  await B.clickText('.n-dialog__action button', '修改')
+  await B.clickText('.dlg-actions button', '修改')
   await B.waitFor('cp done', async () => !(await B.exists(tid('cp-old'))), 10000)
   check('change_password_ok', (await loggedIn(B)) && (await B.toasts()).some((t) => /密码已修改/.test(t)))
 
@@ -530,7 +530,7 @@ async function main() {
   await B3.click(tid('reset-submit'))
   await B3.waitFor('reset done', async () => (await B3.toasts()).some((t) => /密码已重置/.test(t)), 10000)
   check('reset_password_ok', true, { codeFormat: resetCode.replace(/[A-Z0-9]/g, 'X') })
-  await B3.evaluate(`document.querySelector('.n-card-header__close')?.click()`)
+  await B3.evaluate(`document.querySelector('.modal-close')?.click()`)
   await sleep(300)
   await login(B3, PW3, false)
   check('reset_password_then_login', await loggedIn(B3))
@@ -540,7 +540,7 @@ async function main() {
   await stopServer()
   await startServer({ single: true, min: '9.0.0', latest: '9.0.0' })
   await B3.click(tid('account-menu'))
-  await B3.clickText('.n-dropdown-option-body', '立即同步')
+  await B3.clickText('.menu-item', '立即同步')
   await B3.waitFor('outdated dialog', () => B3.exists(tid('outdated-dialog')), 30000).catch(() => {})
   await shot(B3, '09-outdated.png')
   const outdatedShown = await B3.exists(tid('outdated-dialog'))

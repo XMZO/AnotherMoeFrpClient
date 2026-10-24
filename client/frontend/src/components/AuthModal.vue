@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { NButton, NCheckbox, NForm, NFormItem, NInput, NModal, NTabPane, NTabs, NText, useMessage } from 'naive-ui'
+import Icon from '../ui/Icon.vue'
+import Modal from '../ui/Modal.vue'
+import Check from '../ui/Check.vue'
+import Tabs from '../ui/Tabs.vue'
+import { message } from '../ui/feedback'
 import { useAccountStore, type AuthTab } from '../stores/account'
 import { describeError, fieldErrorsOf, reasonMessages, toAppError } from '../errors'
 import { checkInviteCode, checkNickname, checkPassword, normalizeInviteCode } from '../invite'
+import mascot from '../assets/mascot.png'
 
 const account = useAccountStore()
-const message = useMessage()
 const busy = ref(false)
 const error = ref('')
 
@@ -22,6 +26,19 @@ const tab = computed({
     error.value = ''
   },
 })
+const tabs: { value: AuthTab; label: string }[] = [
+  { value: 'login', label: '登录' },
+  { value: 'register', label: '注册' },
+  { value: 'reset', label: '重置密码' },
+]
+const hero = computed(
+  () =>
+    ({
+      login: ['欢迎回来', '登录后同步配置、使用官方节点和分享'],
+      register: ['加入 MoeFrp', '注册需要一个邀请码'],
+      reset: ['重置密码', '用管理员给你的重置码设置新密码'],
+    })[tab.value],
+)
 
 watch(
   () => account.authDialog.show,
@@ -137,86 +154,117 @@ function doReset() {
 </script>
 
 <template>
-  <n-modal
-    v-model:show="account.authDialog.show"
-    preset="card"
-    title="账号"
-    style="width: 420px"
-    :mask-closable="!busy"
-    data-testid="auth-modal"
-  >
-    <n-tabs v-model:value="tab" type="line">
-      <n-tab-pane name="login" tab="登录">
-        <n-form label-placement="top" @submit.prevent="doLogin">
-          <n-form-item label="昵称">
-            <n-input v-model:value="login.nickname" placeholder="昵称" data-testid="login-nickname" @keyup.enter="doLogin" />
-          </n-form-item>
-          <n-form-item label="密码">
-            <n-input
-              v-model:value="login.password"
-              type="password"
-              show-password-on="click"
-              placeholder="密码"
-              data-testid="login-password"
-              @keyup.enter="doLogin"
-            />
-          </n-form-item>
-          <n-checkbox v-model:checked="login.keep" data-testid="login-keep">保持登录</n-checkbox>
-          <n-text depth="3" style="display: block; font-size: 12px; margin-top: 4px">
-            只在 Windows 凭据管理器里保存登录令牌，不保存密码。
-          </n-text>
-        </n-form>
-        <n-button type="primary" block style="margin-top: 16px" :loading="busy" data-testid="login-submit" @click="doLogin">登录</n-button>
-      </n-tab-pane>
+  <Modal v-model:show="account.authDialog.show" :width="420" :mask-closable="!busy" :closable="!busy" aria-label="账号" data-testid="auth-modal">
+    <div class="auth-hero">
+      <img :src="mascot" alt="" />
+      <Transition name="fade" mode="out-in">
+        <div :key="tab">
+          <h2>{{ hero[0] }}</h2>
+          <p>{{ hero[1] }}</p>
+        </div>
+      </Transition>
+    </div>
+    <Tabs v-model="tab" :options="tabs" full class="auth-tabs" />
 
-      <n-tab-pane name="register" tab="注册">
-        <n-form label-placement="top">
-          <n-form-item label="昵称" :feedback="regTouched ? regErrors.nickname : ''" :validation-status="regTouched && regErrors.nickname ? 'error' : undefined">
-            <n-input v-model:value="reg.nickname" placeholder="3–20 位字母、数字或下划线" maxlength="20" data-testid="reg-nickname" />
-          </n-form-item>
-          <n-form-item label="密码" :feedback="regTouched ? regErrors.password : ''" :validation-status="regTouched && regErrors.password ? 'error' : undefined">
-            <n-input v-model:value="reg.password" type="password" show-password-on="click" placeholder="至少 8 位" data-testid="reg-password" />
-          </n-form-item>
-          <n-form-item label="确认密码" :feedback="regTouched ? regErrors.password2 : ''" :validation-status="regTouched && regErrors.password2 ? 'error' : undefined">
-            <n-input v-model:value="reg.password2" type="password" show-password-on="click" data-testid="reg-password2" />
-          </n-form-item>
-          <n-form-item
-            label="邀请码"
-            :feedback="inviteFeedback"
-            :validation-status="inviteFeedback ? 'error' : reg.invite.trim() ? 'success' : undefined"
-          >
-            <n-input v-model:value="reg.invite" placeholder="FRPT-XXXX-XXXX" maxlength="20" data-testid="reg-invite" @keyup.enter="doRegister" />
-          </n-form-item>
-          <div class="invite-state" :data-state="inviteState" data-testid="reg-invite-state" />
-        </n-form>
-        <n-button type="primary" block :loading="busy" data-testid="reg-submit" @click="doRegister">注册</n-button>
-      </n-tab-pane>
+    <form v-if="tab === 'login'" class="auth-form" @submit.prevent="doLogin">
+      <div class="fld"><label for="lg-nick">昵称</label><input id="lg-nick" v-model="login.nickname" class="inp" placeholder="昵称" autocomplete="username" data-testid="login-nickname" /></div>
+      <div class="fld"><label for="lg-pw">密码</label><input id="lg-pw" v-model="login.password" class="inp" type="password" placeholder="密码" autocomplete="current-password" data-testid="login-password" /></div>
+      <Check v-model="login.keep" plain data-testid="login-keep">保持登录</Check>
+      <p class="fld-help" style="margin: 4px 0 16px">只在 Windows 凭据管理器里保存登录令牌，不保存密码。</p>
+      <button type="submit" class="btn pri block" :disabled="busy" data-testid="login-submit"><Icon v-if="busy" name="refresh" size="s" class="spin" />登录</button>
+    </form>
 
-      <n-tab-pane name="reset" tab="重置密码">
-        <n-text depth="3" style="display: block; font-size: 12px; margin-bottom: 8px">重置码由管理员提供，24 小时内有效。重置后所有设备都需要重新登录。</n-text>
-        <n-form label-placement="top">
-          <n-form-item label="昵称">
-            <n-input v-model:value="reset.nickname" data-testid="reset-nickname" />
-          </n-form-item>
-          <n-form-item label="重置码">
-            <n-input v-model:value="reset.code" placeholder="RST-XXXXX-XXXXX-XXXXX" data-testid="reset-code" />
-          </n-form-item>
-          <n-form-item label="新密码" :feedback="reset.password ? resetErrors.password : ''" :validation-status="reset.password && resetErrors.password ? 'error' : undefined">
-            <n-input v-model:value="reset.password" type="password" show-password-on="click" placeholder="至少 8 位" data-testid="reset-password" />
-          </n-form-item>
-          <n-form-item label="确认新密码" :feedback="reset.password2 ? resetErrors.password2 : ''" :validation-status="reset.password2 && resetErrors.password2 ? 'error' : undefined">
-            <n-input v-model:value="reset.password2" type="password" show-password-on="click" data-testid="reset-password2" @keyup.enter="doReset" />
-          </n-form-item>
-        </n-form>
-        <n-button type="primary" block :loading="busy" data-testid="reset-submit" @click="doReset">重置密码</n-button>
-      </n-tab-pane>
-    </n-tabs>
-    <n-text v-if="error" type="error" style="display: block; margin-top: 12px" data-testid="auth-error">{{ error }}</n-text>
-  </n-modal>
+    <form v-else-if="tab === 'register'" class="auth-form" @submit.prevent="doRegister">
+      <div class="fld">
+        <label for="rg-nick">昵称</label>
+        <input id="rg-nick" v-model="reg.nickname" class="inp" :class="{ err: regTouched && regErrors.nickname }" placeholder="3–20 位字母、数字或下划线" maxlength="20" autocomplete="username" data-testid="reg-nickname" />
+        <span v-if="regTouched && regErrors.nickname" class="fld-help err">{{ regErrors.nickname }}</span>
+      </div>
+      <div class="grid2 eq">
+        <div class="fld">
+          <label for="rg-pw">密码</label>
+          <input id="rg-pw" v-model="reg.password" class="inp" :class="{ err: regTouched && regErrors.password }" type="password" placeholder="至少 8 位" autocomplete="new-password" data-testid="reg-password" />
+        </div>
+        <div class="fld">
+          <label for="rg-pw2">确认密码</label>
+          <input id="rg-pw2" v-model="reg.password2" class="inp" :class="{ err: regTouched && regErrors.password2 }" type="password" autocomplete="new-password" data-testid="reg-password2" />
+        </div>
+      </div>
+      <p v-if="regTouched && (regErrors.password || regErrors.password2)" class="fld-help err" style="margin: -8px 0 12px">{{ regErrors.password ?? regErrors.password2 }}</p>
+      <div class="fld">
+        <label for="rg-inv">邀请码</label>
+        <input
+          id="rg-inv"
+          v-model="reg.invite"
+          class="inp mono"
+          :class="{ err: !!inviteFeedback, good: reg.invite.trim() && !inviteState }"
+          placeholder="FRPT-XXXX-XXXX"
+          maxlength="20"
+          data-testid="reg-invite"
+        />
+        <span class="fld-help" :class="inviteFeedback ? 'err' : reg.invite.trim() ? 'ok' : ''">
+          {{ inviteFeedback || (reg.invite.trim() ? '格式正确' : '格式 FRPT-XXXX-XXXX，边输边检查') }}
+        </span>
+      </div>
+      <div class="invite-state" :data-state="inviteState" data-testid="reg-invite-state" />
+      <button type="submit" class="btn pri block" :disabled="busy" data-testid="reg-submit"><Icon v-if="busy" name="refresh" size="s" class="spin" />注册</button>
+    </form>
+
+    <form v-else class="auth-form" @submit.prevent="doReset">
+      <div class="alert info" style="margin-bottom: 14px"><Icon name="info" size="s" /><span>重置码由管理员提供，24 小时内有效。重置后所有设备都需要重新登录。</span></div>
+      <div class="fld"><label for="rs-nick">昵称</label><input id="rs-nick" v-model="reset.nickname" class="inp" autocomplete="username" data-testid="reset-nickname" /></div>
+      <div class="fld"><label for="rs-code">重置码</label><input id="rs-code" v-model="reset.code" class="inp mono" placeholder="RST-XXXXX-XXXXX-XXXXX" data-testid="reset-code" /></div>
+      <div class="grid2 eq">
+        <div class="fld">
+          <label for="rs-pw">新密码</label>
+          <input id="rs-pw" v-model="reset.password" class="inp" :class="{ err: reset.password && resetErrors.password }" type="password" placeholder="至少 8 位" autocomplete="new-password" data-testid="reset-password" />
+        </div>
+        <div class="fld">
+          <label for="rs-pw2">确认新密码</label>
+          <input id="rs-pw2" v-model="reset.password2" class="inp" :class="{ err: reset.password2 && resetErrors.password2 }" type="password" autocomplete="new-password" data-testid="reset-password2" />
+        </div>
+      </div>
+      <p v-if="(reset.password && resetErrors.password) || (reset.password2 && resetErrors.password2)" class="fld-help err" style="margin: -8px 0 12px">
+        {{ resetErrors.password ?? resetErrors.password2 }}
+      </p>
+      <button type="submit" class="btn pri block" :disabled="busy" data-testid="reset-submit"><Icon v-if="busy" name="refresh" size="s" class="spin" />重置密码</button>
+    </form>
+
+    <Transition name="fade">
+      <div v-if="error" class="alert bad" style="margin-top: 12px" data-testid="auth-error"><Icon name="alert" size="s" /><span>{{ error }}</span></div>
+    </Transition>
+  </Modal>
 </template>
 
-<style scoped>
-.invite-state {
-  display: none;
+<style>
+.auth-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 0 12px;
+  text-align: center;
+}
+.auth-hero img {
+  width: 68px;
+  height: 68px;
+  border-radius: 22px;
+  box-shadow: 0 0 0 3px var(--surface), 0 12px 28px -10px color-mix(in oklab, var(--pri) 70%, transparent);
+  animation: floaty 4s ease-in-out infinite;
+}
+.auth-hero h2 {
+  font-size: 20px;
+  font-weight: 900;
+}
+.auth-hero p {
+  font-size: 12.5px;
+  color: var(--text-3);
+  font-weight: 700;
+}
+.auth-tabs {
+  margin-bottom: 16px;
+}
+.auth-form {
+  animation: fade 0.3s;
 }
 </style>

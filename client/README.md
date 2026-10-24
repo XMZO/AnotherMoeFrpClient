@@ -36,4 +36,4 @@ node .\scripts\e2e\run-phase3.mjs     # Phase 3：本机起 moefrp-server，两�
 - `internal/testhooks`：只在 `-tags e2e` 构建里生效的测试钩子
 - `cmd/localfrps`：本机 frps + echo，给界面测试当对端
 - `scripts/e2e/credtool`：端到端测试检查、清理测试凭据的小工具
-- `frontend/`：Vue 3 + TS + Naive UI + Pinia；中文错误提示集中在 `frontend/src/errors.ts`
+- `frontend/`：Vue 3 + TS + Pinia，不依赖组件库：通用控件在 `frontend/src/ui/`（弹窗、抽屉、菜单、开关、提示等），配色和主题变量在 `frontend/src/style.css`；中文错误提示集中在 `frontend/src/errors.ts`

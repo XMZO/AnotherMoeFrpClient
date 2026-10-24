@@ -260,12 +260,12 @@ const shot = async (name) => {
 const runState = () => page.attr(tid('run-state'), 'data-state')
 async function setSetting(label) {
   await page.click(tid('nav-settings'))
-  await page.clickText('.n-radio', label)
+  await page.clickText('.radio', label)
   await sleep(300)
 }
 const imgId = () => page.attr(tid('image-panel-img'), 'data-id')
 const imgLoaded = () => page.evaluate(`(() => { const i = document.querySelector('[data-testid=image-panel-img]'); return !!i && i.complete && i.naturalWidth > 0 })()`)
-const notificationTexts = () => page.evaluate(`[...document.querySelectorAll('.n-notification')].map(e => e.innerText)`)
+const notificationTexts = () => page.evaluate(`[...document.querySelectorAll('.notice')].map(e => e.innerText)`)
 
 // ---------- 场景 ----------
 async function main() {
@@ -292,7 +292,7 @@ async function main() {
   const notes = (await notificationTexts()).join('\n')
   await shot('01-notifications.png')
   check('announcement_and_update_notified', notes.includes(ANNOUNCE) && notes.includes('有新版本 3.9.0'), { notes: notes.slice(0, 200) })
-  await page.evaluate(`document.querySelectorAll('.n-notification .n-base-close').forEach(b => b.click())`)
+  await page.evaluate(`document.querySelectorAll('.notice .notice-close').forEach(b => b.click())`)
   await page.click(tid('nav-about'))
   await page.click(tid('about-check-update'))
   await page.waitFor('update shown', () => page.exists(tid('about-update-available')), 10000)
@@ -306,10 +306,10 @@ async function main() {
   const id1 = await imgId()
   check('image_panel_shows_server_sources', !!id1 && (await imgLoaded()), { id1, imgRequests })
   await page.evaluate(`document.querySelector('[data-testid=image-panel-img]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 80, clientY: 500 }))`)
-  await page.waitFor('context menu', () => page.evaluate(`[...document.querySelectorAll('.n-dropdown-option-body')].some(e => e.offsetParent)`), 5000)
-  const menuItems = await page.evaluate(`[...document.querySelectorAll('.n-dropdown-option-body')].filter(e => e.offsetParent).map(e => e.textContent.trim())`)
+  await page.waitFor('context menu', () => page.evaluate(`[...document.querySelectorAll('.menu-item')].some(e => e.offsetParent)`), 5000)
+  const menuItems = await page.evaluate(`[...document.querySelectorAll('.menu-item')].filter(e => e.offsetParent).map(e => e.textContent.trim())`)
   await shot('03-image-menu.png')
-  await page.clickText('.n-dropdown-option-body', '换一张')
+  await page.clickText('.menu-item', '换一张')
   await page.waitFor('image changed', async () => (await imgId()) !== id1 && (await imgLoaded()), 15000).catch(() => {})
   const id2 = await imgId()
   check('image_context_menu_and_next', JSON.stringify(menuItems) === JSON.stringify(['换一张', '复制', '另存为…', '在浏览器打开原图']) && id2 && id2 !== id1, { menuItems, id1, id2 })
@@ -329,23 +329,23 @@ async function main() {
   for (let i = 0; i < 4 && !proxied.slice(before).some((h) => h.startsWith('img.e2e.test')); i++) {
     const cur = await imgId()
     await page.evaluate(`document.querySelector('[data-testid=image-panel-img]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 80, clientY: 500 }))`)
-    await page.clickText('.n-dropdown-option-body', '换一张')
+    await page.clickText('.menu-item', '换一张')
     await page.waitFor('image changed via proxy', async () => (await imgId()) !== cur, 10000).catch(() => {})
   }
   const viaProxy = proxied.slice(before)
   check('custom_proxy_validated_and_used', /代理地址格式不对/.test(badToast) && viaProxy.some((h) => h.startsWith('img.e2e.test')), { badToast, viaProxy })
   // 改回不使用代理，避免影响后面
   await page.click(tid('nav-settings'))
-  await page.clickText('.n-radio', '不使用代理')
+  await page.clickText('.radio', '不使用代理')
   await sleep(300)
 
   // ---- 隧道：本地配置 + 节点 + 代理，启动 ----
   await page.click(tid('nav-tunnel'))
   await page.click(tid('profile-new'))
   await page.type(tid('profile-name-input'), '自动连接测试')
-  await page.clickText('.n-dialog__action button', '确定')
+  await page.clickText('.dlg-actions button', '确定')
   await page.waitFor('profile', () => page.exists(tid('profile-item-自动连接测试')))
-  await page.clickText('.n-tabs-tab', '节点')
+  await page.clickText('.tab', '节点')
   await page.click(tid('node-add'))
   await page.waitFor('node drawer', () => page.drawerOpen())
   await page.type(tid('node-form-remark'), '本机frps')
@@ -354,7 +354,7 @@ async function main() {
   await page.type(tid('node-form-token'), TOKEN)
   await page.click(tid('node-form-save'))
   await page.waitFor('node saved', async () => !(await page.drawerOpen()))
-  await page.clickText('.n-tabs-tab', '代理')
+  await page.clickText('.tab', '代理')
   await page.click(tid('proxy-add'))
   await page.waitFor('proxy drawer', () => page.drawerOpen())
   await page.type(tid('proxy-form-name'), 'echo')
@@ -456,7 +456,7 @@ try {
 try {
   if (page) {
     await page.click(tid('nav-settings')).catch(() => {})
-    await page.clickText('.n-radio', '退出程序').catch(() => {})
+    await page.clickText('.radio', '退出程序').catch(() => {})
     await sleep(300)
   }
 } catch {}

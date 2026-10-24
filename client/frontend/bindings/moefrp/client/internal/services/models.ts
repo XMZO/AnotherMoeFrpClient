@@ -62,15 +62,12 @@ export interface LogoutInfo {
 }
 
 /**
- * OfficialNodeView 是给前端看的官方节点（不含 token）。ID 带 official- 前缀，和运行栏里的节点 ID 一致。
+ * OfficialNodeView 是给前端看的官方节点：不含地址、端口和登录用的东西，对用户是黑盒。ID 带 official- 前缀，和运行栏里的节点 ID 一致。
  */
 export interface OfficialNodeView {
     "id": string;
     "name": string;
     "description"?: string;
-    "serverAddr": string;
-    "serverPort": number;
-    "user": string;
     "online": boolean;
     "quota": quota$0.Quota;
 }

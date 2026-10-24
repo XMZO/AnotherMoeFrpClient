@@ -1199,7 +1199,7 @@
     const bulk = h('div', { class: 'bulk', hidden: true });
 
     p.actions.append(
-      button('版本与公告', { icon: 'upgrade', onclick: () => { location.hash = '#/settings'; } }),
+      button('版本与公告', { icon: 'upgrade', onclick: () => { location.hash = '#/settings/client'; } }),
       button('推送通知', { icon: 'inbox', kind: 'primary', onclick: () => noticeDialog(selected.size ? { sessions: [...selected] } : null, list) }));
     p.body.append(h('div', { class: 'fill' },
       h('div', { class: 'toolbar' },
@@ -1430,6 +1430,8 @@
   // ---------- 设置 ----------
   // 面板运行中就能改的配置：存在数据库里，改了立即生效，优先于配置文件；每一组都能恢复为配置文件。
   // 部署相关、改了要重启的只读显示（docs/server-ops.md"后台设置"一节）。
+  // 按分组切换，一次显示一组：整页一屏，放不下时在卡片里滚动（手机上也一样）。分组记在地址里 #/settings/<分组>。
+  const SETTING_TABS = [['client', '客户端'], ['images', '图源'], ['auth', '登录'], ['nodes', '节点'], ['deploy', '部署']];
 
   // 推荐的图源（旧版客户端内置的那几个），一键填入
   const SUGGESTED_IMAGE_SOURCES = [
@@ -1440,13 +1442,21 @@
   ];
 
   async function pageSettings(p) {
-    const box = h('div', { class: 'stack' }, loadingBox());
-    p.body.append(box);
+    let tab = SETTING_TABS.some((t) => t[0] === p.params[0]) ? p.params[0] : 'client';
+    const host = h('div', { class: 'set-host' }, loadingBox());
+    p.body.append(h('div', { class: 'fill' },
+      h('div', { class: 'toolbar' }, segmented(SETTING_TABS, tab, (v, set) => {
+        tab = v;
+        set(v);
+        history.replaceState(null, '', '#/settings/' + v);
+        draw();
+      }, { label: '设置分组' })),
+      host));
     let data;
     try {
       data = await api('GET', '/panel-settings');
     } catch (e) {
-      if (p.alive()) box.replaceChildren(errorBox(e, () => renderPage()));
+      if (p.alive()) host.replaceChildren(errorBox(e, () => renderPage()));
       return;
     }
     if (!p.alive()) return;
@@ -1454,17 +1464,49 @@
     draw();
 
     function draw() {
-      box.replaceChildren(clientCard(), authCard(), nodesCard(), deployCard());
+      const make = { client: clientCard, images: imagesCard, auth: authCard, nodes: nodesCard, deploy: deployCard }[tab];
+      host.replaceChildren(make());
     }
 
-    // 卡片：标题、来源标签、按钮；表单错误显示在卡片底部
+    // 卡片：标题、来源标签、按钮在顶部固定；内容放不下时在卡片里滚动
     function card(title, fromPanel, body, actions) {
-      return h('section', { class: 'card' },
+      return h('section', { class: 'card list-card set-card' },
         h('div', { class: 'card-head' },
           h('h2', null, title),
           fromPanel === undefined ? null : badge(fromPanel ? '后台设置' : '来自配置文件', fromPanel ? 'accent' : 'outline'),
           actions ? h('div', { class: 'head-btns' }, actions) : null),
-        h('div', { class: 'card-body' }, body));
+        h('div', { class: 'card-body card-scroll' }, body));
+    }
+
+    // wideM：手机上的两列表单里占满一行
+    function wideM(el) {
+      el.classList.add('m-span');
+      return el;
+    }
+
+    // 客户端配置是一份：版本那一组和图源那一组各自保存时，带上另一组现在的值
+    async function saveClient(patch) {
+      const c = data.client.config;
+      await api('PUT', '/client-config', Object.assign({
+        latestVersion: c.latestVersion, minVersion: c.minVersion, downloadUrl: c.downloadUrl, sha256: c.sha256,
+        releaseNotes: c.releaseNotes, announcement: c.announcement, imageSources: c.imageSources || [],
+      }, patch));
+      reload(await api('GET', '/panel-settings'));
+    }
+    function resetClientButton() {
+      const reset = button('恢复为配置文件', {
+        small: true, disabled: !data.client.fromPanel,
+        onclick: () => busy(reset, async () => {
+          try {
+            await api('DELETE', '/client-config');
+            toast('已恢复为配置文件里的设置，并推送给在线客户端');
+            reload(await api('GET', '/panel-settings'));
+          } catch (e) {
+            fail(e);
+          }
+        }),
+      });
+      return reset;
     }
     function formError() {
       return h('div', { class: 'form-error', role: 'alert' });
@@ -1485,46 +1527,51 @@
       notes.value = c.releaseNotes || '';
       const ann = h('textarea', { class: 'input textarea', rows: 2, placeholder: '每台客户端显示一次，内容变了再显示' });
       ann.value = c.announcement || '';
-      const images = imageEditor(c.imageSources || []);
       const err = formError();
       const save = button('保存并推送', {
         kind: 'primary', small: true,
         onclick: () => busy(save, async () => {
           err.classList.remove('show');
           try {
-            await api('PUT', '/client-config', {
+            await saveClient({
               latestVersion: latest.value, minVersion: min.value, downloadUrl: url.value, sha256: sha.value,
-              releaseNotes: notes.value, announcement: ann.value, imageSources: images.value(),
+              releaseNotes: notes.value, announcement: ann.value,
             });
             toast('已保存，并推送给 ' + data.online + ' 台在线客户端');
-            reload(await api('GET', '/panel-settings'));
           } catch (e) {
             showErr(err, e);
           }
         }),
       });
-      const reset = button('恢复为配置文件', {
-        small: true, disabled: !data.client.fromPanel,
-        onclick: () => busy(reset, async () => {
-          try {
-            await api('DELETE', '/client-config');
-            toast('已恢复为配置文件里的设置，并推送给在线客户端');
-            reload(await api('GET', '/panel-settings'));
-          } catch (e) {
-            fail(e);
-          }
-        }),
-      });
-      return card('客户端', data.client.fromPanel, [
+      return card('版本与公告', data.client.fromPanel, [
         h('p', { class: 'muted card-note' }, '保存后马上推给在线的客户端（现在 ' + data.online + ' 台），其余的下次启动时拿到。'),
         h('div', { class: 'form-grid settings-grid' },
           field('最新版本', latest, '比它旧的客户端提示更新'),
           field('最低版本（强制更新）', min, '比它旧的客户端立即停用账号功能，直到更新'),
-          field('下载地址', url),
-          field('SHA-256', sha, '客户端下载新版本后核对'),
-          field('更新说明', notes),
-          field('公告', ann)),
-        images.el, err], [reset, save]);
+          wideM(field('下载地址', url)),
+          wideM(field('SHA-256', sha, '客户端下载新版本后核对')),
+          wideM(field('更新说明', notes)),
+          wideM(field('公告', ann))),
+        err], [resetClientButton(), save]);
+    }
+
+    // 图源：图片面板的图源，保存后马上推给在线客户端
+    function imagesCard() {
+      const images = imageEditor(data.client.config.imageSources || []);
+      const err = formError();
+      const save = button('保存并推送', {
+        kind: 'primary', small: true,
+        onclick: () => busy(save, async () => {
+          err.classList.remove('show');
+          try {
+            await saveClient({ imageSources: images.value() });
+            toast('已保存，客户端的图片面板马上换用新图源');
+          } catch (e) {
+            showErr(err, e);
+          }
+        }),
+      });
+      return card('图源', data.client.fromPanel, [images.el, err], [images.suggest, resetClientButton(), save]);
     }
 
     // 图源编辑：每行地址、类型（直接返回图片 / JSON 接口）、JSON 路径、权重
@@ -1555,7 +1602,7 @@
       }
       initial.forEach(addRow);
       recount();
-      const suggest = button('填入推荐图源', {
+      const suggest = button('填入推荐', {
         small: true,
         onclick: () => {
           const have = new Set([...rows.children].map((r) => r.value().url));
@@ -1567,10 +1614,11 @@
       return {
         el: h('div', { class: 'img-editor' },
           h('div', { class: 'img-head' },
-            h('span', { class: 'field-label' }, '图片面板的图源'), count,
+            count,
             h('span', { class: 'img-hint muted' }, '“图片”：地址直接返回图片；“JSON”：返回 JSON，按路径取图片地址。权重越大越常出现'),
-            h('div', { class: 'head-btns' }, suggest, button('添加图源', { small: true, icon: 'plus', onclick: () => addRow({ weight: 1 }) }))),
+            button('添加图源', { small: true, icon: 'plus', onclick: () => addRow({ weight: 1 }) })),
           rows, empty),
+        suggest,
         value: () => [...rows.children].map((r) => r.value()),
       };
     }
@@ -2371,6 +2419,7 @@
   async function pageNode(p, id) {
     let n = null;
     let tab = 'overview';
+    let settingsPane = 'basic'; // "设置"页当前的分组
     const tabs = segmented([['overview', '概况'], ['config', '配置'], ['proxies', '代理'], ['logs', '日志'], ['exec', '命令'], ['settings', '设置']], tab, (v, set) => {
       tab = v;
       set(v);
@@ -2532,9 +2581,23 @@
           }
           return field(f.label, el, f.hint);
         };
-        const groups = sc.groups.map((g) => h('section', { class: 'cfg-group' },
-          h('div', { class: 'cfg-group-head' }, h('h3', null, g.label), g.hint ? h('span', null, g.hint) : null),
-          h('div', { class: 'cfg-grid' }, sc.fields.filter((f) => f.group === g.key).map(control))));
+        // 按分组切换，一次显示一组（每组 4–6 项）：手机上也一屏放下，不用滚动
+        const SHORT = { basic: '基础', transport: '传输', vhost: '虚拟主机', advanced: '高级' };
+        let group = sc.groups[0].key;
+        const groups = sc.groups.map((g) => {
+          const el = h('section', { class: 'cfg-group' },
+            g.hint ? h('p', { class: 'cfg-group-hint' }, g.label + '：' + g.hint) : null,
+            h('div', { class: 'cfg-grid' }, sc.fields.filter((f) => f.group === g.key).map(control)));
+          el.dataset.group = g.key;
+          return el;
+        });
+        const groupTabs = segmented(sc.groups.map((g) => [g.key, SHORT[g.key] || g.label]), group, (v, set) => showGroup(v, set), { label: '配置分组' });
+        function showGroup(key, set) {
+          group = key;
+          (set || groupTabs.setValue)(key);
+          for (const el of groups) el.hidden = el.dataset.group !== key;
+        }
+        showGroup(group);
         fill(n.settings || sc.defaults);
 
         const save = button(n.status === 'online' ? '保存并应用' : '保存', {
@@ -2560,6 +2623,9 @@
               for (const fe of fields) {
                 if (ctl[fe.field]) {
                   ctl[fe.field].classList.add('invalid');
+                  // 出错的项在别的分组里：切过去
+                  const f = sc.fields.find((x) => x.key === fe.field);
+                  if (f && f.group !== group) showGroup(f.group);
                   ctl[fe.field].focus();
                 }
               }
@@ -2575,7 +2641,7 @@
               button('默认值', { small: true, title: '填入新节点的默认配置（还没保存）', onclick: () => fill(sc.defaults) }),
               button('还原', { small: true, title: '放弃没保存的修改', onclick: () => { fill(n.settings || sc.defaults); result.hidden = true; } }),
               save)),
-          h('div', { class: 'card-body cfg-body' }, result, groups,
+          h('div', { class: 'card-body cfg-body' }, groupTabs, result, groups,
             h('p', { class: 'cell-sub' }, '节点不设 token，只接受面板签发的登录票据。保存后 agent 先校验再重启 frps，启动失败（如端口被占用）自动恢复旧配置；配置在节点上加密保存。')));
       })();
       return card;
@@ -2782,30 +2848,40 @@
         },
       });
 
-      return h('div', { class: 'stack' },
-        h('section', { class: 'card' },
-          h('div', { class: 'card-head' }, h('h2', null, '节点设置'), h('div', { class: 'head-btns' }, save)),
-          h('div', { class: 'card-body' },
-            h('div', { class: 'form-grid settings-grid' },
-              field('名称', name), field('客户端连接地址', addr),
-              h('div', { class: 'field span-all' }, h('span', { class: 'field-label' }, '下载代理（升级 agent、生成安装命令时用）'), mirror, mirrorList)),
-            h('div', { class: 'official' },
-              old ? h('div', { class: 'callout warn' }, icon('alert', 16), h('span', null, 'agent ' + n.info.agentVersion + ' 要升级到 1.4.0 才能由面板托管（没有 token、加密保存配置），升级前用户用不了这个节点。')) : null,
-              h('div', { class: 'official-head' },
-                h('label', { class: 'check setting-title' }, on, '开放给普通用户'),
-                h('span', { class: 'muted' }, '管理员总能用；个别用户在"用户 → 节点权限"里单独允许或禁止')),
-              field('给用户看的说明', desc, '显示在客户端的节点列表里。限额在节点列表的"限额"里按用户组设置'),
-              h('div', { class: 'field-label access-title' }, '用户访问地址',
-                h('span', { class: 'muted' }, '显示在客户端，用户复制去访问自己的 tcp / udp 代理。IP 留空自动检测，填 - 不显示')),
-              h('div', { class: 'access-grid' }, field('域名', accDomain), field('IPv4', accV4), field('IPv6', accV6))))),
-        h('section', { class: 'card' },
-          h('div', { class: 'card-head' }, h('h2', null, '维护')),
-          h('div', { class: 'card-body' }, h('div', { class: 'ops' },
-            op('重启 frps', '客户端会短暂断开', '/restart', 'frps 已重启', { icon: 'refresh' }),
-            op('升级 agent', n.upgradeTo ? '可升级到 ' + n.upgradeTo : '已是最新版本', '/upgrade', '已开始升级，结果在"命令"页的历史里',
-              { disabled: !online || !n.upgradeTo, icon: 'upgrade', confirm: { title: '升级 agent', ok: '升级', message: 'agent 会下载新版本并重启，frps 会断开几秒。升级失败会自动回滚。' } }),
-            opButton('重置令牌', '泄露或重装时用', { icon: 'key', onclick: (e) => resetToken(e.currentTarget, true) }),
-            uninstall, del))));
+      // 分三组切换，一次显示一组：手机上也一屏放下。保存按钮保存"基本"和"开放与访问"两组（隐藏的那组也一起保存）
+      const panes = {
+        basic: h('div', { class: 'form-grid settings-grid' },
+          field('名称', name), field('客户端连接地址', addr),
+          h('div', { class: 'field span-all' }, h('span', { class: 'field-label' }, '下载代理（升级 agent、生成安装命令时用）'), mirror, mirrorList)),
+        access: h('div', { class: 'official' },
+          old ? h('div', { class: 'callout warn' }, icon('alert', 16), h('span', null, 'agent ' + n.info.agentVersion + ' 要升级到 1.4.0 才能由面板托管（没有 token、加密保存配置），升级前用户用不了这个节点。')) : null,
+          h('div', { class: 'official-head' },
+            h('label', { class: 'check setting-title' }, on, '开放给普通用户'),
+            h('span', { class: 'muted' }, '管理员总能用；个别用户在"用户 → 节点权限"里单独允许或禁止')),
+          field('给用户看的说明', desc, '显示在客户端的节点列表里。限额在节点列表的"限额"里按用户组设置'),
+          h('div', { class: 'field-label access-title' }, '用户访问地址',
+            h('span', { class: 'muted' }, '显示在客户端，用户复制去访问自己的 tcp / udp 代理。IP 留空自动检测，填 - 不显示')),
+          h('div', { class: 'access-grid' }, field('域名', accDomain), field('IPv4', accV4), field('IPv6', accV6))),
+        ops: h('div', { class: 'ops' },
+          op('重启 frps', '客户端会短暂断开', '/restart', 'frps 已重启', { icon: 'refresh' }),
+          op('升级 agent', n.upgradeTo ? '可升级到 ' + n.upgradeTo : '已是最新版本', '/upgrade', '已开始升级，结果在"命令"页的历史里',
+            { disabled: !online || !n.upgradeTo, icon: 'upgrade', confirm: { title: '升级 agent', ok: '升级', message: 'agent 会下载新版本并重启，frps 会断开几秒。升级失败会自动回滚。' } }),
+          opButton('重置令牌', '泄露或重装时用', { icon: 'key', onclick: (e) => resetToken(e.currentTarget, true) }),
+          uninstall, del),
+      };
+      const showPane = (key) => {
+        settingsPane = key;
+        for (const [k, el] of Object.entries(panes)) el.hidden = k !== key;
+        save.hidden = key === 'ops';
+      };
+      const paneTabs = segmented([['basic', '基本'], ['access', '开放与访问'], ['ops', '维护']], settingsPane, (v, set) => {
+        set(v);
+        showPane(v);
+      }, { label: '设置分组' });
+      showPane(settingsPane);
+      return h('section', { class: 'card list-card set-card' },
+        h('div', { class: 'card-head' }, h('h2', null, '节点设置'), h('div', { class: 'head-btns' }, save)),
+        h('div', { class: 'card-body card-scroll node-set-body' }, paneTabs, panes.basic, panes.access, panes.ops));
     }
 
     await load();

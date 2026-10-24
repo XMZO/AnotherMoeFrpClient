@@ -658,10 +658,8 @@ code.clip { display: inline-block; max-width: 360px; overflow: hidden; text-over
 /* ---------- frps 配置表单 ---------- */
 
 .cfg-body { overflow-y: auto; }
-.cfg-group + .cfg-group { margin-top: 4px; padding-top: 14px; border-top: 1px solid var(--border); }
-.cfg-group-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; min-width: 0; }
-.cfg-group-head h3 { margin: 0; font-size: 14px; font-weight: 600; white-space: nowrap; }
-.cfg-group-head span { font-size: 12px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cfg-body > .seg { align-self: flex-start; }
+.cfg-group-hint { margin: 0 0 10px; font-size: 12.5px; color: var(--muted); }
 .cfg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px 16px; align-items: start; }
 .cfg-grid .field + .field { margin-top: 0; }
 .field.bool { padding-top: 6px; }
@@ -873,17 +871,59 @@ th.sel, td.sel { width: 1%; padding-right: 0; }
 /* 设置页 */
 .card-note { margin: 0 0 12px; font-size: 13px; }
 .card-head > .badge { margin-left: 4px; }
-.img-editor { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--border); }
+/* 设置页：分组按钮固定在顶部，卡片按内容高度，放不下时卡片里滚动 */
+.set-host { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.set-host > .set-card { flex: 0 1 auto; min-height: 0; }
+.card-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.img-editor { }
 .img-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin-bottom: 10px; }
-.img-head .field-label { margin: 0; }
 .img-hint { flex: 1 1 260px; min-width: 0; font-size: 12px; }
-.img-head .head-btns { display: flex; gap: 6px; margin-left: auto; }
+.img-head > .btn { margin-left: auto; }
 .img-rows { display: flex; flex-direction: column; gap: 8px; }
 .img-row { display: grid; grid-template-columns: minmax(0, 2.2fr) auto minmax(0, 1.2fr) 72px auto; align-items: center; gap: 8px; }
 .img-row .input:disabled { opacity: 0.45; }
 .img-empty { padding: 8px 0; font-size: 13px; }
 .deploy-kv dd code { overflow-wrap: anywhere; }
+/* 手机上每个图源两行：地址占满一行；类型、JSON 路径、权重、删除一行 */
 @media (max-width: 719px) {
-  .img-row { grid-template-columns: minmax(0, 1fr) auto; }
-  .img-row > :nth-child(3) { grid-column: 1 / -1; }
+  .img-row { grid-template-columns: auto minmax(0, 1fr) 56px auto; row-gap: 6px; padding-bottom: 8px; border-bottom: 1px dashed var(--border); }
+  .img-row > :first-child { grid-column: 1 / -1; }
+  .img-rows { gap: 8px; }
 }
+
+/* 设置页在手机上：一屏放下——按钮放到标题下面平分一行，短字段两列，说明小字收起 */
+@media (max-width: 719px) {
+  .set-card > .card-head { flex-wrap: wrap; row-gap: 8px; }
+  .set-card > .card-head .head-btns { width: 100%; margin-left: 0; }
+  .set-card > .card-head .head-btns .btn { flex: 1; }
+  .set-card .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; }
+  .set-card .form-grid > .m-span { grid-column: 1 / -1; }
+  .set-card .field + .field { margin-top: 0; }
+  .set-card .card-note { margin-bottom: 8px; font-size: 12px; }
+  .img-hint { flex-basis: 100%; order: 3; }
+  .set-card .textarea { min-height: 0; height: 58px; }
+  .set-card .card-body { padding-top: 6px; }
+}
+
+/* 节点配置在手机上：分组按钮占满一行，配置项两列，标题栏的按钮放到第二排平分 */
+@media (max-width: 719px) {
+  .fill-card > .card-head { flex-wrap: wrap; row-gap: 8px; }
+  .fill-card > .card-head .head-btns { width: 100%; margin-left: 0; }
+  .fill-card > .card-head .head-btns .btn { flex: 1; }
+  .cfg-body > .seg { align-self: stretch; display: flex; }
+  .cfg-body > .seg button { flex: 1; }
+  .cfg-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
+  .cfg-group-hint { margin-bottom: 8px; }
+}
+
+/* 节点设置：分组按钮在卡片顶部 */
+.node-set-body { display: flex; flex-direction: column; gap: 12px; }
+.node-set-body > .seg { align-self: flex-start; }
+.node-set-body > .official { margin-top: 0; padding-top: 0; border-top: 0; }
+@media (max-width: 719px) {
+  .node-set-body > .seg { align-self: stretch; display: flex; }
+  .node-set-body > .seg button { flex: 1; }
+  .node-set-body .access-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .node-set-body .access-grid > :first-child { grid-column: 1 / -1; }
+}
+.tab-body > .set-card { flex: 0 1 auto; min-height: 0; }

@@ -39,6 +39,34 @@ type clientSettings struct {
 	SHA256        string `json:"sha256"`
 	ReleaseNotes  string `json:"releaseNotes"`
 	Announcement  string `json:"announcement"`
+	// ImageSources 是图片面板的图源；nil（旧版保存的设置里没有这一项）表示用配置文件的
+	ImageSources *[]imageSourceSetting `json:"imageSources,omitempty"`
+}
+
+// clientSettingsOf 把生效的客户端配置转成后台表单的样子。
+func clientSettingsOf(c config.Client) clientSettings {
+	imgs := make([]imageSourceSetting, 0, len(c.ImageSources))
+	for _, x := range c.ImageSources {
+		imgs = append(imgs, imageSourceSetting{URL: x.URL, Weight: x.Weight, IsAPI: x.IsAPI, JSONPath: x.JSONPath})
+	}
+	return clientSettings{LatestVersion: c.LatestVersion, MinVersion: c.MinVersion, DownloadURL: c.DownloadURL,
+		SHA256: c.SHA256, ReleaseNotes: c.ReleaseNotes, Announcement: c.Announcement, ImageSources: &imgs}
+}
+
+// overrideClient 用后台的设置覆盖配置文件里的。
+func overrideClient(c config.Client, o *clientSettings) config.Client {
+	if o == nil {
+		return c
+	}
+	c.LatestVersion, c.MinVersion, c.DownloadURL = o.LatestVersion, o.MinVersion, o.DownloadURL
+	c.SHA256, c.ReleaseNotes, c.Announcement = o.SHA256, o.ReleaseNotes, o.Announcement
+	if o.ImageSources != nil {
+		c.ImageSources = make([]config.ImageSource, 0, len(*o.ImageSources))
+		for _, x := range *o.ImageSources {
+			c.ImageSources = append(c.ImageSources, config.ImageSource{URL: x.URL, Weight: x.Weight, IsAPI: x.IsAPI, JSONPath: x.JSONPath})
+		}
+	}
+	return c
 }
 
 // clientConfigState 缓存当前生效的客户端配置。
@@ -82,11 +110,7 @@ func nodesHooks(s *Server) nodes.Hooks {
 
 // setClientOverride 换上后台的客户端配置（nil 表示回到配置文件）。
 func (s *Server) setClientOverride(o *clientSettings) error {
-	c := s.cfg.Client
-	if o != nil {
-		c.LatestVersion, c.MinVersion, c.DownloadURL = o.LatestVersion, o.MinVersion, o.DownloadURL
-		c.SHA256, c.ReleaseNotes, c.Announcement = o.SHA256, o.ReleaseNotes, o.Announcement
-	}
+	c := overrideClient(s.cfg.Client, o)
 	var mv *api.Version
 	if c.MinVersion != "" {
 		v, err := api.ParseVersion(c.MinVersion)
@@ -107,12 +131,7 @@ func (s *Server) clientCfg() config.Client {
 	s.clientCfgState.mu.RLock()
 	o := s.clientCfgState.override
 	s.clientCfgState.mu.RUnlock()
-	c := s.cfg.Client
-	if o != nil {
-		c.LatestVersion, c.MinVersion, c.DownloadURL = o.LatestVersion, o.MinVersion, o.DownloadURL
-		c.SHA256, c.ReleaseNotes, c.Announcement = o.SHA256, o.ReleaseNotes, o.Announcement
-	}
-	return c
+	return overrideClient(s.cfg.Client, o)
 }
 
 func (s *Server) clientMinVersion() *api.Version {
@@ -358,8 +377,7 @@ func (s *Server) handleAdminClientConfig(w http.ResponseWriter, r *http.Request)
 	fromPanel := s.clientCfgState.override != nil
 	s.clientCfgState.mu.RUnlock()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"config": clientSettings{LatestVersion: c.LatestVersion, MinVersion: c.MinVersion, DownloadURL: c.DownloadURL,
-			SHA256: c.SHA256, ReleaseNotes: c.ReleaseNotes, Announcement: c.Announcement},
+		"config":    clientSettingsOf(c),
 		"fromPanel": fromPanel,
 		"online":    s.live.Count(),
 	})
@@ -411,6 +429,9 @@ func (s *Server) handleAdminSetClientConfig(w http.ResponseWriter, r *http.Reque
 	if utf8.RuneCountInString(c.Announcement) > 2000 {
 		addErr(&errs, "announcement", validate.ReasonInvalid, "公告最多 2000 个字")
 	}
+	if c.ImageSources != nil {
+		validateImageSources(*c.ImageSources, &errs)
+	}
 	if len(errs) > 0 {
 		s.writeError(w, r, apierr.New(apierr.ValidationFailed).With(apierr.DetailFields, errs))
 		return
@@ -424,7 +445,11 @@ func (s *Server) handleAdminSetClientConfig(w http.ResponseWriter, r *http.Reque
 		s.writeError(w, r, err)
 		return
 	}
-	s.auditClient(r, store.AuditClientConfig, "", map[string]any{"latestVersion": c.LatestVersion, "minVersion": c.MinVersion})
+	nImg := -1
+	if c.ImageSources != nil {
+		nImg = len(*c.ImageSources)
+	}
+	s.auditClient(r, store.AuditClientConfig, "", map[string]any{"latestVersion": c.LatestVersion, "minVersion": c.MinVersion, "imageSources": nImg})
 	s.pushClientConfig()
 	s.handleAdminClientConfig(w, r)
 }

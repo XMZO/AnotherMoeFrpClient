@@ -179,3 +179,69 @@ func TestLive(t *testing.T) {
 	}
 	_ = model.Profile{}
 }
+
+// TestPanelSettings：后台"设置"页——图源随客户端配置保存并下发（校验每一项）；单设备模式、登录有效期立即生效；
+// 节点的面板地址写进安装命令；每一组都能恢复为配置文件。
+func TestPanelSettings(t *testing.T) {
+	n := newNodeEnv(t, withConfigSingle(false))
+	var ps struct {
+		Client struct {
+			Config    map[string]any
+			FromPanel bool
+		}
+		Auth struct {
+			Config    authSettings
+			FromPanel bool
+		}
+		Nodes struct {
+			Config    nodeSettings
+			FromPanel bool
+		}
+		Deploy map[string]any
+	}
+	n.admin("GET", "/panel-settings", nil).expect(http.StatusOK).decode(&ps)
+	if ps.Auth.FromPanel || ps.Auth.Config.SingleSession || ps.Auth.Config.SessionTTLHours != 720 || ps.Deploy["secretKey"] == "" {
+		t.Fatalf("初始：%+v", ps)
+	}
+
+	// 图源：格式不对标出字段；保存后客户端拿到
+	n.admin("PUT", "/client-config", map[string]any{"imageSources": []map[string]any{{"url": "ftp://x", "weight": 1}}}).apiErr(apierr.ValidationFailed)
+	n.admin("PUT", "/client-config", map[string]any{"imageSources": []map[string]any{{"url": "https://img.example.com/api", "weight": 2, "isApi": true}}}).apiErr(apierr.ValidationFailed)
+	n.admin("PUT", "/client-config", map[string]any{"latestVersion": "3.1.0", "imageSources": []map[string]any{
+		{"url": "https://umi.example.com/random", "weight": 5},
+		{"url": "https://img.example.com/api", "weight": 2, "isApi": true, "jsonPath": "data.0.url"},
+	}}).expect(http.StatusOK)
+	var cc api.ClientConfigResponse
+	n.do(req{method: "GET", path: api.RouteClientConfig}).expect(http.StatusOK).decode(&cc)
+	if len(cc.ImageSources) != 2 || cc.ImageSources[1].JSONPath != "data.0.url" || !cc.ImageSources[1].IsAPI {
+		t.Fatalf("图源：%+v", cc.ImageSources)
+	}
+
+	// 单设备模式：打开后新登录挤掉旧的
+	n.register("bob", "password-bob")
+	tok1 := n.login("bob", "password-bob")
+	n.admin("PUT", "/panel-settings/auth", authSettings{SingleSession: true, SessionTTLHours: 0}).apiErr(apierr.ValidationFailed)
+	n.admin("PUT", "/panel-settings/auth", authSettings{SingleSession: true, SessionTTLHours: 48}).expect(http.StatusOK)
+	n.login("bob", "password-bob")
+	n.do(req{method: "GET", path: api.RouteMe, token: tok1}).apiErr(apierr.SessionReplaced)
+	if n.auth.SessionTTL() != 48*time.Hour {
+		t.Fatalf("有效期：%v", n.auth.SessionTTL())
+	}
+	n.admin("DELETE", "/panel-settings/auth", nil).expect(http.StatusOK)
+	if n.auth.SingleSession() || n.auth.SessionTTL() != 720*time.Hour {
+		t.Fatal("应恢复为配置文件")
+	}
+
+	// 节点：面板地址写进安装命令；格式不对标出字段
+	n.admin("PUT", "/panel-settings/nodes", nodeSettings{PublicURL: "https://x.example.com/path"}).apiErr(apierr.ValidationFailed)
+	n.admin("PUT", "/panel-settings/nodes", nodeSettings{PublicURL: "https://panel.example.com/", AgentMirror: "https://gh.example.com/"}).expect(http.StatusOK)
+	var created struct{ InstallCommand string }
+	n.admin("POST", "/nodes", map[string]any{"name": "装机"}).expect(http.StatusCreated).decode(&created)
+	if !strings.Contains(created.InstallCommand, "https://panel.example.com/agent/install.sh") {
+		t.Fatalf("安装命令：%s", created.InstallCommand)
+	}
+	n.admin("GET", "/panel-settings", nil).expect(http.StatusOK).decode(&ps)
+	if !ps.Nodes.FromPanel || ps.Nodes.Config.PublicURL != "https://panel.example.com" {
+		t.Fatalf("节点设置：%+v", ps.Nodes)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"moefrp/server/internal/store"
@@ -70,6 +71,10 @@ type Service struct {
 	dummyHash string
 	hashSem   chan struct{}
 
+	// 后台"设置"页可以随时改的两项（Options 里的是启动时的值）
+	single atomic.Bool
+	ttlNs  atomic.Int64
+
 	// afterVerify 只在测试里设置：密码校验通过之后、写事务开始之前调用，用来制造竞态。
 	afterVerify func()
 }
@@ -81,20 +86,34 @@ func New(st *store.Store, opt Options) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{
+	s := &Service{
 		st:        st,
 		opt:       opt,
 		lockout:   NewLockout(opt.Lockout),
 		dummyHash: dummy,
 		hashSem:   make(chan struct{}, opt.MaxHashes),
-	}, nil
+	}
+	s.SetSessionPolicy(opt.SingleSession, opt.SessionTTL)
+	return s, nil
 }
 
 // Lockout 返回锁定表（测试和后台清理使用）。
 func (s *Service) Lockout() *Lockout { return s.lockout }
 
 // SingleSession 返回是否开启了单设备模式。
-func (s *Service) SingleSession() bool { return s.opt.SingleSession }
+func (s *Service) SingleSession() bool { return s.single.Load() }
+
+// SessionTTL 返回客户端会话的滑动过期时间。
+func (s *Service) SessionTTL() time.Duration { return time.Duration(s.ttlNs.Load()) }
+
+// SetSessionPolicy 修改单设备模式和客户端会话的有效期（后台"设置"页），之后的登录和续期生效。
+// ttl 为 0 时不改。
+func (s *Service) SetSessionPolicy(single bool, ttl time.Duration) {
+	s.single.Store(single)
+	if ttl > 0 {
+		s.ttlNs.Store(int64(ttl))
+	}
+}
 
 // ClientMeta 是请求方的信息，用于会话和审计。
 type ClientMeta struct {
@@ -335,7 +354,7 @@ func (s *Service) ttl(kind string) time.Duration {
 	if kind == store.SessionAdminWeb {
 		return s.opt.AdminTTL
 	}
-	return s.opt.SessionTTL
+	return s.SessionTTL()
 }
 
 func (s *Service) login(ctx context.Context, nickname, password string, meta ClientMeta, kind string) (LoginResult, error) {
@@ -461,7 +480,7 @@ func (s *Service) login(ctx context.Context, nickname, password string, meta Cli
 			u.PasswordHash = newHash
 			detail["rehashed"] = true
 		}
-		if s.opt.SingleSession {
+		if s.SingleSession() {
 			// 只挤掉同一类型的会话：打开管理后台不影响桌面客户端，反之亦然
 			n, err := store.RevokeUserSessionsOfKind(ctx, tx, u.ID, kind, store.RevokeReplaced, now.Unix())
 			if err != nil {

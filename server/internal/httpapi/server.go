@@ -77,6 +77,7 @@ type Server struct {
 	trustedProxies []netip.Prefix
 	live           *live.Hub         // 客户端实时通道
 	clientCfgState clientConfigState // 当前生效的客户端配置（配置文件，或后台改过的）
+	panel          panelState        // 后台"设置"页改过的其他设置
 
 	limLogin, limRegister, limReset, limUser, limPreview, limTickets *ratelimit.Limiter
 
@@ -157,6 +158,9 @@ func New(d Deps) (*Server, error) {
 		s.nodes = nodes.New(nodes.Options{Store: d.Store, Log: s.log, Now: s.now, Source: src, KEK: kek, KEKSource: kekSrc})
 	}
 	if err := s.initLive(context.Background()); err != nil {
+		return nil, err
+	}
+	if err := s.initPanelSettings(context.Background()); err != nil {
 		return nil, err
 	}
 	limits := DefaultLimits

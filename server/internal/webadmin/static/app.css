@@ -869,3 +869,21 @@ th.sel, td.sel { width: 1%; padding-right: 0; }
 .access-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .access-grid .field + .field { margin-top: 0; }
 @media (max-width: 719px) { .access-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* 设置页 */
+.card-note { margin: 0 0 12px; font-size: 13px; }
+.card-head > .badge { margin-left: 4px; }
+.img-editor { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--border); }
+.img-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin-bottom: 10px; }
+.img-head .field-label { margin: 0; }
+.img-hint { flex: 1 1 260px; min-width: 0; font-size: 12px; }
+.img-head .head-btns { display: flex; gap: 6px; margin-left: auto; }
+.img-rows { display: flex; flex-direction: column; gap: 8px; }
+.img-row { display: grid; grid-template-columns: minmax(0, 2.2fr) auto minmax(0, 1.2fr) 72px auto; align-items: center; gap: 8px; }
+.img-row .input:disabled { opacity: 0.45; }
+.img-empty { padding: 8px 0; font-size: 13px; }
+.deploy-kv dd code { overflow-wrap: anywhere; }
+@media (max-width: 719px) {
+  .img-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .img-row > :nth-child(3) { grid-column: 1 / -1; }
+}

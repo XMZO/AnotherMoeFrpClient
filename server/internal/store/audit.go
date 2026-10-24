@@ -41,10 +41,11 @@ const (
 	AuditUserNodeCred   = "admin.node_cred"   // 重置用户的节点凭证
 	AuditNodeSecret     = "admin.node_secret" // 轮换面板主密钥（节点票据和存储密钥）
 
-	AuditClientNotice = "admin.client_notice" // 给客户端推送通知
-	AuditClientTunnel = "admin.client_tunnel" // 远程停止 / 重启客户端的隧道
-	AuditClientKick   = "admin.client_kick"   // 让某台设备下线
-	AuditClientConfig = "admin.client_config" // 修改客户端版本、最低版本、公告
+	AuditClientNotice  = "admin.client_notice"  // 给客户端推送通知
+	AuditClientTunnel  = "admin.client_tunnel"  // 远程停止 / 重启客户端的隧道
+	AuditClientKick    = "admin.client_kick"    // 让某台设备下线
+	AuditClientConfig  = "admin.client_config"  // 修改客户端版本、最低版本、公告、图源
+	AuditPanelSettings = "admin.panel_settings" // 修改后台"设置"页的账号与登录、节点设置
 
 	AuditShareCreate    = "share.create"
 	AuditShareRepublish = "share.republish"

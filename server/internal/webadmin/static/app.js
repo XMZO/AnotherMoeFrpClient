@@ -576,6 +576,7 @@
     { id: 'users', label: '用户', icon: 'users', desc: '调整角色、停用账号、踢下线、生成密码重置码', render: pageUsers },
     { id: 'clients', label: '客户端', icon: 'activity', desc: '在线设备、推送通知、远程控制隧道、客户端版本和公告', render: pageClients },
     { id: 'audit', label: '审计日志', short: '审计', icon: 'list', desc: '登录、注册、分享和管理操作的记录', render: pageAudit },
+    { id: 'settings', label: '设置', icon: 'layers', desc: '客户端版本、公告和图源，登录策略，节点安装地址；改了立即生效', render: pageSettings },
     { id: 'backup', label: '备份', icon: 'database', desc: '下载数据库快照', render: pageBackup },
   ];
 
@@ -1198,7 +1199,7 @@
     const bulk = h('div', { class: 'bulk', hidden: true });
 
     p.actions.append(
-      button('版本与公告', { icon: 'upgrade', onclick: () => clientConfigDialog() }),
+      button('版本与公告', { icon: 'upgrade', onclick: () => { location.hash = '#/settings'; } }),
       button('推送通知', { icon: 'inbox', kind: 'primary', onclick: () => noticeDialog(selected.size ? { sessions: [...selected] } : null, list) }));
     p.body.append(h('div', { class: 'fill' },
       h('div', { class: 'toolbar' },
@@ -1426,69 +1427,239 @@
     title.focus();
   }
 
-  // clientConfigDialog 客户端版本、最低版本（强制更新）、下载地址、更新说明、公告。保存后立即推给所有在线客户端。
-  async function clientConfigDialog() {
-    let res;
+  // ---------- 设置 ----------
+  // 面板运行中就能改的配置：存在数据库里，改了立即生效，优先于配置文件；每一组都能恢复为配置文件。
+  // 部署相关、改了要重启的只读显示（docs/server-ops.md"后台设置"一节）。
+
+  // 推荐的图源（旧版客户端内置的那几个），一键填入
+  const SUGGESTED_IMAGE_SOURCES = [
+    { url: 'https://umi.li/random?dir=lucky&type=img', weight: 5, isApi: false, jsonPath: '' },
+    { url: 'https://api.lolicon.app/setu/v2?r18=0&num=1&size=regular&proxy=i.pixiv.re&excludeAI=true', weight: 2, isApi: true, jsonPath: 'data.0.urls.regular' },
+    { url: 'https://image.anosu.top/pixiv/json?r18=0&size=regular&num=1&keyword=loli', weight: 2, isApi: true, jsonPath: '0.url' },
+    { url: 'https://moe.jitsu.top/img', weight: 1, isApi: false, jsonPath: '' },
+  ];
+
+  async function pageSettings(p) {
+    const box = h('div', { class: 'stack' }, loadingBox());
+    p.body.append(box);
+    let data;
     try {
-      res = await api('GET', '/client-config');
+      data = await api('GET', '/panel-settings');
     } catch (e) {
-      fail(e);
+      if (p.alive()) box.replaceChildren(errorBox(e, () => renderPage()));
       return;
     }
-    const c = res.config;
-    const latest = input({ value: c.latestVersion, placeholder: '例如 3.1.0' });
-    const min = input({ value: c.minVersion, placeholder: '不限制' });
-    const url = input({ value: c.downloadUrl, placeholder: 'https://…', type: 'url' });
-    const sha = input({ value: c.sha256, placeholder: '可以不填', class: 'input mono' });
-    const notes = h('textarea', { class: 'input textarea', rows: 3, placeholder: '有新版本时显示给用户' });
-    notes.value = c.releaseNotes || '';
-    const ann = h('textarea', { class: 'input textarea', rows: 3, placeholder: '每台客户端显示一次，内容变了再显示' });
-    ann.value = c.announcement || '';
-    const err = h('div', { class: 'form-error', role: 'alert' });
-    const save = button('保存并推送', { kind: 'primary', type: 'submit' });
-    const reset = button('恢复为配置文件', {
-      disabled: !res.fromPanel,
-      onclick: () => busy(reset, async () => {
-        try {
-          await api('DELETE', '/client-config');
-          toast('已恢复为配置文件里的设置，并推送给在线客户端');
-          d.close();
-        } catch (e) {
-          fail(e);
-        }
-      }),
-    });
-    const d = openDialog({
-      title: '客户端版本与公告',
-      titleIcon: 'upgrade',
-      wide: true,
-      body: [
-        h('p', { class: 'dialog-text' }, (res.fromPanel ? '当前是后台设置的。' : '当前来自配置文件。') +
-          '保存后马上推给 ' + res.online + ' 台在线客户端，其余的下次启动时拿到。'),
-        h('div', { class: 'form-grid' },
+    if (!p.alive()) return;
+    const reload = (res) => { data = res; draw(); };
+    draw();
+
+    function draw() {
+      box.replaceChildren(clientCard(), authCard(), nodesCard(), deployCard());
+    }
+
+    // 卡片：标题、来源标签、按钮；表单错误显示在卡片底部
+    function card(title, fromPanel, body, actions) {
+      return h('section', { class: 'card' },
+        h('div', { class: 'card-head' },
+          h('h2', null, title),
+          fromPanel === undefined ? null : badge(fromPanel ? '后台设置' : '来自配置文件', fromPanel ? 'accent' : 'outline'),
+          actions ? h('div', { class: 'head-btns' }, actions) : null),
+        h('div', { class: 'card-body' }, body));
+    }
+    function formError() {
+      return h('div', { class: 'form-error', role: 'alert' });
+    }
+    function showErr(el, e) {
+      el.textContent = errText(e);
+      el.classList.add('show');
+    }
+
+    // ---- 客户端：版本、公告、图源 ----
+    function clientCard() {
+      const c = data.client.config;
+      const latest = input({ value: c.latestVersion, placeholder: '例如 3.1.0' });
+      const min = input({ value: c.minVersion, placeholder: '不限制' });
+      const url = input({ value: c.downloadUrl, placeholder: 'https://…', type: 'url' });
+      const sha = input({ value: c.sha256, placeholder: '可以不填', class: 'input mono' });
+      const notes = h('textarea', { class: 'input textarea', rows: 2, placeholder: '有新版本时显示给用户' });
+      notes.value = c.releaseNotes || '';
+      const ann = h('textarea', { class: 'input textarea', rows: 2, placeholder: '每台客户端显示一次，内容变了再显示' });
+      ann.value = c.announcement || '';
+      const images = imageEditor(c.imageSources || []);
+      const err = formError();
+      const save = button('保存并推送', {
+        kind: 'primary', small: true,
+        onclick: () => busy(save, async () => {
+          err.classList.remove('show');
+          try {
+            await api('PUT', '/client-config', {
+              latestVersion: latest.value, minVersion: min.value, downloadUrl: url.value, sha256: sha.value,
+              releaseNotes: notes.value, announcement: ann.value, imageSources: images.value(),
+            });
+            toast('已保存，并推送给 ' + data.online + ' 台在线客户端');
+            reload(await api('GET', '/panel-settings'));
+          } catch (e) {
+            showErr(err, e);
+          }
+        }),
+      });
+      const reset = button('恢复为配置文件', {
+        small: true, disabled: !data.client.fromPanel,
+        onclick: () => busy(reset, async () => {
+          try {
+            await api('DELETE', '/client-config');
+            toast('已恢复为配置文件里的设置，并推送给在线客户端');
+            reload(await api('GET', '/panel-settings'));
+          } catch (e) {
+            fail(e);
+          }
+        }),
+      });
+      return card('客户端', data.client.fromPanel, [
+        h('p', { class: 'muted card-note' }, '保存后马上推给在线的客户端（现在 ' + data.online + ' 台），其余的下次启动时拿到。'),
+        h('div', { class: 'form-grid settings-grid' },
           field('最新版本', latest, '比它旧的客户端提示更新'),
           field('最低版本（强制更新）', min, '比它旧的客户端立即停用账号功能，直到更新'),
-          wide(field('下载地址', url)),
-          wide(field('SHA-256', sha, '客户端下载新版本后核对')),
-          wide(field('更新说明', notes)),
-          wide(field('公告', ann))),
-        err],
-      actions: [reset, h('span', { class: 'grow' }), button('取消', { onclick: () => d.close() }), save],
-      onSubmit: () => busy(save, async () => {
-        err.classList.remove('show');
-        try {
-          await api('PUT', '/client-config', {
-            latestVersion: latest.value, minVersion: min.value, downloadUrl: url.value, sha256: sha.value,
-            releaseNotes: notes.value, announcement: ann.value,
-          });
-          toast('已保存，并推送给在线客户端');
-          d.close();
-        } catch (e) {
-          err.textContent = errText(e);
-          err.classList.add('show');
-        }
-      }),
-    });
+          field('下载地址', url),
+          field('SHA-256', sha, '客户端下载新版本后核对'),
+          field('更新说明', notes),
+          field('公告', ann)),
+        images.el, err], [reset, save]);
+    }
+
+    // 图源编辑：每行地址、类型（直接返回图片 / JSON 接口）、JSON 路径、权重
+    function imageEditor(initial) {
+      const rows = h('div', { class: 'img-rows' });
+      const count = h('span', { class: 'muted' });
+      const empty = h('div', { class: 'faint img-empty' }, '还没有图源：客户端的图片面板会显示“暂时没有可用的图源”。');
+      const recount = () => {
+        const n = rows.children.length;
+        count.textContent = n + ' 个';
+        empty.hidden = n > 0;
+      };
+      function addRow(src) {
+        let isApi = !!src.isApi;
+        const u = input({ value: src.url || '', placeholder: 'https://…', class: 'input mono', 'aria-label': '图源地址' });
+        const path = input({ value: src.jsonPath || '', placeholder: '图片地址在 JSON 里的路径，例如 data.0.url', class: 'input mono', 'aria-label': 'JSON 路径' });
+        const w = input({ value: String(src.weight || 1), type: 'number', min: 1, max: 100, class: 'input', 'aria-label': '权重', title: '权重：越大越常出现' });
+        const kind = segmented([['img', '图片'], ['api', 'JSON']], isApi ? 'api' : 'img', (v, set) => {
+          isApi = v === 'api';
+          set(v);
+          path.disabled = !isApi;
+        }, { label: '类型' });
+        path.disabled = !isApi;
+        const row = h('div', { class: 'img-row' }, u, kind, path, w, iconButton('trash', '删除这个图源', () => { row.remove(); recount(); }, 'danger'));
+        row.value = () => ({ url: u.value.trim(), isApi, jsonPath: isApi ? path.value.trim() : '', weight: Number(w.value) || 0 });
+        rows.append(row);
+        recount();
+      }
+      initial.forEach(addRow);
+      recount();
+      const suggest = button('填入推荐图源', {
+        small: true,
+        onclick: () => {
+          const have = new Set([...rows.children].map((r) => r.value().url));
+          const add = SUGGESTED_IMAGE_SOURCES.filter((x) => !have.has(x.url));
+          add.forEach(addRow);
+          toast(add.length ? '已填入 ' + add.length + ' 个，记得保存' : '推荐的图源都已经在列表里了');
+        },
+      });
+      return {
+        el: h('div', { class: 'img-editor' },
+          h('div', { class: 'img-head' },
+            h('span', { class: 'field-label' }, '图片面板的图源'), count,
+            h('span', { class: 'img-hint muted' }, '“图片”：地址直接返回图片；“JSON”：返回 JSON，按路径取图片地址。权重越大越常出现'),
+            h('div', { class: 'head-btns' }, suggest, button('添加图源', { small: true, icon: 'plus', onclick: () => addRow({ weight: 1 }) }))),
+          rows, empty),
+        value: () => [...rows.children].map((r) => r.value()),
+      };
+    }
+
+    // ---- 账号与登录 ----
+    function authCard() {
+      const a = data.auth.config;
+      const single = h('input', { type: 'checkbox' });
+      single.checked = a.singleSession;
+      const days = input({ type: 'number', min: 1, max: 365, value: String(Math.max(1, Math.round(a.sessionTtlHours / 24))), class: 'input' });
+      const err = formError();
+      const save = button('保存', {
+        kind: 'primary', small: true,
+        onclick: () => busy(save, async () => {
+          err.classList.remove('show');
+          try {
+            reload(await api('PUT', '/panel-settings/auth', { singleSession: single.checked, sessionTtlHours: Math.round(Number(days.value) * 24) }));
+            toast('已保存，之后的登录和续期生效');
+          } catch (e) {
+            showErr(err, e);
+          }
+        }),
+      });
+      const reset = button('恢复为配置文件', {
+        small: true, disabled: !data.auth.fromPanel,
+        onclick: () => busy(reset, async () => {
+          try {
+            reload(await api('DELETE', '/panel-settings/auth'));
+            toast('已恢复为配置文件里的设置');
+          } catch (e) {
+            fail(e);
+          }
+        }),
+      });
+      return card('账号与登录', data.auth.fromPanel, [
+        h('div', { class: 'form-grid settings-grid' },
+          h('div', { class: 'field' }, h('span', { class: 'field-label' }, '单设备模式'),
+            h('label', { class: 'check' }, single, '每个账号同时只能在一台设备上登录'),
+            h('span', { class: 'field-hint' }, '新登录会把这个账号的其他客户端挤下线（管理后台的登录不受影响）')),
+          field('客户端登录有效期（天）', days, '这么久没用才需要重新登录，用着就一直顺延')),
+        err], [reset, save]);
+    }
+
+    // ---- 节点 ----
+    function nodesCard() {
+      const n = data.nodes.config;
+      const pub = input({ value: n.publicUrl, placeholder: '留空按你打开后台的地址生成，例如 https://frp.example.com' });
+      const mirror = input({ value: n.agentMirror, placeholder: '留空直连 GitHub，例如 https://ghproxy.example.com/' });
+      const err = formError();
+      const save = button('保存', {
+        kind: 'primary', small: true,
+        onclick: () => busy(save, async () => {
+          err.classList.remove('show');
+          try {
+            reload(await api('PUT', '/panel-settings/nodes', { publicUrl: pub.value, agentMirror: mirror.value }));
+            toast('已保存');
+          } catch (e) {
+            showErr(err, e);
+          }
+        }),
+      });
+      const reset = button('恢复为配置文件', {
+        small: true, disabled: !data.nodes.fromPanel,
+        onclick: () => busy(reset, async () => {
+          try {
+            reload(await api('DELETE', '/panel-settings/nodes'));
+            toast('已恢复为配置文件里的设置');
+          } catch (e) {
+            fail(e);
+          }
+        }),
+      });
+      return card('节点', data.nodes.fromPanel, [
+        h('div', { class: 'form-grid settings-grid' },
+          field('面板地址（写进安装命令）', pub, '节点访问面板用的地址；后台走内网、节点走公网时要填'),
+          field('默认下载代理', mirror, '添加节点时自动填上；每个节点也可以在自己的设置里改')),
+        err], [reset, save]);
+    }
+
+    // ---- 部署（只读） ----
+    function deployCard() {
+      const d = data.deploy;
+      const row = (k, v) => [h('dt', null, k), h('dd', null, v === '' || v == null || (Array.isArray(v) && !v.length) ? h('span', { class: 'faint' }, '—') : h('code', null, Array.isArray(v) ? v.join(', ') : String(v)))];
+      return card('部署', undefined, [
+        h('p', { class: 'muted card-note' }, '这些只能在 data/config.toml 或 MOEFRP_* 环境变量里改，改完重启面板生效。'),
+        h('dl', { class: 'kv deploy-kv' },
+          row('面板版本', d.version), row('监听地址', d.listen), row('数据库', d.dbPath), row('受信任的反向代理', d.trustedProxies),
+          row('日志级别', d.logLevel), row('agent 来源', d.agentSource), row('面板主密钥', d.secretKey))]);
+    }
   }
 
   // ---------- 审计日志 ----------

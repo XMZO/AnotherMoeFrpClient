@@ -152,6 +152,7 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 		return chain(h, s.adminCSRF, s.requireAdmin, s.limit(s.limUser, byUser))
 	}
 	s.adminLiveRoutes(mux, authed)
+	s.adminPanelRoutes(mux, authed)
 	mux.Handle("GET "+adminAPIPrefix+"/setup", chain(http.HandlerFunc(s.handleAdminSetupState), s.adminCSRF))
 	mux.Handle("POST "+adminAPIPrefix+"/setup", chain(http.HandlerFunc(s.handleAdminSetup), s.adminCSRF, s.limit(s.limReset, byIP)))
 	mux.Handle("POST "+adminAPIPrefix+"/login", chain(http.HandlerFunc(s.handleAdminLogin), s.adminCSRF, s.limit(s.limLogin, byIP)))
@@ -290,8 +291,8 @@ func (s *Server) handleAdminOverview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"stats":         o,
 		"serverVersion": s.version,
-		"client":        s.cfg.Client.ClientConfig(),
-		"singleSession": s.cfg.SingleSession,
+		"client":        s.clientCfg().ClientConfig(),
+		"singleSession": s.auth.SingleSession(),
 	})
 }
 

@@ -127,8 +127,8 @@ var hostRe = regexp.MustCompile(`^[A-Za-z0-9.\-\[\]:]+$`)
 
 // publicURL 是写进安装命令的面板地址：优先用配置的 public_url，否则按这次请求的地址生成。
 func (s *Server) publicURL(r *http.Request) (string, bool) {
-	if s.cfg.PublicURL != "" {
-		return strings.TrimRight(s.cfg.PublicURL, "/"), true
+	if u := s.nodeCfg().PublicURL; u != "" {
+		return strings.TrimRight(u, "/"), true
 	}
 	if !hostRe.MatchString(r.Host) {
 		return "", false
@@ -333,11 +333,11 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	resp := map[string]any{"nodes": list, "agent": s.agentStatus(), "defaultMirror": s.cfg.AgentMirror}
+	resp := map[string]any{"nodes": list, "agent": s.agentStatus(), "defaultMirror": s.nodeCfg().AgentMirror}
 	// 用过的下载代理，添加节点时可以直接选
 	seen := map[string]bool{}
 	mirrors := []string{}
-	for _, m := range append([]string{s.cfg.AgentMirror}, mirrorsOf(list)...) {
+	for _, m := range append([]string{s.nodeCfg().AgentMirror}, mirrorsOf(list)...) {
 		if m != "" && !seen[m] {
 			seen[m] = true
 			mirrors = append(mirrors, m)

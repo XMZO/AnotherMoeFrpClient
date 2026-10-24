@@ -255,6 +255,9 @@ const (
 	revoked    = "这台设备已经退出登录或被踢下线，请在客户端重新登录"
 	resetCred  = "你的节点凭证已被管理员重置，请重新连接（客户端会自动领取新的登录票据）"
 	superseded = "这台设备的账号在别处重新连接了这个节点，这个连接已停用"
+	// staleKey：票据签名对不上。正常情况下是面板轮换了密钥（旧票据和用旧票据登录的连接一起作废），
+	// 客户端收到实时通知或看到这个原因后会领新票据重连；不要说成"不是官方客户端"吓到用户。
+	staleKey = "登录票据已失效（面板更换了节点密钥），客户端会自动领取新的登录票据重新连接"
 )
 
 // identify 校验票据代表的身份（不看过期和是否用过），返回声明和用户。调用方持有锁。
@@ -264,7 +267,14 @@ func (s *Store) identify(metas map[string]string) (nodeticket.Claims, agentproto
 		return nodeticket.Claims{}, agentproto.AccessUser{}, denied
 	}
 	c, err := nodeticket.Verify(s.key, ticket)
-	if err != nil || c.Node != s.nodeID {
+	if errors.Is(err, nodeticket.ErrBadSignature) && c.Node == s.nodeID {
+		// 发给这个节点、但签名对不上：面板换了密钥（声明未经验证，只用来给提示）
+		return nodeticket.Claims{}, agentproto.AccessUser{}, staleKey
+	}
+	if err != nil {
+		return nodeticket.Claims{}, agentproto.AccessUser{}, denied
+	}
+	if c.Node != s.nodeID {
 		return c, agentproto.AccessUser{}, denied
 	}
 	u, ok := s.users[c.User]

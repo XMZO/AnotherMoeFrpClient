@@ -451,3 +451,25 @@ func TestWithFrps(t *testing.T) {
 	waitFor("新 frpc 的代理运行", func() bool { ph, _ := status(c2, "q0"); return ph == "running" && echoOK(20009) })
 	waitFor("原来的 frpc 失效", func() bool { return !echoOK(runningPort) })
 }
+
+// 面板轮换密钥后，旧密钥签的票据给出"密钥已更换"的原因（客户端据此自动领新票据重连），
+// 没带票据的才提示要用 MoeFrp 客户端。
+func TestStaleKeyReason(t *testing.T) {
+	s, err := Load(filepath.Join(t.TempDir(), "access.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Apply(table(true)); err != nil {
+		t.Fatal(err)
+	}
+	oldKey := nodeticket.NodeKey([]byte("another-master-key-0123456789abc"), "node-1")
+	now := time.Now().Unix()
+	stale := nodeticket.Sign(oldKey, nodeticket.Claims{User: "u1", Session: "s", Node: "node-1", Gen: 1, Issued: now, Expires: now + 900,
+		Nonce: nodeticket.NewNonce(), Device: nodeticket.DeviceTag(oldKey, "dev-1")})
+	if r, _ := login(t, s, "alice", stale, ""); !strings.Contains(r, "更换了节点密钥") {
+		t.Fatalf("旧密钥的票据：%q", r)
+	}
+	if r, _ := login(t, s, "alice", "", ""); !strings.Contains(r, "MoeFrp 客户端") {
+		t.Fatalf("没有票据：%q", r)
+	}
+}

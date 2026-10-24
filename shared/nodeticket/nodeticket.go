@@ -73,6 +73,10 @@ func Sign(key []byte, c Claims) string {
 // ErrInvalid 表示票据格式不对或签名不对。
 var ErrInvalid = errors.New("无效的节点票据")
 
+// ErrBadSignature 表示票据格式完整，但签名用的不是现在的密钥：通常是面板轮换了密钥，旧票据作废了。
+// 这时 Verify 仍返回解出的声明，但声明没有经过验证，只能用来给出更准确的提示，不能据此放行。
+var ErrBadSignature = errors.New("节点票据的签名对不上（密钥已更换）")
+
 // Verify 校验签名并解出声明。不检查过期时间和是否用过，由调用方按场景判断。
 func Verify(key []byte, ticket string) (Claims, error) {
 	rest, ok := strings.CutPrefix(ticket, Prefix)
@@ -88,12 +92,15 @@ func Verify(key []byte, ticket string) (Claims, error) {
 		return Claims{}, ErrInvalid
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil || !hmac.Equal(sig, mac(key, payload)) {
+	if err != nil {
 		return Claims{}, ErrInvalid
 	}
 	var c Claims
 	if err := json.Unmarshal(payload, &c); err != nil || c.User == "" || c.Session == "" || c.Node == "" || c.Nonce == "" {
 		return Claims{}, ErrInvalid
+	}
+	if !hmac.Equal(sig, mac(key, payload)) {
+		return c, ErrBadSignature
 	}
 	return c, nil
 }

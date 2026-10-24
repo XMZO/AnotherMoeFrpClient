@@ -86,7 +86,7 @@ func (s *AppService) Licenses() []License {
 		{"Go 标准库及 golang.org/x", "BSD-3-Clause", "https://go.dev", ""},
 		{"Vue", "MIT", "https://github.com/vuejs/core", ""},
 		{"Pinia", "MIT", "https://github.com/vuejs/pinia", ""},
-		{"Nunito、JetBrains Mono 字体", "SIL OFL 1.1", "https://fontsource.org", "界面字体，打包在客户端里"},
+		{"Nunito、JetBrains Mono 字体", "SIL OFL 1.1", "https://fontsource.org", "界面字体"},
 		{"wincred", "MIT", "https://github.com/danieljoos/wincred", "Windows 凭据管理器"},
 		{"golang.design/x/clipboard", "MIT", "https://github.com/golang-design/clipboard", "复制图片"},
 		{"quic-go、kcp-go 等", "MIT", "https://github.com/fatedier/frp/blob/master/go.mod", "frp 的依赖"},

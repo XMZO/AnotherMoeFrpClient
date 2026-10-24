@@ -297,7 +297,8 @@
   }
 
   function fmtBytes(n) {
-    n = Number(n) || 0;
+    // 速率是字节差除以秒数，会带小数；先取整到字节，不足 1 KB 时按整数显示
+    n = Math.round(Number(n) || 0);
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
     let i = 0;
     while (n >= 1024 && i < units.length - 1) {

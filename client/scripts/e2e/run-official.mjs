@@ -4,7 +4,9 @@
 //   代理名带上昵称前缀、流量能通 → 超过数量时代理被拒绝并显示原因 → 节点 frps 重启后客户端带新的登录票据重连 →
 //   管理员踢下线后节点拒绝这台设备的新连接。
 //
-//   node scripts/e2e/run-official.mjs [--keep]
+//   node scripts/e2e/run-official.mjs [--keep] [--shots]
+//
+//   --shots：踢下线之前按几种窗口宽度截图（运行状态面板、代理行、运行栏、受限的代理类型），放在 out-official/
 //
 // 需要先构建端到端测试版客户端：wails3 build PACKAGE_MANAGER=pnpm EXTRA_TAGS=e2e APP_NAME=MoeFrp-e2e
 import { spawn, execFileSync } from 'node:child_process'
@@ -20,6 +22,7 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const client = path.resolve(here, '..', '..')
 const gogogo = path.resolve(client, '..')
 const keep = process.argv.includes('--keep')
+const shots = process.argv.includes('--shots')
 const EXE = path.join(client, 'bin', 'MoeFrp-e2e.exe')
 const OUT = path.join(here, 'out-official')
 const T = path.join(os.tmpdir(), 'moefrp-e2eo-' + new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14))
@@ -181,6 +184,62 @@ async function main() {
     () => check('reconnect_with_fresh_ticket', true),
     () => check('reconnect_with_fresh_ticket', false),
   )
+
+  // 实时通道（docs/client-live.md）：后台看得到这台设备和它的隧道状态
+  let dev
+  await waitUntil('device listed in admin', async () => {
+    dev = (await admin.request('GET', '/clients')).clients.find((c) => c.nickname === NICK)
+    return dev?.tunnel?.state === 'running' && dev.tunnel.officialId === nodeId && dev.tunnel.profileKind === 'cloud'
+  }, 15000, 300).then(
+    () => check('live_device_listed', true, { os: dev.os, version: dev.version, tunnel: dev.tunnel }),
+    () => check('live_device_listed', false, dev),
+  )
+
+  // 推送通知：客户端马上显示
+  await admin.request('POST', '/clients/notice', { target: { all: true }, notice: { title: '端到端推送通知', content: '来自管理后台', level: 'warning' } })
+  await waitUntil('notice shown', async () => p.evaluate(`document.body.innerText.includes('端到端推送通知')`), 5000, 100).then(
+    () => check('live_notice_shown', true),
+    () => check('live_notice_shown', false),
+  )
+
+  // 轮换面板主密钥：客户端马上丢掉预取的旧票据、用新票据重连（以前要等旧票据一张张被节点拒绝）
+  const logsText = () => p.evaluate(`document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('logs').lines.map((l) => l.text).join('\\n')`)
+  await admin.request('POST', '/elevate', { password: admin.password })
+  const t0 = Date.now()
+  await admin.request('POST', '/node-secret/rotate')
+  await waitUntil('reconnected after key rotation', async () => (await logsText()).includes('官方节点的登录票据已更新') &&
+    (await p.attr(tid('run-state'), 'data-state')) === 'running' && (await echoAny('after-rotate')), 20000, 200).then(
+    () => check('live_key_rotation_fast_reconnect', true, { ms: Date.now() - t0 }),
+    () => check('live_key_rotation_fast_reconnect', false, { ms: Date.now() - t0 }),
+  )
+
+  // 远程停止隧道：客户端马上停止，并告诉用户
+  await admin.request('POST', '/clients/tunnel', { target: { all: true }, action: 'stop', reason: '端到端测试' })
+  await waitUntil('remote stop', async () => (await p.attr(tid('run-state'), 'data-state')) === 'idle', 8000, 100).then(
+    () => check('live_remote_stop', true),
+    () => check('live_remote_stop', false),
+  )
+  await p.click(tid('run-toggle'))
+  await p.waitFor('running again', async () => (await p.attr(tid('run-state'), 'data-state')) === 'running', 20000)
+  await waitUntil('echo after restart', async () => echoAny('again'), 15000, 300)
+
+  if (shots) {
+    await p.evaluate(`document.querySelectorAll('.notice-close').forEach((b) => b.click())`)
+    await sleep(500)
+    for (const [w, h] of [[900, 640], [1120, 740], [1600, 900]]) {
+      await p.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false })
+      await sleep(700)
+      await p.shot(path.join(OUT, `layout-${w}.png`))
+    }
+    await p.send('Emulation.setDeviceMetricsOverride', { width: 1120, height: 740, deviceScaleFactor: 1, mobile: false })
+    await p.click(tid('proxy-add'))
+    await sleep(700)
+    await p.shot(path.join(OUT, 'proxy-drawer-limits.png'))
+    await p.evaluate(`document.querySelector('[data-testid=proxy-form-limits]') ? 'ok' : 'missing'`).then((v) => check('proxy_drawer_limits_shown', v === 'ok'))
+    await p.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`)
+    await sleep(400)
+    await p.send('Emulation.clearDeviceMetricsOverride')
+  }
 
   // 管理员踢下线：这台设备的会话被撤销，节点马上拒绝它的新连接（以前踢下线不影响节点上的连接）
   await admin.request('POST', `/users/${NICK}/kick`)

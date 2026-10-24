@@ -76,6 +76,21 @@ watch(kind, () => resetSelection())
 
 const candidateProxies = computed(() => (profile.value?.proxies ?? []).filter((x) => (kind.value === 'p2p' ? isP2PType(x.type) : true)))
 
+// 代理多的时候：列表限高、内部滚动，超过 8 个出现搜索框（选中状态不受筛选影响）
+const SEARCH_FROM = 8
+const proxyQuery = ref('')
+watch(profileId, () => (proxyQuery.value = ''))
+const shownProxies = computed(() => {
+  const q = proxyQuery.value.trim().toLowerCase()
+  return q ? candidateProxies.value.filter((x) => x.name.toLowerCase().includes(q) || x.type.includes(q)) : candidateProxies.value
+})
+const allNodes = computed(() => (profile.value?.nodes ?? []).length > 0 && nodeIds.value.length === (profile.value?.nodes ?? []).length)
+const allProxies = computed(() => candidateProxies.value.length > 0 && proxyIds.value.length === candidateProxies.value.length)
+function selectAll(which: 'nodes' | 'proxies', on: boolean) {
+  if (which === 'nodes') nodeIds.value = on ? (profile.value?.nodes ?? []).map((n) => n.id) : []
+  else proxyIds.value = on ? candidateProxies.value.map((x) => x.id) : []
+}
+
 function toggleIn(which: 'nodes' | 'proxies', id: string, on: boolean) {
   const list = which === 'nodes' ? nodeIds : proxyIds
   list.value = on ? [...list.value.filter((x) => x !== id), id] : list.value.filter((x) => x !== id)
@@ -163,8 +178,11 @@ async function submit() {
     </div>
     <div v-if="profile" class="grid2 eq">
       <div class="fld">
-        <span class="lbl">节点</span>
-        <div class="checks">
+        <span class="lbl pick-lbl">
+          节点<small v-if="kind !== 'p2p'">{{ nodeIds.length }} / {{ (profile.nodes ?? []).length }}</small>
+          <button v-if="kind !== 'p2p' && (profile.nodes ?? []).length > 1" type="button" class="pick-all" @click="selectAll('nodes', !allNodes)">{{ allNodes ? '全不选' : '全选' }}</button>
+        </span>
+        <div class="checks pick-list">
           <template v-if="kind === 'p2p'">
             <Check v-for="n in profile.nodes ?? []" :key="n.id" radio :model-value="p2pNode === n.id" @update:model-value="p2pNode = n.id">
               <span class="ck-t">{{ nodeLabel(n) }}</span>
@@ -179,10 +197,14 @@ async function submit() {
         </div>
       </div>
       <div v-if="kind !== 'template'" class="fld">
-        <span class="lbl">{{ kind === 'p2p' ? 'P2P 目标' : '代理' }}</span>
-        <div class="checks">
+        <span class="lbl pick-lbl">
+          {{ kind === 'p2p' ? 'P2P 目标' : '代理' }}<small>{{ proxyIds.length }} / {{ candidateProxies.length }}</small>
+          <button v-if="candidateProxies.length > 1" type="button" class="pick-all" data-testid="share-create-proxy-all" @click="selectAll('proxies', !allProxies)">{{ allProxies ? '全不选' : '全选' }}</button>
+        </span>
+        <input v-if="candidateProxies.length > SEARCH_FROM" v-model="proxyQuery" class="inp pick-search" placeholder="搜索名称或类型" aria-label="搜索代理" />
+        <div class="checks pick-list">
           <Check
-            v-for="x in candidateProxies"
+            v-for="x in shownProxies"
             :key="x.id"
             :model-value="proxyIds.includes(x.id)"
             :data-testid="`share-create-proxy-${x.name}`"
@@ -191,6 +213,7 @@ async function submit() {
             <span class="ck-t">{{ x.name }}</span>
             <span class="type" :class="isP2PType(x.type) ? 'p2p' : isDomainType(x.type) ? 'web' : ''">{{ x.type }}</span>
           </Check>
+          <span v-if="candidateProxies.length && !shownProxies.length" class="fld-help">没有匹配的代理</span>
           <span v-if="!candidateProxies.length" class="fld-help">{{ kind === 'p2p' ? '这份配置里没有 stcp/xtcp/sudp 代理' : '这份配置还没有代理' }}</span>
         </div>
       </div>
@@ -259,6 +282,31 @@ async function submit() {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+/* 节点、代理很多时列表限高滚动，弹窗不会越拉越长 */
+.pick-lbl {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.pick-lbl small {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+.pick-all {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--pri-text);
+}
+.pick-search {
+  margin-bottom: 6px;
+}
+.pick-list {
+  max-height: 190px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 .ck-t {
   flex: 1;

@@ -35,6 +35,9 @@ func (s *SettingsService) Update(in store.Settings) (store.Settings, error) {
 	if in.NetworkProxy == store.NetProxyCustom && !store.ValidProxyURL(in.ProxyURL) {
 		return before, apperr.New(apperr.ProxyURLInvalid, in.ProxyURL)
 	}
+	if in.FrpProxy != store.FrpProxyApp {
+		in.FrpProxy = store.FrpProxyDirect
+	}
 	if in.AutoStart != before.AutoStart {
 		if s.AutoStart == nil {
 			return before, apperr.New(apperr.AutoStartFailed, "not supported")
@@ -45,7 +48,7 @@ func (s *SettingsService) Update(in store.Settings) (store.Settings, error) {
 	}
 	out, err := s.settings.Update(func(cur *store.Settings) error {
 		cur.Theme, cur.CloseAction, cur.LogLevel, cur.AutoConnect = in.Theme, in.CloseAction, in.LogLevel, in.AutoConnect
-		cur.NetworkProxy, cur.ProxyURL = in.NetworkProxy, in.ProxyURL
+		cur.NetworkProxy, cur.ProxyURL, cur.FrpProxy = in.NetworkProxy, in.ProxyURL, in.FrpProxy
 		cur.AutoStart, cur.ImagePanel, cur.ReleaseOnHide = in.AutoStart, in.ImagePanel, in.ReleaseOnHide
 		return nil
 	})

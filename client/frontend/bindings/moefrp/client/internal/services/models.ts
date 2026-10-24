@@ -62,7 +62,7 @@ export interface LogoutInfo {
 }
 
 /**
- * OfficialNodeView 是给前端看的官方节点：不含地址、端口和登录用的东西，对用户是黑盒。ID 带 official- 前缀，和运行栏里的节点 ID 一致。
+ * OfficialNodeView 是给前端看的官方节点：不含连接地址、端口和登录用的东西（对用户是黑盒），只有访问地址。ID 带 official- 前缀，和运行栏里的节点 ID 一致。
  */
 export interface OfficialNodeView {
     "id": string;
@@ -70,6 +70,13 @@ export interface OfficialNodeView {
     "description"?: string;
     "online": boolean;
     "quota": quota$0.Quota;
+
+    /**
+     * 访问地址：用户复制去访问自己映射在这个节点上的代理（面板设置或自动检测），没有的为空
+     */
+    "domain"?: string;
+    "ipv4"?: string;
+    "ipv6"?: string;
 }
 
 /**

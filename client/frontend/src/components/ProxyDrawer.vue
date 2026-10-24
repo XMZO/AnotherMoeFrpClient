@@ -9,6 +9,7 @@ import { message } from '../ui/feedback'
 import type { Proxy } from '../api'
 import { ProfileService } from '../api'
 import { useProfilesStore } from '../stores/profiles'
+import { useTunnelStore } from '../stores/tunnel'
 import { describeError, fieldErrorsFor, fieldErrorsOf, type AppError } from '../errors'
 import { hasRemotePort, isDomainType, isP2PType, proxyTypeHints, proxyTypes } from '../labels'
 import { saveFeedback } from './saveFeedback'
@@ -18,6 +19,14 @@ const props = defineProps<{ show: boolean; index: number }>()
 const emit = defineEmits<{ 'update:show': [boolean] }>()
 
 const profiles = useProfilesStore()
+const tunnel = useTunnelStore()
+// 选中的是官方节点时，按面板给这个账号的限额提示：不允许的类型不能选，端口范围写在提示里（面板改了实时更新）
+const limitText = computed(() => {
+  const l = tunnel.limits
+  if (!l) return ''
+  const parts = [l.types.length ? `只允许 ${l.types.join(' / ')}` : '', l.ports ? `远程端口 ${l.ports}` : '', l.maxProxies ? `最多同时 ${l.maxProxies} 个代理` : '']
+  return parts.filter(Boolean).join(' · ')
+})
 
 const empty = (): Proxy => ({
   id: '',
@@ -123,13 +132,17 @@ async function save() {
             type="button"
             role="radio"
             class="chip-opt"
-            :class="{ on: form.type === t }"
+            :class="{ on: form.type === t, na: !tunnel.typeAllowed(t) }"
             :aria-checked="form.type === t"
+            :disabled="!tunnel.typeAllowed(t) && form.type !== t"
+            :title="tunnel.typeAllowed(t) ? undefined : `「${tunnel.limits?.node}」不允许你使用 ${t}，换其他节点可以用`"
             @click="form.type = t"
           >
             {{ t }}
           </button>
         </div>
+        <div v-if="limitText" class="type-hint limit" data-testid="proxy-form-limits"><Icon name="shield" size="xs" /><span>「{{ tunnel.limits?.node }}」对你的限制：{{ limitText }}</span></div>
+        <div v-if="!tunnel.typeAllowed(form.type)" class="type-hint bad"><Icon name="alert" size="xs" /><span>「{{ tunnel.limits?.node }}」不允许 {{ form.type }}，用这个节点时这个代理会被拒绝</span></div>
         <Transition name="fade" mode="out-in">
           <div :key="form.type" class="type-hint"><Icon name="info" size="xs" /><span>{{ proxyTypeHints[form.type] }}</span></div>
         </Transition>
@@ -149,7 +162,7 @@ async function save() {
       <Transition name="collapse">
         <div v-if="hasRemotePort(form.type)" class="fld">
           <label for="px-rport">远程端口</label>
-          <input id="px-rport" v-model="remotePort" class="inp mono" :class="{ err: fieldErr.remotePort }" inputmode="numeric" placeholder="留空自动分配" data-testid="proxy-form-remotePort" />
+          <input id="px-rport" v-model="remotePort" class="inp mono" :class="{ err: fieldErr.remotePort }" inputmode="numeric" :placeholder="tunnel.limits?.ports ? `留空自动分配（可用 ${tunnel.limits.ports}）` : '留空自动分配'" data-testid="proxy-form-remotePort" />
           <span class="fld-help" :class="{ err: fieldErr.remotePort }">{{ fieldErr.remotePort ?? '留空表示由节点分配' }}</span>
         </div>
       </Transition>
@@ -249,6 +262,28 @@ async function save() {
 }
 .type-hint .ic {
   margin-top: 2px;
+}
+/* 选中的官方节点不允许的类型：灰掉、带删除线，不能选 */
+.chip-opt.na {
+  border-style: dashed;
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+.chip-opt.na:disabled {
+  cursor: not-allowed;
+}
+.chip-opt.na.on {
+  background: var(--bad-soft);
+  border-color: var(--bad);
+  color: var(--bad-text);
+}
+.type-hint.limit {
+  background: var(--fill);
+  color: var(--text-2);
+}
+.type-hint.bad {
+  background: var(--bad-soft);
+  color: var(--bad-text);
 }
 .toggles {
   display: flex;

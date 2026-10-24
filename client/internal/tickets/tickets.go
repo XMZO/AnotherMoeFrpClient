@@ -89,6 +89,14 @@ func (p *Pool) Clear() {
 	p.tickets = map[string][]api.NodeTicket{}
 }
 
+// Discard 扔掉一个节点的全部票据（节点说票据无效：密钥轮换、凭证重置），下次登录前重新领。
+func (p *Pool) Discard(nodeID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.gen++ // 正在领的那批也不要了（可能是用旧密钥签的）
+	delete(p.tickets, nodeID)
+}
+
 // Retain 只保留这些节点的票据（官方节点列表变化后，去掉不再能用的节点）。
 func (p *Pool) Retain(nodeIDs []string) {
 	keep := map[string]bool{}

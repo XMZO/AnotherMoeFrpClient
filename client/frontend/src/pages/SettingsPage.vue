@@ -125,7 +125,7 @@ async function applyCustom() {
         <section class="card" style="animation-delay: 0.1s">
           <div class="card-h"><span class="tile-ic"><Icon name="globe" size="s" /></span>网络代理</div>
           <p class="set-note">
-            用于登录、云同步、检查更新和图片面板。“跟随系统”读取 Windows“Internet 选项”里的手动代理（不支持自动配置脚本）。frp 连接节点不受影响，节点的代理在节点设置里单独填写。
+            用于登录、云同步、检查更新和图片面板。“跟随系统”读取 Windows“Internet 选项”里的手动代理（不支持自动配置脚本）。
           </p>
           <div class="net-row">
             <Options
@@ -146,6 +146,22 @@ async function applyCustom() {
                 <button type="submit" class="btn pri sm" style="height: 40px" data-testid="settings-proxy-apply">应用</button>
               </form>
             </Transition>
+          </div>
+          <div class="set-row">
+            <div class="set-txt">
+              <b>frp 隧道连接</b>
+              <small>连接节点时走不走上面的代理。节点设置里单独填了代理的，总是用节点自己的。改了之后重新启动隧道生效</small>
+            </div>
+            <Options
+              :model-value="s.frpProxy === 'app' ? 'app' : 'direct'"
+              :options="[
+                { value: 'direct', label: '直连' },
+                { value: 'app', label: '跟随网络代理', testid: 'settings-frp-proxy-app' },
+              ]"
+              label="frp 隧道连接"
+              data-testid="settings-frp-proxy"
+              @pick="(v: string) => set({ frpProxy: v })"
+            />
           </div>
         </section>
 

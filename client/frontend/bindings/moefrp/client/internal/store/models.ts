@@ -37,6 +37,11 @@ export interface Settings {
     "proxyUrl"?: string;
 
     /**
+     * FrpProxy：frp 连接节点时走不走 NetworkProxy：direct（默认）、app。
+     */
+    "frpProxy"?: string;
+
+    /**
      * AutoStart：开机自启（写 HKCU\...\Run，PLAN 6.8，默认关闭）。实际的注册表状态以启动时核对为准。
      */
     "autoStart": boolean;

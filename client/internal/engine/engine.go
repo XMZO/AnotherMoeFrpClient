@@ -94,12 +94,51 @@ type Options struct {
 	Tickets TicketSource
 	// DeviceID 是设备指纹（client/internal/device），官方节点登录时和票据一起带上，节点核对票据里的设备绑定。
 	DeviceID string
+	// ProxyFor 返回连接这个节点地址时 frp 要走的代理（设置里"frp 连接也走网络代理"），空串表示直连。
+	// 节点自己填了代理时不调用。为空时总是直连。
+	ProxyFor func(serverAddr string) string
+}
+
+// applyProxy：节点自己没填代理时，按设置决定 frp 走不走网络代理（Options.ProxyFor）。
+func (e *Engine) applyProxy(prep *Prepared) {
+	if prep.Node.ProxyURL != "" || e.opts.ProxyFor == nil {
+		return
+	}
+	if u := e.opts.ProxyFor(prep.Node.ServerAddr); u != "" {
+		prep.Node.ProxyURL = u
+		prep.Common.Transport.ProxyURL = u
+	}
 }
 
 // TicketSource 提供官方节点的登录票据：Peek 拿一张但不取走，连接建立、登录消息发出后再 Used。
 type TicketSource interface {
 	Peek(ctx context.Context, nodeID string) (string, error)
 	Used(nodeID, ticket string)
+}
+
+// ticketDiscarder 是能扔掉一个节点全部票据的 TicketSource（tickets.Pool）。
+type ticketDiscarder interface{ Discard(nodeID string) }
+
+// staleTicketHints 是节点因为票据本身无效而拒绝登录时的原文片段（agent/internal/access）：
+// 面板轮换了密钥、重置了凭证，预取的票据全都不能用了，扔掉重新领，不用一张张试完。
+var staleTicketHints = []string{"没有有效的登录票据", "节点凭证已被管理员重置", "登录票据已过期"}
+
+// dropStaleTickets 在官方节点拒绝登录时检查原因，票据无效就扔掉这个节点预取的票据。
+func (e *Engine) dropStaleTickets(nodeID, msg string) {
+	id, ok := strings.CutPrefix(nodeID, api.OfficialNodePrefix)
+	if !ok {
+		return
+	}
+	d, ok := e.opts.Tickets.(ticketDiscarder)
+	if !ok {
+		return
+	}
+	for _, h := range staleTicketHints {
+		if strings.Contains(msg, h) {
+			d.Discard(id)
+			return
+		}
+	}
 }
 
 func (o *Options) complete() {
@@ -295,6 +334,9 @@ func (e *Engine) RunningProfile() (profileID, nodeID string, ok bool) {
 // 等旧的 Run 返回之后再启动新的（PLAN 6.3.5，坑 6、9），这段时间状态是 Stopping。
 func (e *Engine) Start(p model.Profile, nodeID string) error {
 	prep, err := Prepare(p, nodeID, e.extraNodes()...)
+	if err == nil {
+		e.applyProxy(prep)
+	}
 	if err != nil {
 		return err
 	}
@@ -423,6 +465,9 @@ func (e *Engine) Update(p model.Profile) (UpdateMode, error) {
 	e.mu.Unlock()
 
 	prep, err := Prepare(p, nodeID, e.extraNodes()...)
+	if err == nil {
+		e.applyProxy(prep)
+	}
 	if err != nil {
 		return UpdateNone, err
 	}
@@ -617,6 +662,7 @@ func (e *Engine) runLoop(r *run, ctx context.Context) {
 // explainLoginFailure 把首次登录失败的 frp 原文转换成错误码（PLAN 6.3.4，坑 8）。
 func (e *Engine) explainLoginFailure(node model.Node, err error) *apierr.Error {
 	msg := e.sink.Conceal(err.Error())
+	e.dropStaleTickets(node.ID, msg)
 	if m := reLoginFailed.FindStringSubmatch(msg); m != nil {
 		msg = m[1]
 	}
@@ -683,6 +729,7 @@ func (e *Engine) onLog(l LogLine) {
 		if m := reConnectErr.FindStringSubmatch(text); m != nil {
 			msg = m[1]
 		}
+		e.dropStaleTickets(r.node.ID, msg)
 		e.status.State = StateReconnecting
 		e.status.Error = &apierr.Error{Code: apperr.NodeUnreachable, Message: msg}
 		e.notifyLocked()

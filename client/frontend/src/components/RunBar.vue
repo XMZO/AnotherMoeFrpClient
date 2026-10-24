@@ -233,7 +233,7 @@ async function ping() {
 .rh-ctrl {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-shrink: 0;
   gap: 8px;
   margin-left: auto;
 }
@@ -241,7 +241,7 @@ async function ping() {
   display: flex;
   align-items: center;
   gap: 9px;
-  width: 260px;
+  width: clamp(180px, 21vw, 280px);
   height: 42px;
   padding: 0 10px 0 6px;
   border-radius: 14px;
@@ -476,9 +476,6 @@ async function ping() {
 }
 /* 窄窗口：测速只留图标，节点框收窄，让标题和按钮尽量排在一行 */
 @media (max-width: 1000px) {
-  .nodesel {
-    width: 186px;
-  }
   .ping-btn {
     width: 42px;
     padding: 0;

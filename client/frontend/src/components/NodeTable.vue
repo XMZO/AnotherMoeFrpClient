@@ -117,7 +117,7 @@ async function use(id: string) {
             <span class="tile-ic lg gold"><Icon name="star" /></span>
             <div class="ncard-t">
               <b :title="n.name">{{ n.name }}</b>
-              <small>MoeFrp 托管节点</small>
+              <small class="mono" :title="[n.domain, n.ipv4, n.ipv6].filter(Boolean).join(' / ') || undefined">{{ n.domain || n.ipv4 || n.ipv6 || 'MoeFrp 托管节点' }}</small>
             </div>
             <span class="bdg" :class="n.online ? 'ok' : ''">{{ n.online ? '在线' : '离线' }}</span>
           </div>

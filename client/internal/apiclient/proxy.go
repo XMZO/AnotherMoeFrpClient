@@ -122,3 +122,25 @@ func bypassed(host, override string) bool {
 	}
 	return false
 }
+
+// ProxyURLFor 返回按这个代理设置连接 host 时要用的代理地址（给 frp 用），不走代理时返回空串。
+// frp 只支持 http 和 socks5 代理，其他的（例如 https://）当作不走代理。
+func ProxyURLFor(mode, custom, host string) string {
+	fn := proxyFunc(mode, custom)
+	if fn == nil {
+		return ""
+	}
+	req, err := http.NewRequest(http.MethodGet, "http://"+host+"/", nil)
+	if err != nil {
+		return ""
+	}
+	u, err := fn(req)
+	if err != nil || u == nil {
+		return ""
+	}
+	switch u.Scheme {
+	case "http", "socks5":
+		return u.String()
+	}
+	return ""
+}

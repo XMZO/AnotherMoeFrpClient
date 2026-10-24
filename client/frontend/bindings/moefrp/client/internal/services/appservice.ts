@@ -12,6 +12,10 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as api$0 from "../../../shared/api/models.js";
+
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
 /**
@@ -51,6 +55,13 @@ export function Ready(): $CancellablePromise<number> {
 
 export function Startup(): $CancellablePromise<$models.StartupInfo> {
     return $Call.ByID(913235146);
+}
+
+/**
+ * TakeNotices 取走管理员推送的、还没显示的通知（前端收到 app:notice 或启动时调用）。
+ */
+export function TakeNotices(): $CancellablePromise<api$0.LiveNoticeBody[] | null> {
+    return $Call.ByID(2634093327);
 }
 
 /**

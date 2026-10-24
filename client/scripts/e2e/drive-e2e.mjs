@@ -241,8 +241,10 @@ async function mainScenario() {
   const echoed = await echoOnce(R_ECHO, 'hello-from-e2e')
   check('realForwarding', echoed === 'hello-from-e2e', { port: R_ECHO, echoed })
   const runId = await attr(tid('run-state'), 'data-runid')
+  // 运行中：状态列显示"运行中"，映射列的远程一侧换成节点实际分配的地址
   const proxyStatusText = await text(tid('proxy-status-echo'))
-  check('proxyStatusColumn', proxyStatusText.includes('运行中') && proxyStatusText.includes(String(R_ECHO)), { proxyStatusText })
+  const proxyMapText = await text(tid('proxy-map-echo'))
+  check('proxyStatusColumn', proxyStatusText.includes('运行中') && proxyMapText.includes(':' + R_ECHO), { proxyStatusText, proxyMapText })
   await shot('01-running.png')
 
   // 日志面板：纯文本渲染

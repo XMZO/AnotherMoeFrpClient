@@ -28,6 +28,45 @@ export interface CreateShareRequest {
 }
 
 /**
+ * LiveNoticeBody 是一条推送通知。
+ */
+export interface LiveNoticeBody {
+    "id": string;
+
+    /**
+     * info / success / warning / error
+     */
+    "level": string;
+
+    /**
+     * toast / dialog
+     */
+    "display": string;
+    "title": string;
+    "content"?: string;
+
+    /**
+     * 按钮文字，和 LinkURL 一起用
+     */
+    "linkText"?: string;
+
+    /**
+     * 只允许 http(s)
+     */
+    "linkUrl"?: string;
+
+    /**
+     * toast 不自动消失
+     */
+    "sticky"?: boolean;
+
+    /**
+     * 发送的管理员昵称
+     */
+    "from"?: string;
+}
+
+/**
  * PreviewNode 是预览里的节点：只有备注和协议，不含地址和 token。
  */
 export interface PreviewNode {

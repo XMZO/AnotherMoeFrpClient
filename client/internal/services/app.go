@@ -45,6 +45,7 @@ type AppService struct {
 	QuitApp     func()
 	OnReady     func(sinceStart time.Duration)
 	Updater     *Updater
+	Notices     *Notices // 管理员推送的通知
 }
 
 // CheckUpdate 立即检查更新（"关于"页的按钮）。

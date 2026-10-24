@@ -96,6 +96,8 @@ func BuildCommon(n model.Node) (*v1.ClientCommonConfig, error) {
 	if err := common.Complete(); err != nil { // 同时把 LoginFailExit 补成 true
 		return nil, err
 	}
+	// Complete 在没填代理时会读 http_proxy 环境变量；代理只由节点设置和"网络代理"设置决定，不悄悄走环境变量
+	common.Transport.ProxyURL = n.ProxyURL
 	return common, nil
 }
 

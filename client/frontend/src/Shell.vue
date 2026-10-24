@@ -12,12 +12,13 @@ import ImagePanel from './components/ImagePanel.vue'
 import TitleBar from './components/TitleBar.vue'
 import Icon from './ui/Icon.vue'
 import type { IconName } from './ui/icons'
-import { notify } from './ui/feedback'
+import { dialog, notify } from './ui/feedback'
 import { AppService, Events, type UpdateInfo } from './api'
 import { useSettingsStore } from './stores/settings'
 import { useTunnelStore } from './stores/tunnel'
 import { useLogsStore } from './stores/logs'
 import { useAccountStore } from './stores/account'
+import { useEventsStore } from './stores/events'
 import { describeError } from './errors'
 import { message } from './ui/feedback'
 import mascot from './assets/mascot.png'
@@ -35,6 +36,7 @@ const tunnel = useTunnelStore()
 const logs = useLogsStore()
 const account = useAccountStore()
 const settingsStore = useSettingsStore()
+const runEvents = useEventsStore()
 
 // 侧栏的主题按钮：跟随系统 → 浅色 → 深色 → 跟随系统
 const themes = { system: { label: '跟随系统', icon: 'monitor', next: 'light' }, light: { label: '浅色', icon: 'sun', next: 'dark' }, dark: { label: '深色', icon: 'moon', next: 'system' } } as const
@@ -68,10 +70,45 @@ function notifyAnnouncement(text: string) {
   notify({ title: '公告', content: text })
 }
 
+// 管理员推送的通知（docs/client-live.md）：右上角通知或弹窗，可以带一个打开链接的按钮
+type AdminNotice = { id: string; level: string; display: string; title: string; content?: string; linkText?: string; linkUrl?: string; sticky?: boolean; from?: string }
+function showAdminNotice(n: AdminNotice) {
+  const type = (['info', 'success', 'warning', 'error'].includes(n.level) ? n.level : 'info') as 'info' | 'success' | 'warning' | 'error'
+  const content = [n.content, n.from ? `—— 管理员 ${n.from}` : ''].filter(Boolean).join('\n')
+  const open = () => n.linkUrl && AppService.OpenURL(n.linkUrl).catch(() => {})
+  if (n.display === 'dialog') {
+    dialog[type]({
+      title: n.title,
+      content,
+      positiveText: n.linkUrl ? n.linkText || '打开链接' : '知道了',
+      negativeText: n.linkUrl ? '知道了' : undefined,
+      onPositiveClick: () => {
+        open()
+      },
+    })
+    return
+  }
+  const h = notify({
+    type,
+    title: n.title,
+    content,
+    duration: n.sticky ? 0 : 12000,
+    actions: n.linkUrl ? [{ label: n.linkText || '打开链接', primary: true, onClick: () => (open(), h.destroy()) }] : [],
+  })
+}
+async function takeNotices() {
+  try {
+    for (const n of (await AppService.TakeNotices()) as AdminNotice[]) showAdminNotice(n)
+  } catch {}
+}
+
 onMounted(async () => {
+  runEvents.init()
   await Promise.all([tunnel.init(), logs.init(), account.init(), settingsStore.load()]).catch(() => {})
   Events.On('update:available', (ev: any) => notifyUpdate(ev.data as UpdateInfo))
   Events.On('app:announcement', (ev: any) => notifyAnnouncement(ev.data as string))
+  Events.On('app:notice', () => takeNotices())
+  takeNotices()
   AppService.UpdateInfo()
     .then((u) => {
       notifyUpdate(u)

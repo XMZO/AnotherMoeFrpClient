@@ -27,6 +27,10 @@ const (
 	NetProxySystem = "system"
 	NetProxyNone   = "none"
 	NetProxyCustom = "custom" // 使用 ProxyURL（http://、https://、socks5://）
+
+	// frp 连接节点时走不走上面的网络代理。节点自己填了代理（节点设置里的 proxyURL）时总是用节点的。
+	FrpProxyDirect = "direct" // 直连，不走任何代理（默认；也不读 http_proxy 环境变量）
+	FrpProxyApp    = "app"    // 跟随网络代理（系统 / 自定义；系统代理只支持 http 和 socks）
 )
 
 var (
@@ -55,6 +59,8 @@ type Settings struct {
 	NetworkProxy string `json:"networkProxy"`
 	// ProxyURL：NetworkProxy 为 custom 时使用的代理，例如 http://127.0.0.1:7890、socks5://127.0.0.1:1080。
 	ProxyURL string `json:"proxyUrl,omitempty"`
+	// FrpProxy：frp 连接节点时走不走 NetworkProxy：direct（默认）、app。
+	FrpProxy string `json:"frpProxy,omitempty"`
 	// AutoStart：开机自启（写 HKCU\...\Run，PLAN 6.8，默认关闭）。实际的注册表状态以启动时核对为准。
 	AutoStart bool `json:"autoStart"`
 	// ImagePanel：是否显示图片面板（PLAN 6.9、13 节 #4，默认开启）。关闭后不发任何图片请求。

@@ -3,6 +3,7 @@ module moefrp/client
 go 1.26.1
 
 require (
+	github.com/coder/websocket v1.8.14
 	github.com/danieljoos/wincred v1.2.3
 	github.com/fatedier/frp v0.71.1
 	github.com/fatedier/golib v0.8.2
@@ -19,7 +20,6 @@ require (
 	github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
-	github.com/coder/websocket v1.8.14 // indirect
 	github.com/coreos/go-oidc/v3 v3.18.0 // indirect
 	github.com/ebitengine/purego v0.10.1 // indirect
 	github.com/fatedier/yamux v0.2.0 // indirect

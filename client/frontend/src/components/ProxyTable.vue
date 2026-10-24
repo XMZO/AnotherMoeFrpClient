@@ -8,6 +8,7 @@ import { dialog, message } from '../ui/feedback'
 import type { Proxy } from '../api'
 import { useProfilesStore } from '../stores/profiles'
 import { useTunnelStore } from '../stores/tunnel'
+import { Clipboard } from '@wailsio/runtime'
 import { codeText, describeError } from '../errors'
 import { isDomainType, isP2PType, phaseLabels } from '../labels'
 import { proxyRemote } from '../util'
@@ -64,10 +65,15 @@ interface StatusView {
 }
 function status(p: Proxy): StatusView {
   if (!p.enabled) return { tone: '', label: '未启用', text: '', title: '' }
+  // 选中的官方节点不允许这种类型（用户组或单个用户的限制，面板改了实时更新）
+  if (!tunnel.typeAllowed(p.type)) {
+    const node = tunnel.limits?.node
+    return { tone: 'bad', label: '节点不允许', text: '', title: `「${node}」不允许你使用 ${p.type}，换其他节点可以用` }
+  }
   if (!isRunningHere.value) return { tone: '', label: '未运行', text: '', title: '' }
   const st = tunnel.proxyById[p.id]
   const phase = st?.phase ?? ''
-  if (phase === 'running') return { tone: 'ok', label: '运行中', text: st?.remoteAddr ?? (isP2PType(p.type) ? '等访问方连接' : ''), title: '', phase }
+  if (phase === 'running') return { tone: 'ok', label: '运行中', text: isP2PType(p.type) ? '等访问方连接' : '', title: '', phase }
   if (st?.err) {
     // 没有专门说明的错误（例如官方节点的限额拒绝）直接显示原因，不只显示"代理启动失败"
     const text = (st.code as string) === 'proxy_start_error' ? st.err : codeText(st.code, null, st.err)
@@ -76,6 +82,38 @@ function status(p: Proxy): StatusView {
   return { tone: 'info', label: phaseLabels[phase] ?? phase, text: '', title: '', phase }
 }
 const typeTone = (t: string) => (isP2PType(t) ? 'p2p' : isDomainType(t) ? 'web' : '')
+
+// 远程一侧：运行中显示节点实际分配的地址（例如 :10405），否则显示配置的（没填端口时是"自动"）
+function remote(p: Proxy): string {
+  const st = isRunningHere.value ? tunnel.proxyById[p.id] : undefined
+  if (st?.phase === 'running' && st.remoteAddr) return st.remoteAddr
+  if ((p.type === 'tcp' || p.type === 'udp') && !p.remotePort) return '自动分配'
+  return proxyRemote(p)
+}
+
+// 完整的访问地址（tcp / udp 运行中）：节点的访问地址 + 远程端口，复制给别人用
+const accessHost = computed(() => {
+  const id = tunnel.status.nodeId ?? ''
+  const o = tunnel.official.find((n) => n.id === id)
+  if (o) return o.domain || o.ipv4 || (o.ipv6 ? `[${o.ipv6}]` : '')
+  const n = profiles.current?.nodes?.find((x) => x.id === id)
+  if (!n) return ''
+  return n.serverAddr.includes(':') && !n.serverAddr.startsWith('[') ? `[${n.serverAddr}]` : n.serverAddr
+})
+function accessAddr(p: Proxy): string {
+  if (!isRunningHere.value || (p.type !== 'tcp' && p.type !== 'udp')) return ''
+  const st = tunnel.proxyById[p.id]
+  if (st?.phase !== 'running' || !st.remoteAddr?.startsWith(':') || !accessHost.value) return ''
+  return accessHost.value + st.remoteAddr
+}
+async function copyAddr(text: string) {
+  try {
+    await Clipboard.SetText(text)
+    message.success(`已复制 ${text}`)
+  } catch {
+    message.error('复制失败')
+  }
+}
 </script>
 
 <template>
@@ -96,10 +134,21 @@ const typeTone = (t: string) => (isP2PType(t) ? 'p2p' : isDomainType(t) ? 'web' 
           <span class="type" :class="typeTone(row.type)">{{ row.type }}</span>
           <span v-if="row.useEncryption" class="enc" title="已开启加密"><Icon name="lock" size="xs" /></span>
         </div>
-        <div class="row-map mono" :title="`${row.localIP || '127.0.0.1'}:${row.localPort} → ${proxyRemote(row)}`">
-          <span>{{ row.localIP || '127.0.0.1' }}:{{ row.localPort }}</span>
+        <div class="row-map mono" :title="`${row.localIP || '127.0.0.1'}:${row.localPort} → ${remote(row)}`" :data-testid="`proxy-map-${row.name}`">
+          <span class="loc">{{ row.localIP || '127.0.0.1' }}:{{ row.localPort }}</span>
           <Icon name="arrow" size="xs" />
-          <span class="rem">{{ proxyRemote(row) }}</span>
+          <span class="rem" :class="{ auto: remote(row) === '自动分配' }">{{ remote(row) }}</span>
+          <button
+            v-if="accessAddr(row)"
+            type="button"
+            class="icon-btn sm copy-addr"
+            :title="`复制访问地址 ${accessAddr(row)}`"
+            :aria-label="`复制 ${row.name} 的访问地址`"
+            :data-testid="`proxy-copy-${row.name}`"
+            @click="copyAddr(accessAddr(row))"
+          >
+            <Icon name="copy" size="xs" />
+          </button>
         </div>
         <div
           class="row-st"
@@ -138,13 +187,15 @@ const typeTone = (t: string) => (isP2PType(t) ? 'p2p' : isDomainType(t) ? 'web' 
   flex-direction: column;
   gap: 8px;
 }
+/* 列宽按内容：开关、名称、映射（不截断）、状态（占剩下的，错误原因放不下时省略、悬停看全文）、操作。
+   窗口变窄时只收紧间距、名称可以省略，不换行、不折叠成多行。 */
 .row {
   display: grid;
-  grid-template-columns: 44px minmax(110px, 0.9fr) minmax(170px, 1.3fr) minmax(170px, 1.5fr) 76px;
+  grid-template-columns: auto minmax(64px, max-content) minmax(0, max-content) minmax(84px, 1fr) auto;
   grid-template-areas: 'sw name map st act';
   align-items: center;
-  gap: 6px 14px;
-  padding: 11px 12px 11px 14px;
+  gap: 0 18px;
+  padding: 10px 10px 10px 14px;
   border-radius: 17px;
   background: var(--surface);
   border: 1.5px solid var(--line-2);
@@ -196,10 +247,25 @@ const typeTone = (t: string) => (isP2PType(t) ? 'p2p' : isDomainType(t) ? 'web' 
   color: var(--text-2);
 }
 .row-map span {
+  white-space: nowrap;
+}
+.row-map .loc {
+  flex-shrink: 0;
+}
+/* 域名很多时只有这一段会省略 */
+.row-map .rem {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+.row-map .rem.auto {
+  color: var(--text-3);
+  font-weight: 600;
+  font-family: var(--font);
+}
+.copy-addr {
+  flex-shrink: 0;
+  margin-left: -3px;
 }
 .row-map .rem {
   color: var(--text);
@@ -224,13 +290,11 @@ const typeTone = (t: string) => (isP2PType(t) ? 'p2p' : isDomainType(t) ? 'web' 
   white-space: nowrap;
   color: var(--text-2);
 }
+.row-st .bdg {
+  flex-shrink: 0;
+}
 .row-st .msg.bad {
   color: var(--bad-text);
-  white-space: normal;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  line-height: 1.4;
 }
 .row-act {
   grid-area: act;
@@ -240,15 +304,24 @@ const typeTone = (t: string) => (isP2PType(t) ? 'p2p' : isDomainType(t) ? 'web' 
 }
 @container (max-width: 720px) {
   .row {
-    grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1.15fr) 72px;
-    grid-template-areas: 'sw name st act' 'sw map map act';
-    row-gap: 3px;
+    gap: 0 12px;
+    padding-left: 12px;
   }
 }
-@container (max-width: 470px) {
+@container (max-width: 560px) {
   .row {
-    grid-template-columns: 44px minmax(0, 1fr) 72px;
-    grid-template-areas: 'sw name act' 'sw map act' 'sw st act';
+    gap: 0 8px;
+  }
+  .row {
+    padding: 9px 8px 9px 10px;
+  }
+  .row-map {
+    gap: 5px;
+    font-size: 12px;
+  }
+  /* 状态只留标签，原因悬停看 */
+  .row-st .msg {
+    display: none;
   }
 }
 .row-enter-from {

@@ -21,6 +21,18 @@ export const useTunnelStore = defineStore('tunnel', () => {
   const runningProfileId = computed(() =>
     status.value.state === 'idle' || status.value.state === 'failed' ? '' : (status.value.profileId ?? ''),
   )
+  /** 选中的节点是官方节点时，它对这个账号的限制（用户组和单个用户的限额，面板改了会实时推过来）。 */
+  const selectedOfficial = computed(() => official.value.find((x) => x.id === selectedNodeId.value) ?? null)
+  const limits = computed(() => {
+    const n = selectedOfficial.value
+    if (!n) return null
+    return { node: n.name, types: n.quota?.types ?? [], ports: n.quota?.ports ?? '', maxProxies: n.quota?.maxProxies ?? 0 }
+  })
+  /** 选中的节点允许这种代理类型吗（不是官方节点时总是允许）。 */
+  function typeAllowed(t: string) {
+    const l = limits.value
+    return !l || !l.types.length || l.types.includes(t)
+  }
   const proxyById = computed(() => {
     const m: Record<string, ProxyStatus> = {}
     for (const p of proxies.value) m[p.id] = p
@@ -79,5 +91,8 @@ export const useTunnelStore = defineStore('tunnel', () => {
     }
   }
 
-  return { status, proxies, proxyById, pings, pinging, official, acting, active, busy, runningProfileId, selectedNodeId, init, start, stop, chooseNode, ping }
+  return {
+    status, proxies, proxyById, pings, pinging, official, acting, active, busy, runningProfileId, selectedNodeId, selectedOfficial, limits, typeAllowed,
+    init, start, stop, chooseNode, ping,
+  }
 })

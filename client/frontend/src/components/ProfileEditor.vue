@@ -5,6 +5,7 @@ import NodeTable from './NodeTable.vue'
 import VisitorTable from './VisitorTable.vue'
 import RunBar from './RunBar.vue'
 import LogPanel from './LogPanel.vue'
+import StatusPanel from './StatusPanel.vue'
 import Icon from '../ui/Icon.vue'
 import Tabs, { type TabOption } from '../ui/Tabs.vue'
 import type { IconName } from '../ui/icons'
@@ -12,7 +13,7 @@ import { useProfilesStore } from '../stores/profiles'
 import { shareKindLabels } from '../labels'
 import mascot from '../assets/mascot.png'
 
-// 隧道页右侧：顶部是配置名和运行控制，中间是代理 / 节点 / 访客，底部是日志。
+// 隧道页右侧：顶部是配置名和运行控制，中间是代理 / 节点 / 访客，底部是日志（本地配置）或运行状态（云端配置、订阅：配置对用户是黑盒，看不懂的原始日志换成状态和事件）。
 const emit = defineEmits<{ 'toggle-list': [] }>()
 const profiles = useProfilesStore()
 const summary = computed(() => profiles.currentSummary)
@@ -65,6 +66,7 @@ const tabHint = computed(() => {
   if (tab.value === 'visitors') return '访问别人提供的 stcp / xtcp / sudp 代理，在本机监听一个端口'
   return '运行时，所有启用的代理都通过上方选中的节点连接'
 })
+const blackBox = computed(() => summary.value?.origin === 'cloud' || isSub.value)
 const inactive = computed(() => isSub.value && (summary.value?.revoked || summary.value?.expired))
 
 const proxyTable = ref<InstanceType<typeof ProxyTable> | null>(null)
@@ -119,7 +121,8 @@ const add = computed(() => {
         <p>点左上角的 + 新建配置，先添加节点，再添加代理，然后点“启动”。</p>
       </div>
     </div>
-    <LogPanel />
+    <StatusPanel v-if="blackBox" />
+    <LogPanel v-else />
   </section>
 </template>
 
@@ -131,9 +134,9 @@ const add = computed(() => {
   min-height: 0;
   transition: background-color 0.35s;
 }
+/* 标题和运行控制一行放下：窗口变窄时标题省略、节点框变窄，不换行 */
 .runhead {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 12px 14px;
   padding: 16px 20px 0;
@@ -142,7 +145,7 @@ const add = computed(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1 1 200px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 .rh-title h1 {
@@ -180,7 +183,6 @@ const add = computed(() => {
 }
 .tabsrow {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 10px 14px;
   padding: 14px 20px 12px;
@@ -189,12 +191,19 @@ const add = computed(() => {
   animation: fade 0.3s;
 }
 .tabs-hint {
-  flex: 1 1 200px;
+  flex: 1 1 0;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
   color: var(--text-3);
   font-weight: 600;
   line-height: 1.5;
+}
+.tabsrow .add-item {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 .editor > .content {
   flex: 1;

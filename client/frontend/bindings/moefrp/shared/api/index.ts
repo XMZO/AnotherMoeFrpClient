@@ -3,6 +3,7 @@
 
 export type {
     CreateShareRequest,
+    LiveNoticeBody,
     PreviewNode,
     PreviewProxy,
     PreviewTarget,

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,6 +26,7 @@ import (
 	"moefrp/client/internal/credstore"
 	"moefrp/client/internal/device"
 	"moefrp/client/internal/engine"
+	"moefrp/client/internal/live"
 	"moefrp/client/internal/services"
 	"moefrp/client/internal/store"
 	"moefrp/client/internal/testhooks"
@@ -184,7 +187,17 @@ func main() {
 
 	// 官方节点每次登录都用一张新的登录票据，向面板领取，预取几张备用（docs/node-agent.md 第 12 节）
 	nodeTickets := tickets.New(api.NodeTickets)
-	eng := engine.New(sink, engine.Options{Tickets: nodeTickets, DeviceID: device.ID(settings.Get().InstallID)})
+	eng := engine.New(sink, engine.Options{
+		Tickets: nodeTickets, DeviceID: device.ID(settings.Get().InstallID),
+		// 设置里选了"frp 连接也走网络代理"时，节点没单独填代理的都走它；否则直连
+		ProxyFor: func(addr string) string {
+			s := settings.Get()
+			if s.FrpProxy != store.FrpProxyApp {
+				return ""
+			}
+			return apiclient.ProxyURLFor(s.NetworkProxy, s.ProxyURL, addr)
+		},
+	})
 	tunnelSvc, tunnelCtl := services.NewTunnelService(eng, sink, profiles, settings)
 	tunnelCtl.SetTicketPool(nodeTickets)
 	tunnelCtl.SetOfficial(profiles.Sync().Official) // 上次缓存的官方节点，离线也能用
@@ -199,12 +212,45 @@ func main() {
 	profileSvc := services.NewProfileService(profiles, settings, eng, syncMgr)
 	authSvc := services.NewAuthService(syncMgr, profiles, eng)
 	settingsSvc := services.NewSettingsService(settings, sink)
-	settingsSvc.OnNetworkProxy = api.SetProxy
 	appSvc := services.NewAppService(version, paths, warnings, started)
 	updater := services.NewUpdater(api, version)
 	appSvc.Updater = updater
 	imageSvc, imageCtl := services.NewImageService(paths.ImagesDir(), settings, func() *http.Client { return api.NewHTTPClient(30 * time.Second) })
 	updater.OnConfig(func(cfg apiConfig) { imageCtl.SetSources(cfg.ImageSources) })
+
+	// 实时通道（docs/client-live.md）：面板的变化秒推过来，管理员的通知、远程控制也走它
+	notices := &services.Notices{}
+	appSvc.Notices = notices
+	liveCh := live.New(api, apiLiveHello{Version: version, OS: osName(), Hostname: hostname}, live.Handlers{
+		Sync:     syncMgr.SyncNow,
+		Official: syncMgr.SyncNow,
+		Tickets:  func(string) { tunnelCtl.TicketsInvalid() },
+		Config: func(apiConfig) {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), apiclient.DefaultTimeout)
+				defer cancel()
+				_, _ = updater.Check(ctx) // 新版本、公告、图源
+				syncMgr.SyncNow()         // 最低版本提高了的话，这次请求会被拒绝，账号功能随之停用
+			}()
+		},
+		Notice: notices.Push,
+		Tunnel: func(cmd apiLiveTunnel) {
+			if msg := tunnelCtl.Remote(cmd); msg != "" {
+				notices.Push(apiLiveNotice{ID: "tunnel-" + strconv.FormatInt(time.Now().UnixNano(), 36), Level: "warning", Display: "toast", Title: msg, From: cmd.From})
+			}
+		},
+		Ended: func(b apiLiveEnded) {
+			syncMgr.CheckError(&apierr.Error{Code: apierr.Code(b.Code), Message: b.Message})
+		},
+		Online: func(on bool) { diag("live: connected=%v", on) },
+		Log:    func(format string, args ...any) { diag(format, args...) },
+	})
+	tunnelCtl.OnStatus(func(st engine.Status) { liveCh.SetStatus(tunnelCtl.LiveStatus(st)) })
+	liveCh.SetStatus(tunnelCtl.LiveStatus(eng.Status()))
+	settingsSvc.OnNetworkProxy = func(mode, custom string) {
+		api.SetProxy(mode, custom)
+		liveCh.Reconnect()
+	}
 
 	// 开机自启（PLAN 6.8）：正式构建的值名是 MoeFrp；端到端测试构建按数据目录区分，不碰正式的那一项
 	if exe, err := os.Executable(); err == nil {
@@ -402,6 +448,8 @@ func main() {
 		// 检查更新、公告、图源（PLAN 6.12）：启动时一次，之后每 6 小时
 		updater.SetEmitter(emit)
 		go updater.Run(updaterStop)
+		notices.SetEmitter(emit)
+		go liveCh.Run(updaterStop)
 		// 启动后自动连接上次的配置（PLAN 6.8，默认关闭）
 		if settings.Get().AutoConnect {
 			go func() {
@@ -501,6 +549,14 @@ func trayStateLabel(s engine.State) string {
 
 // apiConfig 是服务端下发的客户端配置。
 type apiConfig = api.ClientConfigResponse
+
+// 实时通道的消息体（main 里的 api 变量是 API 客户端，遮住了 api 包）。
+type (
+	apiLiveHello  = api.LiveHelloBody
+	apiLiveTunnel = api.LiveTunnelCommand
+	apiLiveNotice = api.LiveNoticeBody
+	apiLiveEnded  = api.LiveEndedBody
+)
 
 func fatalBox(msg string) {
 	log.Print(msg)

@@ -23,8 +23,10 @@ const (
 	// Subprotocol 是 WebSocket 子协议名，协议不兼容时改版本号。
 	Subprotocol = "moefrp-agent.v1"
 
-	// ReportInterval 是 agent 上报状态的间隔；面板超过 OfflineAfter 没收到任何消息就认为离线。
-	ReportInterval = 10
+	// ReportInterval 是 agent 上报状态的间隔（秒），面板上的流量和资源按这个频率变化；
+	// PingInterval 是 agent 检查连接是否还通的间隔；面板超过 OfflineAfter 没收到任何消息就认为离线。
+	ReportInterval = 3
+	PingInterval   = 15
 	OfflineAfter   = 45
 )
 

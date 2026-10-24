@@ -167,6 +167,7 @@ func session(ctx context.Context, o Options) error {
 	}
 	tick := time.NewTicker(agentproto.ReportInterval * time.Second)
 	defer tick.Stop()
+	lastPing := time.Now()
 	for {
 		select {
 		case err := <-readErr:
@@ -178,6 +179,10 @@ func session(ctx context.Context, o Options) error {
 			if err := report(); err != nil {
 				return err
 			}
+			if time.Since(lastPing) < agentproto.PingInterval*time.Second {
+				continue
+			}
+			lastPing = time.Now()
 			// 面板没响应（例如中间的反代断了但 TCP 没断）时尽快发现
 			pctx, pcancel := context.WithTimeout(ctx, 15*time.Second)
 			err := ws.Ping(pctx)

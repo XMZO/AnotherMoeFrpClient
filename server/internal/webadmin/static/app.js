@@ -14,7 +14,7 @@
     for (const [k, v] of Object.entries(attrs || {})) {
       if (v == null || v === false) continue;
       if (k === 'class') el.className = v;
-      else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+      else if (k.startsWith('on')) listen(el, k.slice(2), v);
       else if (k === 'value') el.value = v;
       else el.setAttribute(k, v === true ? '' : String(v));
     }
@@ -27,6 +27,61 @@
       if (c != null && c !== false) el.append(c);
     }
     return el;
+  }
+
+  // listen 绑定事件。处理函数放在 el._on 上，morph 合并新内容时换成新的函数，不用重建元素。
+  function listen(el, type, fn) {
+    el._on = el._on || {};
+    el._on[type] = fn;
+    wire(el, type);
+  }
+
+  function wire(el, type) {
+    el._wired = el._wired || new Set();
+    if (el._wired.has(type)) return;
+    el._wired.add(type);
+    el.addEventListener(type, (e) => {
+      const fn = el._on && el._on[type];
+      if (fn) fn(e);
+    });
+  }
+
+  // morph 把新画出来的 to 合并进页面上的 from：只改变化的属性和文字，元素本身保留。
+  // 自动刷新用它，滚动位置、焦点、正在执行的按钮都不受影响，进度条宽度的变化还能有过渡动画。
+  function morph(from, to) {
+    if (from.nodeType !== to.nodeType || from.nodeName !== to.nodeName) {
+      from.replaceWith(to);
+      return;
+    }
+    if (from.nodeType === Node.TEXT_NODE) {
+      if (from.data !== to.data) from.data = to.data;
+      return;
+    }
+    if (from.nodeType !== Node.ELEMENT_NODE) {
+      from.replaceWith(to);
+      return;
+    }
+    // 正在执行的按钮（busy）保持原样，结束后它自己会恢复
+    if (from.classList.contains('loading')) return;
+    for (const a of Array.from(from.attributes)) {
+      if (!to.hasAttribute(a.name)) from.removeAttribute(a.name);
+    }
+    for (const a of Array.from(to.attributes)) {
+      if (from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value);
+    }
+    from._on = to._on;
+    for (const t of Object.keys(to._on || {})) wire(from, t);
+    morphChildren(from, Array.from(to.childNodes));
+  }
+
+  // morphChildren 用 next 更新 parent 的子节点，按位置一一合并
+  function morphChildren(parent, next) {
+    const cur = Array.from(parent.childNodes);
+    next.forEach((n, i) => {
+      if (i < cur.length) morph(cur[i], n);
+      else parent.append(n);
+    });
+    for (let i = next.length; i < cur.length; i++) cur[i].remove();
   }
 
   const SVG = 'http://www.w3.org/2000/svg';
@@ -60,6 +115,8 @@
     eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
     lock: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4',
     chevron: 'M9 6l6 6-6 6',
+    sun: 'M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
+    moon: 'M20.5 14.1A8.5 8.5 0 1 1 9.9 3.5a6.8 6.8 0 0 0 10.6 10.6z',
     power: 'M12 3v8M6.4 6.4a8 8 0 1 0 11.2 0',
   };
 
@@ -178,7 +235,7 @@
       return table(columns, items.map((x) => {
         const r = row(x);
         const tr = h('tr', { class: r.onclick ? 'clickable' : null }, cells(x));
-        if (r.onclick) tr.addEventListener('click', (e) => { if (!e.target.closest('button, a')) r.onclick(e); });
+        if (r.onclick) listen(tr, 'click', (e) => { if (!e.target.closest('button, a')) r.onclick(e); });
         return tr;
       }));
     }
@@ -196,8 +253,8 @@
         r.trail ? h('div', { class: 'row-trail' }, r.trail) : null);
       if (r.onclick) {
         el.tabIndex = 0;
-        el.addEventListener('click', (e) => { if (!e.target.closest('button')) r.onclick(e); });
-        el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === el) r.onclick(e); });
+        listen(el, 'click', (e) => { if (!e.target.closest('button')) r.onclick(e); });
+        listen(el, 'keydown', (e) => { if (e.key === 'Enter' && e.target === el) r.onclick(e); });
       }
       return el;
     }));
@@ -208,13 +265,9 @@
     return h('div', { class: 'card list-card grow' });
   }
 
-  // fillList 替换列表卡片的内容，保留列表的滚动位置（自动刷新时不跳回顶部）
+  // fillList 更新列表卡片的内容：合并进已有元素（见 morph），自动刷新时不跳回顶部、不闪
   function fillList(box, ...children) {
-    const old = box.querySelector('.scroll');
-    const top = old ? old.scrollTop : 0;
-    box.replaceChildren(...children);
-    const now = box.querySelector('.scroll');
-    if (now && top) now.scrollTop = top;
+    morphChildren(box, children.flat(Infinity).filter((c) => c != null && c !== false));
   }
 
   // ---------- 格式化 ----------
@@ -431,6 +484,86 @@
     });
   }
 
+  // ---------- 主题 ----------
+  // 浅色 / 深色 / 跟随系统。选择存在 localStorage，theme.js 在样式生效前先套用，避免闪一下。
+  // 切换时从按钮位置圆形展开新主题（View Transitions）；不支持时整体渐变；系统要求减少动画时直接切换。
+
+  const THEME_KEY = 'moefrp-admin-theme';
+  const darkMq = matchMedia('(prefers-color-scheme: dark)');
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+
+  function themePref() {
+    try {
+      const t = localStorage.getItem(THEME_KEY);
+      return t === 'light' || t === 'dark' ? t : 'system';
+    } catch (e) {
+      return 'system';
+    }
+  }
+
+  const isDark = (pref) => pref === 'dark' || (pref === 'system' && darkMq.matches);
+
+  function applyTheme(pref) {
+    const root = document.documentElement;
+    if (pref === 'system') delete root.dataset.theme;
+    else root.dataset.theme = pref;
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = getComputedStyle(root).getPropertyValue('--bg').trim();
+    document.querySelectorAll('.theme-btn').forEach(drawThemeButton);
+  }
+
+  // fadeTheme 让颜色在 0.35 秒内渐变过去（不支持 View Transitions 时，和跟随系统切换时用）
+  function fadeTheme(fn) {
+    const root = document.documentElement;
+    root.classList.add('theme-fade');
+    fn();
+    clearTimeout(fadeTheme.timer);
+    fadeTheme.timer = setTimeout(() => root.classList.remove('theme-fade'), 400);
+  }
+
+  function setTheme(pref, origin) {
+    try {
+      if (pref === 'system') localStorage.removeItem(THEME_KEY);
+      else localStorage.setItem(THEME_KEY, pref);
+    } catch (e) { /* 隐私模式下存不了，只对这次有效 */ }
+    if (reduceMotion.matches) return applyTheme(pref);
+    if (!document.startViewTransition || !origin) return fadeTheme(() => applyTheme(pref));
+    const b = origin.getBoundingClientRect();
+    const x = b.left + b.width / 2;
+    const y = b.top + b.height / 2;
+    const r = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+    const t = document.startViewTransition(() => applyTheme(pref));
+    t.ready.then(() => document.documentElement.animate(
+      { clipPath: ['circle(0px at ' + x + 'px ' + y + 'px)', 'circle(' + r + 'px at ' + x + 'px ' + y + 'px)'] },
+      { duration: 520, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', pseudoElement: '::view-transition-new(root)' })).catch(() => {});
+  }
+
+  // 点一下总是切到相反的颜色；如果相反的颜色正好是系统当前的颜色，就回到"跟随系统"
+  function toggleTheme(e) {
+    const next = isDark(themePref()) ? 'light' : 'dark';
+    setTheme(next === (darkMq.matches ? 'dark' : 'light') ? 'system' : next, e.currentTarget);
+  }
+
+  function drawThemeButton(btn) {
+    const pref = themePref();
+    const dark = isDark(pref);
+    const label = (dark ? '深色' : '浅色') + (pref === 'system' ? '（跟随系统）' : '') + '，点击切换到' + (dark ? '浅色' : '深色');
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+    btn.replaceChildren(icon(dark ? 'moon' : 'sun', 17));
+  }
+
+  function themeButton() {
+    const btn = h('button', { class: 'icon-btn theme-btn', type: 'button', onclick: toggleTheme });
+    drawThemeButton(btn);
+    return btn;
+  }
+
+  darkMq.addEventListener('change', () => {
+    if (themePref() === 'system') fadeTheme(() => applyTheme('system'));
+  });
+  applyTheme(themePref());
+
   // ---------- 状态与路由 ----------
 
   const state = { me: null, page: null, gen: 0, relayout: null };
@@ -497,7 +630,7 @@
         }
       });
     });
-    $app.replaceChildren(h('main', { class: 'auth' }, h('div', { class: 'auth-card' }, brand(), h('h1', null, title), h('p', null, sub), note, form)));
+    $app.replaceChildren(h('main', { class: 'auth' }, h('div', { class: 'auth-theme' }, themeButton()), h('div', { class: 'auth-card' }, brand(), h('h1', null, title), h('p', null, sub), note, form)));
     const first = form.querySelector('input');
     if (first) first.focus();
   }
@@ -559,17 +692,19 @@
       h('div', { class: 'sidebar-foot' },
         h('div', { class: 'avatar', title: me.nickname, 'aria-hidden': 'true' }, Array.from(me.nickname)[0] || '?'),
         h('div', { class: 'who' }, h('div', { class: 'who-name', title: me.nickname }, me.nickname), h('div', { class: 'who-sub' }, '管理员 · ' + (me.version || 'dev'))),
-        out));
-    // 窄屏没有侧栏，退出按钮放在页头
+        themeButton(), out));
+    // 窄屏没有侧栏，主题和退出按钮放在页头
     const mOut = iconButton('logout', '退出登录（' + me.nickname + '）', () => logout(mOut));
     mOut.classList.add('m-only');
+    const mTheme = themeButton();
+    mTheme.classList.add('m-only');
     $back = h('a', { class: 'icon-btn head-back', 'aria-label': '返回', title: '返回', hidden: true }, icon('back', 18));
     $title = h('h1');
     $desc = h('p');
     $actions = h('div', { class: 'page-actions' });
     $body = h('div', { class: 'page-body' });
     const main = h('main', { class: 'main' },
-      h('header', { class: 'page-head' }, $back, h('div', { class: 'head-text' }, $title, $desc), $actions, mOut), $body);
+      h('header', { class: 'page-head' }, $back, h('div', { class: 'head-text' }, $title, $desc), $actions, mTheme, mOut), $body);
     $app.replaceChildren(h('div', { class: 'layout' }, sidebar, main));
     renderPage();
   }
@@ -595,7 +730,7 @@
       actions: $actions, body: $body, params, alive,
       // setHead 换标题（可以是元素）和副标题；back 是返回按钮的链接
       setHead: (title, desc, back) => {
-        $title.replaceChildren(title);
+        morphChildren($title, [typeof title === 'string' ? document.createTextNode(title) : title]);
         $title.title = typeof title === 'string' ? title : title.textContent;
         $desc.textContent = desc || '';
         if (back) {
@@ -607,6 +742,30 @@
       // onLayout 登记宽窄屏切换时的重画函数（表格和列表互换）
       onLayout: (fn) => { state.relayout = () => alive() && fn(); },
     });
+  }
+
+  // autoRefresh 每 3 秒（和 agent 上报同频）调一次 fn，结果用 morph 合并进页面。
+  // 页面在后台时暂停，回到前台马上刷新一次；上一次还没返回时跳过；离开页面后停止。
+  const REFRESH_MS = 3000;
+  function autoRefresh(p, fn) {
+    let running = false;
+    const stop = () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+    const tick = async () => {
+      if (!p.alive()) return stop();
+      if (document.hidden || running) return;
+      running = true;
+      try {
+        await fn();
+      } finally {
+        running = false;
+      }
+    };
+    const onVisible = () => { if (!document.hidden) tick(); };
+    const timer = setInterval(tick, REFRESH_MS);
+    document.addEventListener('visibilitychange', onVisible);
   }
 
   // ---------- 概览 ----------
@@ -1458,7 +1617,7 @@
 
     function draw() {
       const ag = data.agent || {};
-      notice.replaceChildren(...(ag.version ? [] : [h('div', { class: 'callout warn mb' }, icon('alert', 16),
+      morphChildren(notice, (ag.version ? [] : [h('div', { class: 'callout warn mb' }, icon('alert', 16),
         h('span', null, ag.error ? '暂时不能安装和升级节点：' + ag.error : '正在从 GitHub 查询 agent 最新版本…'))]));
       const agentText = ag.version ? ' · agent 最新 ' + ag.version + (ag.source === 'github' ? '（GitHub ' + (ag.repo || '') + '）' : '（本地目录）') : '';
       const list = data.nodes || [];
@@ -1510,11 +1669,11 @@
                 meterCell('CPU', r.cpu, 100, r.cpu.toFixed(0) + '%'), meterCell('内存', r.memUsed, r.memTotal, pct(r.memUsed, r.memTotal))) : null,
             };
           }),
-        h('div', { class: 'card-foot' }, '共 ' + list.length + ' 个节点，' + list.filter((n) => n.status === 'online').length + ' 个在线' + agentText + ' · 每 10 秒刷新'));
+        h('div', { class: 'card-foot' }, '共 ' + list.length + ' 个节点，' + list.filter((n) => n.status === 'online').length + ' 个在线' + agentText + ' · 每 3 秒刷新'));
     }
 
     await load();
-    const timer = setInterval(() => (p.alive() ? load(true) : clearInterval(timer)), 10000);
+    autoRefresh(p, () => load(true));
   }
 
   // execDialog 在选中的节点上执行命令（批量），结果逐个显示。
@@ -1626,16 +1785,20 @@
           p.body.replaceChildren(h('div', { class: 'fill' }, h('div', { class: 'toolbar' }, tabs), content));
           drawTab();
         } else if (tab === 'overview') {
-          const top = content.scrollTop;
-          drawTab();
-          content.scrollTop = top;
+          morphChildren(content, [tabOverview()]);
+        } else if (tabRefresh) {
+          await tabRefresh();
         }
       } catch (e) {
         if (!quiet && p.alive()) p.body.replaceChildren(errorBox(e, () => load()));
       }
     }
 
+    // tabRefresh 是当前标签页的局部刷新（代理列表用），自动刷新时调用
+    let tabRefresh = null;
+
     function drawTab() {
+      tabRefresh = null;
       const fn = { overview: tabOverview, config: tabConfig, proxies: tabProxies, logs: tabLogs, exec: tabExec, settings: tabSettings }[tab];
       content.replaceChildren(fn());
     }
@@ -1715,11 +1878,16 @@
       return h('div', { class: 'node-grid' }, parts);
     }
 
+    // 显示过的 token 记在 revealed 里，自动刷新重画时保持显示状态
+    const revealed = new Set();
     function secretBox(text) {
-      const code = h('code', null, '••••••••••••');
-      let shown = false;
-      return h('div', { class: 'copybox' }, code,
-        iconButton('eye', '显示', () => { shown = !shown; code.textContent = shown ? text : '••••••••••••'; }),
+      const mask = '••••••••••••';
+      return h('div', { class: 'copybox' }, h('code', null, revealed.has(text) ? text : mask),
+        iconButton('eye', '显示', (e) => {
+          if (revealed.has(text)) revealed.delete(text);
+          else revealed.add(text);
+          e.currentTarget.parentNode.querySelector('code').textContent = revealed.has(text) ? text : mask;
+        }),
         iconButton('copy', '复制', () => copyText(text, 'token 已复制')));
     }
 
@@ -1759,16 +1927,17 @@
     function tabProxies() {
       if (n.status !== 'online') return offlineBox();
       const box = h('div', { class: 'card list-card grow' }, loadingBox());
-      (async () => {
+      const fill = async () => {
         try {
           const res = await api('GET', '/nodes/' + encodeURIComponent(id) + '/proxies');
+          if (!box.isConnected && tabRefresh !== fill) return;
           const list = (res.proxies || []).sort((a, b) => (b.online - a.online) || a.name.localeCompare(b.name));
           if (!list.length) {
-            box.replaceChildren(stateBox('inbox', '还没有代理', '客户端连上这个节点并开启代理后显示在这里。'));
+            fillList(box, stateBox('inbox', '还没有代理', '客户端连上这个节点并开启代理后显示在这里。'));
             return;
           }
           const traffic = (x) => '↓ ' + fmtBytes(x.trafficIn) + ' · ↑ ' + fmtBytes(x.trafficOut);
-          box.replaceChildren(dataList([{ label: '名称' }, { label: '类型' }, { label: '用户' }, { label: '状态' }, { label: '连接' }, { label: '今日流量' }, { label: '上线时间' }], list,
+          fillList(box, dataList([{ label: '名称' }, { label: '类型' }, { label: '用户' }, { label: '状态' }, { label: '连接' }, { label: '今日流量' }, { label: '上线时间' }], list,
             (x) => [h('td', null, h('code', null, x.name)), h('td', null, x.type), h('td', null, x.user || h('span', { class: 'faint' }, '—')),
               h('td', null, x.online ? badge('在线', 'ok') : badge('离线')), h('td', null, String(x.conns)),
               h('td', { class: 'nowrap' }, traffic(x)),
@@ -1780,9 +1949,11 @@
             })),
           h('div', { class: 'card-foot' }, '在线 ' + list.filter((x) => x.online).length + ' / 共 ' + list.length + ' 个（包括最近下线的）'));
         } catch (e) {
-          box.replaceChildren(errorBox(e));
+          fillList(box, errorBox(e));
         }
-      })();
+      };
+      fill();
+      tabRefresh = fill;
       return box;
     }
 
@@ -1976,7 +2147,7 @@
     }
 
     await load();
-    const timer = setInterval(() => (p.alive() ? load(true) : clearInterval(timer)), 10000);
+    autoRefresh(p, () => load(true));
   }
 
   boot();

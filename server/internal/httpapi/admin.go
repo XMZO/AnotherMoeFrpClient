@@ -441,7 +441,7 @@ func (s *Server) adminUI() http.Handler {
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Cache-Control", "no-cache")
 		switch r.URL.Path {
-		case "/", "/app.js", "/app.css", "/favicon.svg":
+		case "/", "/app.js", "/app.css", "/theme.js", "/favicon.svg":
 			files.ServeHTTP(w, r)
 		default:
 			s.writeError(w, r, apierr.New(apierr.NotFound))

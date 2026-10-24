@@ -9,7 +9,7 @@ import (
 //go:embed static
 var static embed.FS
 
-// FS 返回页面文件，根目录下是 index.html、app.js、app.css。
+// FS 返回页面文件，根目录下是 index.html、theme.js、app.js、app.css。
 func FS() fs.FS {
 	sub, err := fs.Sub(static, "static")
 	if err != nil {

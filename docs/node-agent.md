@@ -73,7 +73,7 @@ WebSocket（`github.com/coder/websocket`），JSON 文本帧，双向请求/响�
 | 方向 | 方法 | 说明 |
 |---|---|---|
 | agent → 面板 | `hello` | 连接后第一条：agent 版本、系统、架构、内核、主机名、开机时间、当前 frps 配置的版本号 |
-| agent → 面板 | `report` | 每 10 秒：CPU、内存、磁盘、负载、网络流量；frps 状态（运行 / 出错 + 原因）、客户端数、代理数、连接数、累计流量 |
+| agent → 面板 | `report` | 每 3 秒（agent 1.2.0 起；之前是 10 秒）：CPU、内存、磁盘、负载、网络流量；frps 状态（运行 / 出错 + 原因）、客户端数、代理数、连接数、累计流量 |
 | 面板 → agent | `frps.apply` | 下发 frps 配置（TOML），agent 校验 → 进程内重启 frps → 失败自动回滚到旧配置，结果原样返回 |
 | 面板 → agent | `frps.restart` / `frps.stop` | |
 | 面板 → agent | `frps.proxies` | 当前在线的代理列表（名称、类型、用户、客户端、流量） |

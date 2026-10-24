@@ -133,7 +133,7 @@ func (s *Service) Serve(ctx context.Context, ws *websocket.Conn, node store.Node
 
 	greeted := false
 	for {
-		// agent 每 10 秒上报一次；超过 OfflineAfter 收不到任何消息就断开
+		// agent 每 ReportInterval 秒上报一次；超过 OfflineAfter 收不到任何消息就断开
 		rctx, rcancel := context.WithTimeout(ctx, agentproto.OfflineAfter*time.Second)
 		_, b, err := ws.Read(rctx)
 		rcancel()

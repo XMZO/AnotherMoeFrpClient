@@ -63,8 +63,29 @@ const mine = computed<NodeOpt[]>(() =>
   (profiles.current?.nodes ?? []).map((n) => ({ id: n.id, label: nodeLabel(n), sub: `${n.serverAddr}:${n.serverPort}`, online: true, official: false })),
 )
 const official = computed<NodeOpt[]>(() =>
-  officialNodes.value.map((n) => ({ id: n.id, label: n.name, sub: n.online ? (n.description || '托管节点') : '离线', online: n.online, official: true })),
+  officialNodes.value.map((n) => ({ id: n.id, label: n.name, sub: n.online ? (n.description ?? '') : '离线', online: n.online, official: true })),
 )
+
+// 节点多了：每个节点一行（名字和备注并排），超过 SEARCH_FROM 个时顶上出现搜索框，按名字和备注过滤
+const SEARCH_FROM = 7
+// 搜索框出现时直接聚焦，打开菜单就能打字
+const vFocus = { mounted: (el: HTMLElement) => el.focus() }
+const nodeQuery = ref('')
+const searchable = computed(() => mine.value.length + official.value.length >= SEARCH_FROM)
+const match = (n: NodeOpt) => {
+  const q = nodeQuery.value.trim().toLowerCase()
+  return !q || n.label.toLowerCase().includes(q) || n.sub.toLowerCase().includes(q)
+}
+const groups = computed(() =>
+  [
+    { title: profiles.isSubscription ? '分享者提供的节点' : '我的节点', items: mine.value.filter(match) },
+    { title: '官方节点', items: official.value.filter(match) },
+  ].filter((g) => g.items.length),
+)
+function pickFirst(close: () => void) {
+  const n = groups.value[0]?.items[0]
+  if (n) choose(n.id, close)
+}
 const selected = computed(() => [...mine.value, ...official.value].find((n) => n.id === tunnel.selectedNodeId) ?? null)
 const hasNodes = computed(() => mine.value.length + official.value.length > 0)
 
@@ -125,6 +146,7 @@ async function toggle() {
 
 async function choose(id: string, close: () => void) {
   close()
+  nodeQuery.value = ''
   if (!profiles.current) return
   try {
     await tunnel.chooseNode(profiles.current.id, id)
@@ -147,7 +169,7 @@ async function ping() {
   <header class="runhead">
     <slot name="title" />
     <div class="rh-ctrl">
-      <Menu placement="bottom-end" :width="300" label="选择节点">
+      <Menu placement="bottom-end" :width="320" label="选择节点" @close="nodeQuery = ''">
         <template #trigger="{ toggle: toggleMenu, open }">
           <button
             type="button"
@@ -169,7 +191,19 @@ async function ping() {
           </button>
         </template>
         <template #default="{ close }">
-          <template v-for="g in [{ title: profiles.isSubscription ? '分享者提供的节点' : '我的节点', items: mine }, { title: '官方节点', items: official }]" :key="g.title">
+          <div v-if="searchable" class="node-search">
+            <Icon name="zoom" size="xs" />
+            <input
+              v-model="nodeQuery"
+              v-focus
+              class="node-search-inp"
+              placeholder="搜索节点"
+              aria-label="搜索节点"
+              data-testid="run-node-search"
+              @keydown.enter.prevent="pickFirst(close)"
+            />
+          </div>
+          <template v-for="g in groups" :key="g.title">
             <template v-if="g.items.length">
               <div class="menu-lbl">{{ g.title }}</div>
               <button
@@ -183,12 +217,13 @@ async function ping() {
                 @click="choose(n.id, close)"
               >
                 <span class="nm-dot" :class="n.id === tunnel.selectedNodeId ? 'pri' : n.online ? 'ok' : ''" />
-                <span class="nm-txt"><b>{{ n.label }}</b><small>{{ n.sub }}</small></span>
+                <span class="nm-txt"><b>{{ n.label }}</b><small v-if="n.sub">{{ n.sub }}</small></span>
                 <span v-if="pingView(n.id)" class="ping" :class="pingView(n.id)!.cls" :title="pingView(n.id)!.text">{{ pingView(n.id)!.text }}</span>
               </button>
             </template>
           </template>
           <div v-if="!hasNodes" class="menu-lbl">还没有节点</div>
+          <div v-else-if="!groups.length" class="menu-lbl">没有匹配“{{ nodeQuery }}”的节点</div>
           <div class="menu-sep" />
           <button type="button" class="menu-item" @click="close(), emit('manage-nodes')"><Icon name="edit" size="s" />管理节点</button>
         </template>
@@ -304,6 +339,31 @@ async function ping() {
 }
 .node-opt {
   gap: 10px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+.node-search {
+  position: sticky;
+  top: -6px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -6px -6px 4px;
+  padding: 10px 14px;
+  background: var(--raised);
+  border-bottom: 1.5px solid var(--line-2);
+  color: var(--text-3);
+}
+.node-search-inp {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
 }
 .node-opt.sel {
   background: var(--pri-soft);
@@ -321,19 +381,25 @@ async function ping() {
 .nm-dot.pri {
   background: var(--pri);
 }
+/* 名字和备注并排一行，节点多的时候列表不会太长 */
 .nm-txt {
   display: flex;
-  flex-direction: column;
+  align-items: baseline;
+  gap: 8px;
   flex: 1;
   min-width: 0;
-  line-height: 1.25;
+  line-height: 1.3;
+  white-space: nowrap;
 }
 .nm-txt b {
+  flex: none;
+  max-width: 60%;
   overflow: hidden;
   text-overflow: ellipsis;
   font-weight: 800;
 }
 .nm-txt small {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 11.5px;

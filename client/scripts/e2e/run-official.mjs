@@ -231,7 +231,17 @@ async function main() {
       await sleep(700)
       await p.shot(path.join(OUT, `layout-${w}.png`))
     }
+    for (const pg of ['settings', 'about']) {
+      await p.click(tid(`nav-${pg}`))
+      for (const [w, h] of [[960, 900], [1600, 900]]) {
+        await p.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false })
+        await sleep(700)
+        await p.shot(path.join(OUT, `${pg}-${w}.png`))
+      }
+    }
+    await p.click(tid('nav-tunnel'))
     await p.send('Emulation.setDeviceMetricsOverride', { width: 1120, height: 740, deviceScaleFactor: 1, mobile: false })
+    await sleep(500)
     await p.click(tid('proxy-add'))
     await sleep(700)
     await p.shot(path.join(OUT, 'proxy-drawer-limits.png'))

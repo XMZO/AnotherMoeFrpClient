@@ -88,14 +88,14 @@ async function copy(text: string) {
       <div v-if="checkError" class="alert bad about-note"><Icon name="alert" size="s" /><span>{{ checkError }}</span></div>
 
       <div class="about-grid">
-        <div class="about-col">
           <section v-if="update?.announcement" class="card" data-testid="about-announcement">
             <div class="card-h"><span class="tile-ic gold"><Icon name="bell" size="s" /></span>公告</div>
             <p class="ann-text">{{ update.announcement }}</p>
           </section>
           <section v-if="info" class="card" style="animation-delay: 0.05s">
             <div class="card-h"><span class="tile-ic"><Icon name="folder" size="s" /></span>数据位置</div>
-            <div class="kv-row first">
+            <div class="about-cols">
+            <div class="kv-row">
               <small>设置和配置缓存</small>
               <span class="mono" :title="info.dataDir">{{ info.dataDir }}</span>
               <button type="button" class="icon-btn sm" title="复制路径" aria-label="复制设置和配置缓存的路径" @click="copy(info.dataDir)"><Icon name="copy" size="s" /></button>
@@ -105,18 +105,17 @@ async function copy(text: string) {
               <span class="mono" :title="info.localDir">{{ info.localDir }}</span>
               <button type="button" class="icon-btn sm" title="复制路径" aria-label="复制 WebView2 数据和日志的路径" @click="copy(info.localDir)"><Icon name="copy" size="s" /></button>
             </div>
+            </div>
           </section>
-        </div>
         <section class="card" style="animation-delay: 0.1s">
           <div class="card-h"><span class="tile-ic"><Icon name="heart" size="s" /></span>开源许可</div>
-          <div data-testid="about-licenses">
+          <div class="about-cols" data-testid="about-licenses">
             <div v-for="l in licenses" :key="l.name" class="lic">
               <a :href="l.url" @click.prevent="open(l.url)">{{ l.name }}</a>
               <span class="bdg">{{ l.license }}</span>
               <small>{{ l.note }}</small>
             </div>
           </div>
-          <div style="height: 8px" />
         </section>
       </div>
     </div>
@@ -247,17 +246,33 @@ async function copy(text: string) {
 .about-note {
   margin-top: 14px;
 }
+/* 卡片整行堆叠，卡片里按两列排：左右边缘对齐，高度只由自己的内容决定，不拉伸、不留白 */
 .about-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
-  gap: 14px;
-  margin-top: 14px;
-  align-items: start;
-}
-.about-col {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  margin-top: 14px;
+}
+.about-grid > .card {
+  container-type: inline-size;
+  padding-bottom: 6px;
+}
+.about-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 36px;
+}
+/* 两列各自的第一项不要分隔线 */
+.about-cols > :nth-child(-n + 2) {
+  border-top: 0 !important;
+}
+@container (max-width: 640px) {
+  .about-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .about-cols > :nth-child(2) {
+    border-top: 1.5px dashed var(--line-2) !important;
+  }
 }
 .ann-text {
   padding-bottom: 14px;
@@ -274,9 +289,6 @@ async function copy(text: string) {
   gap: 10px;
   padding: 10px 0;
   border-top: 1.5px dashed var(--line-2);
-}
-.kv-row.first {
-  border-top: 0;
 }
 .kv-row small {
   font-size: 12px;
@@ -295,9 +307,6 @@ async function copy(text: string) {
   gap: 10px;
   padding: 9px 0;
   border-top: 1.5px dashed var(--line-2);
-}
-.lic:first-child {
-  border-top: 0;
 }
 .lic a {
   font-weight: 800;

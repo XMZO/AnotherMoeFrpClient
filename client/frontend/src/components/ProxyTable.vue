@@ -83,28 +83,36 @@ function status(p: Proxy): StatusView {
 }
 const typeTone = (t: string) => (isP2PType(t) ? 'p2p' : isDomainType(t) ? 'web' : '')
 
-// 远程一侧：运行中显示节点实际分配的地址（例如 :10405），否则显示配置的（没填端口时是"自动"）
-function remote(p: Proxy): string {
-  const st = isRunningHere.value ? tunnel.proxyById[p.id] : undefined
-  if (st?.phase === 'running' && st.remoteAddr) return st.remoteAddr
-  if ((p.type === 'tcp' || p.type === 'udp') && !p.remotePort) return '自动分配'
-  return proxyRemote(p)
-}
-
-// 完整的访问地址（tcp / udp 运行中）：节点的访问地址 + 远程端口，复制给别人用
+// 访问地址的主机部分：运行中看实际用的节点，否则看选中的节点。官方节点用面板给的访问地址，自己的节点用服务器地址
 const accessHost = computed(() => {
-  const id = tunnel.status.nodeId ?? ''
+  const id = (isRunningHere.value ? tunnel.status.nodeId : tunnel.selectedNodeId) ?? ''
   const o = tunnel.official.find((n) => n.id === id)
   if (o) return o.domain || o.ipv4 || (o.ipv6 ? `[${o.ipv6}]` : '')
   const n = profiles.current?.nodes?.find((x) => x.id === id)
   if (!n) return ''
   return n.serverAddr.includes(':') && !n.serverAddr.startsWith('[') ? `[${n.serverAddr}]` : n.serverAddr
 })
+
+// tcp / udp 的端口：运行中用节点实际分配的，否则用配置的；自动分配又没在运行时为 0
+function port(p: Proxy): number {
+  const st = isRunningHere.value ? tunnel.proxyById[p.id] : undefined
+  const m = st?.phase === 'running' ? /:(\d+)$/.exec(st.remoteAddr ?? '') : null
+  return m ? Number(m[1]) : p.remotePort || 0
+}
+const isPortType = (p: Proxy) => p.type === 'tcp' || p.type === 'udp'
+
+// 远程一侧显示的文字：tcp / udp 是"访问地址:端口"，端口还不知道时是"地址:自动"
+function remote(p: Proxy): { host: string; port: string; auto: boolean } {
+  if (!isPortType(p)) return { host: proxyRemote(p), port: '', auto: false }
+  const n = port(p)
+  return { host: accessHost.value, port: n ? String(n) : '自动', auto: !n }
+}
+
+// 能复制的完整访问地址（地址和端口都知道时）
 function accessAddr(p: Proxy): string {
-  if (!isRunningHere.value || (p.type !== 'tcp' && p.type !== 'udp')) return ''
-  const st = tunnel.proxyById[p.id]
-  if (st?.phase !== 'running' || !st.remoteAddr?.startsWith(':') || !accessHost.value) return ''
-  return accessHost.value + st.remoteAddr
+  if (!isPortType(p) || !accessHost.value) return ''
+  const n = port(p)
+  return n ? `${accessHost.value}:${n}` : ''
 }
 async function copyAddr(text: string) {
   try {
@@ -134,10 +142,14 @@ async function copyAddr(text: string) {
           <span class="type" :class="typeTone(row.type)">{{ row.type }}</span>
           <span v-if="row.useEncryption" class="enc" title="已开启加密"><Icon name="lock" size="xs" /></span>
         </div>
-        <div class="row-map mono" :title="`${row.localIP || '127.0.0.1'}:${row.localPort} → ${remote(row)}`" :data-testid="`proxy-map-${row.name}`">
+        <div
+          class="row-map mono"
+          :title="`${row.localIP || '127.0.0.1'}:${row.localPort} → ${accessAddr(row) || remote(row).host + (remote(row).port ? ':' + remote(row).port : '')}${remote(row).auto ? '\n远程端口自动分配：每次连接可能不同，想固定就在代理里填远程端口' : ''}`"
+          :data-testid="`proxy-map-${row.name}`"
+        >
           <span class="loc">{{ row.localIP || '127.0.0.1' }}:{{ row.localPort }}</span>
           <Icon name="arrow" size="xs" />
-          <span class="rem" :class="{ auto: remote(row) === '自动分配' }">{{ remote(row) }}</span>
+          <span class="rem">{{ remote(row).host }}<template v-if="remote(row).port">:<span :class="{ auto: remote(row).auto }">{{ remote(row).port }}</span></template></span>
           <button
             v-if="accessAddr(row)"
             type="button"
@@ -258,7 +270,7 @@ async function copyAddr(text: string) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.row-map .rem.auto {
+.row-map .rem .auto {
   color: var(--text-3);
   font-weight: 600;
   font-family: var(--font);

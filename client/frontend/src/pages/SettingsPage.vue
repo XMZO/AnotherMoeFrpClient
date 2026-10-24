@@ -68,6 +68,7 @@ async function applyCustom() {
       <div v-if="s" class="set-grid">
         <section class="card">
           <div class="card-h"><span class="tile-ic"><Icon name="sun" size="s" /></span>外观</div>
+          <div class="set-cols look">
           <div class="tiles" role="radiogroup" aria-label="主题" data-testid="settings-theme">
             <button
               v-for="t in themes"
@@ -90,11 +91,13 @@ async function applyCustom() {
             <div class="set-txt"><b>图片面板</b><small>侧栏里每分钟换一张图；关闭后不会发出任何图片请求</small></div>
             <Switch :model-value="s.imagePanel" label="图片面板" data-testid="settings-image-panel" @change="(v: boolean) => set({ imagePanel: v })" />
           </div>
+          </div>
         </section>
 
         <section class="card" style="animation-delay: 0.05s">
           <div class="card-h"><span class="tile-ic"><Icon name="power" size="s" /></span>窗口与启动</div>
-          <div class="set-row first">
+          <div class="set-cols">
+          <div class="set-row">
             <div class="set-txt"><b>点关闭按钮时</b></div>
             <Options
               :model-value="s.closeAction"
@@ -106,12 +109,10 @@ async function applyCustom() {
               @pick="(v: string) => set({ closeAction: v })"
             />
           </div>
-          <Transition name="collapse">
-            <div v-if="s.closeAction === 'tray'" class="set-row">
-              <div class="set-txt"><b>最小化到托盘时释放界面内存</b><small>后台只占几十 MB（隧道照常运行），再次打开窗口约需半秒</small></div>
-              <Switch :model-value="s.releaseOnHide" label="释放界面内存" data-testid="settings-release-on-hide" @change="(v: boolean) => set({ releaseOnHide: v })" />
-            </div>
-          </Transition>
+          <div class="set-row" :class="{ dim: s.closeAction !== 'tray' }">
+            <div class="set-txt"><b>最小化到托盘时释放界面内存</b><small>后台只占几十 MB（隧道照常运行），再次打开窗口约需半秒</small></div>
+            <Switch :model-value="s.releaseOnHide" :disabled="s.closeAction !== 'tray'" label="释放界面内存" data-testid="settings-release-on-hide" @change="(v: boolean) => set({ releaseOnHide: v })" />
+          </div>
           <div class="set-row">
             <div class="set-txt"><b>开机自启</b><small>开机后只在托盘显示图标，不弹出窗口</small></div>
             <Switch :model-value="s.autoStart" label="开机自启" data-testid="settings-autostart" @change="(v: boolean) => set({ autoStart: v })" />
@@ -120,12 +121,15 @@ async function applyCustom() {
             <div class="set-txt"><b>启动后自动连接</b><small>启动时自动运行上次使用的配置和节点</small></div>
             <Switch :model-value="s.autoConnect" label="启动后自动连接" data-testid="settings-autoconnect" @change="(v: boolean) => set({ autoConnect: v })" />
           </div>
+          </div>
         </section>
 
         <section class="card" style="animation-delay: 0.1s">
           <div class="card-h"><span class="tile-ic"><Icon name="globe" size="s" /></span>网络代理</div>
+          <div class="set-cols">
+          <div class="set-row col">
           <p class="set-note">
-            用于登录、云同步、检查更新和图片面板。“跟随系统”读取 Windows“Internet 选项”里的手动代理（不支持自动配置脚本）。
+            <b>应用自己的请求</b>登录、云同步、检查更新和图片面板。“跟随系统”读取 Windows“Internet 选项”里的手动代理（不支持自动配置脚本）。
           </p>
           <div class="net-row">
             <Options
@@ -147,7 +151,8 @@ async function applyCustom() {
               </form>
             </Transition>
           </div>
-          <div class="set-row">
+          </div>
+          <div class="set-row col">
             <div class="set-txt">
               <b>frp 隧道连接</b>
               <small>连接节点时走不走上面的代理。节点设置里单独填了代理的，总是用节点自己的。改了之后重新启动隧道生效</small>
@@ -162,6 +167,7 @@ async function applyCustom() {
               data-testid="settings-frp-proxy"
               @pick="(v: string) => set({ frpProxy: v })"
             />
+          </div>
           </div>
         </section>
 
@@ -178,21 +184,58 @@ async function applyCustom() {
 </template>
 
 <style>
+/* 卡片整行堆叠，卡片里按两列排：左右边缘天然对齐，每张卡片的高度只由自己的内容决定，不拉伸、不留白 */
 .set-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 14px;
+}
+.set-grid > .card {
+  container-type: inline-size;
+}
+.set-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 36px;
   align-items: start;
 }
 .set-row {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 10px 14px;
-  padding: 13px 0;
+  min-height: 64px;
+  padding: 12px 0;
   border-top: 1.5px dashed var(--line-2);
 }
-.set-row.first {
+/* 卡片标题下面的第一项、两列各自的第一项不要分隔线 */
+.card-h + .set-row {
+  border-top: 0;
+}
+.set-cols > .set-row:nth-child(-n + 2) {
+  border-top: 0;
+}
+.set-row > .set-txt {
+  flex: 1;
+  min-width: 0;
+}
+.set-row > :not(.set-txt) {
+  flex-shrink: 0;
+}
+.set-row.col {
+  flex-direction: column;
+  align-items: flex-start;
+}
+.set-row.col > .set-txt {
+  flex: none;
+}
+.set-row.dim .set-txt {
+  opacity: 0.55;
+}
+.set-cols.look {
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  align-items: center;
+}
+.set-cols.look > .set-row {
   border-top: 0;
 }
 .set-note {
@@ -200,23 +243,39 @@ async function applyCustom() {
   color: var(--text-3);
   font-weight: 600;
   line-height: 1.6;
-  padding-bottom: 12px;
+}
+.set-note b {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text);
 }
 .net-row {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 10px;
-  padding-bottom: 14px;
+  width: 100%;
 }
 .net-row .inp-group {
   width: 100%;
+}
+/* 窄了退成一列 */
+@container (max-width: 700px) {
+  .set-cols,
+  .set-cols.look {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .set-cols > .set-row:nth-child(2) {
+    border-top: 1.5px dashed var(--line-2);
+  }
 }
 .tiles {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  padding: 4px 0 16px;
+  padding: 4px 0;
 }
 .tile {
   display: flex;

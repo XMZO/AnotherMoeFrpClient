@@ -78,6 +78,7 @@ type License struct {
 }
 
 // Licenses 返回客户端用到的主要开源组件。
+// "关于"页分两列显示，条数保持偶数，两列最后一行才对齐（不留空、不拉伸）。
 func (s *AppService) Licenses() []License {
 	return []License{
 		{"frp", "Apache License 2.0", "https://github.com/fatedier/frp", "内嵌的 frp 客户端，版本见上方"},
@@ -88,7 +89,8 @@ func (s *AppService) Licenses() []License {
 		{"Nunito、JetBrains Mono 字体", "SIL OFL 1.1", "https://fontsource.org", "界面字体，打包在客户端里"},
 		{"wincred", "MIT", "https://github.com/danieljoos/wincred", "Windows 凭据管理器"},
 		{"golang.design/x/clipboard", "MIT", "https://github.com/golang-design/clipboard", "复制图片"},
-		{"quic-go、yamux 等 frp 的依赖", "MIT / MPL-2.0 等", "https://github.com/fatedier/frp/blob/master/go.mod", ""},
+		{"quic-go、kcp-go 等", "MIT", "https://github.com/fatedier/frp/blob/master/go.mod", "frp 的依赖"},
+		{"yamux", "MPL-2.0", "https://github.com/fatedier/yamux", "frp 的多路复用"},
 	}
 }
 

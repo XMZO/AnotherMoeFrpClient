@@ -34,14 +34,15 @@ type Session struct {
 	ExpiresAt    int64
 	RevokedAt    *int64
 	RevokeReason string
+	LoginIP      string // 登录时的 IP
 }
 
 // InsertSession 插入会话。
 func InsertSession(ctx context.Context, q Querier, s Session) error {
 	_, err := q.ExecContext(ctx,
-		`INSERT INTO sessions (id, user_id, token_hash, install_id, device_name, device_id, created_at, last_seen_at, expires_at, kind)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.ID, s.UserID, s.TokenHash, s.InstallID, nullString(s.DeviceName), s.DeviceID, s.CreatedAt, s.LastSeenAt, s.ExpiresAt, sessionKind(s.Kind))
+		`INSERT INTO sessions (id, user_id, token_hash, install_id, device_name, device_id, created_at, last_seen_at, expires_at, kind, login_ip)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.ID, s.UserID, s.TokenHash, s.InstallID, nullString(s.DeviceName), s.DeviceID, s.CreatedAt, s.LastSeenAt, s.ExpiresAt, sessionKind(s.Kind), s.LoginIP)
 	return err
 }
 
@@ -201,4 +202,47 @@ func SessionRevoked(ctx context.Context, q Querier, sessionID string) (bool, err
 		return false, err
 	}
 	return revokedAt.Valid, nil
+}
+
+// SetSessionClientInfo 记下客户端连实时通道时上报的设备信息（JSON）和这次的 IP。
+func SetSessionClientInfo(ctx context.Context, q Querier, sessionID, info, ip string) error {
+	_, err := q.ExecContext(ctx, `UPDATE sessions SET client_info = ?, last_ip = ? WHERE id = ?`, info, ip, sessionID)
+	return err
+}
+
+// DeviceSession 是管理后台"登录设备"列表的一行。
+type DeviceSession struct {
+	ID         string
+	Kind       string
+	InstallID  string
+	DeviceName string
+	DeviceID   string
+	LoginIP    string
+	LastIP     string
+	ClientInfo string
+	CreatedAt  int64
+	LastSeenAt int64
+	ExpiresAt  int64
+}
+
+// ListUserSessions 列出用户还有效（没吊销、没过期）的会话，最近活跃的在前。
+func ListUserSessions(ctx context.Context, q Querier, userID string, now int64) ([]DeviceSession, error) {
+	rows, err := q.QueryContext(ctx,
+		`SELECT id, kind, install_id, COALESCE(device_name, ''), device_id, login_ip, last_ip, client_info, created_at, last_seen_at, expires_at
+		   FROM sessions WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ? ORDER BY last_seen_at DESC`, userID, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DeviceSession
+	for rows.Next() {
+		var d DeviceSession
+		if err := rows.Scan(&d.ID, &d.Kind, &d.InstallID, &d.DeviceName, &d.DeviceID, &d.LoginIP, &d.LastIP, &d.ClientInfo,
+			&d.CreatedAt, &d.LastSeenAt, &d.ExpiresAt); err != nil {
+			return nil, err
+		}
+		d.Kind = sessionKind(d.Kind)
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }

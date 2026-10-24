@@ -136,6 +136,8 @@ type Options struct {
 
 	// OnOfficial 在官方节点列表变化时调用（退出登录时传 nil）。
 	OnOfficial func([]api.OfficialNode)
+	// OnImages 在拿到图片面板的图源时调用（图源只给登录的用户；退出登录、会话失效时传 nil）。
+	OnImages func([]api.ImageSource)
 }
 
 type pushErr struct {
@@ -145,16 +147,18 @@ type pushErr struct {
 
 // Manager 见包注释。
 type Manager struct {
-	api        *apiclient.Client
-	creds      credstore.Store
-	profiles   *store.ProfileStore
-	eng        Engine
-	device     string
-	poll       time.Duration
-	retry      time.Duration
-	delay      time.Duration
-	logf       func(string, ...any)
-	onOfficial func([]api.OfficialNode)
+	api         *apiclient.Client
+	creds       credstore.Store
+	profiles    *store.ProfileStore
+	eng         Engine
+	device      string
+	poll        time.Duration
+	retry       time.Duration
+	delay       time.Duration
+	logf        func(string, ...any)
+	onOfficial  func([]api.OfficialNode)
+	onImages    func([]api.ImageSource)
+	imagesStale atomic.Bool // 面板改了客户端配置，下次同步重新拉图源
 
 	mu        sync.Mutex
 	emit      func(string, any)
@@ -178,6 +182,7 @@ type session struct {
 	// 以下只在循环 goroutine 里读写
 	etag        int64 // 上次拉到的 stateVersion；-1 表示不带 If-None-Match（每个会话第一次总是全量拉取）
 	wantDefault bool  // 交互登录后第一次拉取：云端没有配置时建一个默认配置
+	images      bool  // 这次登录已经拉到过图源
 }
 
 func (s *session) kick(reason string) {
@@ -203,7 +208,7 @@ func New(o Options) *Manager {
 	}
 	m := &Manager{
 		api: o.API, creds: o.Creds, profiles: o.Profiles, eng: o.Engine, device: apiclient.DeviceName(o.DeviceName),
-		poll: o.PollInterval, retry: o.OfflineRetry, delay: o.PushDelay, logf: o.Logf, onOfficial: o.OnOfficial,
+		poll: o.PollInterval, retry: o.OfflineRetry, delay: o.PushDelay, logf: o.Logf, onOfficial: o.OnOfficial, onImages: o.OnImages,
 		conflicts: map[string]*Conflict{}, remote: map[string]RemoteUpdate{}, pushErrs: map[string]pushErr{},
 	}
 	m.acct.CacheOwner = o.Profiles.Sync().Nickname
@@ -416,6 +421,7 @@ func (m *Manager) endSession(s *session, err error) {
 	m.status = Status{State: StateOff}
 	m.mu.Unlock()
 	m.logf("session ended by server: %s", ae.Code)
+	m.clearImages()
 	if derr := m.creds.Delete(); derr != nil {
 		m.logf("delete credential: %v", derr)
 	}
@@ -454,6 +460,7 @@ func (m *Manager) Logout(ctx context.Context) error {
 	m.pushErrs = map[string]pushErr{}
 	m.status = Status{State: StateOff}
 	m.mu.Unlock()
+	m.clearImages()
 	m.logf("logged out, %d cloud profiles removed from cache", len(ids))
 	m.emitAccount()
 	m.fire(EventSyncChanged, Changed{ProfileIDs: ids})
@@ -567,6 +574,18 @@ func (m *Manager) SyncNow() {
 	m.mu.Unlock()
 	if s != nil {
 		s.kick("manual")
+	}
+}
+
+// RefreshImages 在面板改了客户端配置（实时通道推送）时调用：下次同步重新拉图源，并立即同步一次。
+func (m *Manager) RefreshImages() {
+	m.imagesStale.Store(true)
+	m.SyncNow()
+}
+
+func (m *Manager) clearImages() {
+	if m.onImages != nil {
+		m.onImages(nil)
 	}
 }
 

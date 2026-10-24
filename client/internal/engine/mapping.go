@@ -118,6 +118,7 @@ func SameConnection(a, b model.Node) bool {
 
 // MapProfile 把模型里的代理和访客转换成 frp 的配置对象（PLAN 6.3.3）。
 // 未启用的也会转换，Enabled=false，由 FilterClientConfigurers 过滤掉。
+// tcp+udp 的代理（WithUDP）拆成两个：同名的 tcp 和 name-udp 的 udp，本地端口、远程端口相同。
 func MapProfile(p model.Profile) ([]v1.ProxyConfigurer, []v1.VisitorConfigurer, error) {
 	proxies := make([]v1.ProxyConfigurer, 0, len(p.Proxies))
 	for _, px := range p.Proxies {
@@ -126,6 +127,15 @@ func MapProfile(p model.Profile) ([]v1.ProxyConfigurer, []v1.VisitorConfigurer, 
 			return nil, nil, err
 		}
 		proxies = append(proxies, c)
+		if px.Type == model.ProxyTCP && px.WithUDP {
+			u := px
+			u.Type, u.Name, u.WithUDP = model.ProxyUDP, px.UDPName(), false
+			c, err := MapProxy(u)
+			if err != nil {
+				return nil, nil, err
+			}
+			proxies = append(proxies, c)
+		}
 	}
 	visitors := make([]v1.VisitorConfigurer, 0, len(p.Visitors))
 	for _, vs := range p.Visitors {
@@ -197,6 +207,9 @@ func MapVisitor(v model.Visitor) (v1.VisitorConfigurer, error) {
 	base.ServerUser = v.ServerUser
 	base.BindAddr = v.BindAddr // 为空时 Complete() 补成 127.0.0.1
 	base.BindPort = v.BindPort
+	// xtcp 必须和对方代理一致（打洞后直连）；stcp / sudp 只影响访客到 frps 这一段
+	base.Transport.UseEncryption = v.UseEncryption
+	base.Transport.UseCompression = v.UseCompression
 	switch t := c.(type) {
 	case *v1.STCPVisitorConfig, *v1.SUDPVisitorConfig:
 	case *v1.XTCPVisitorConfig:

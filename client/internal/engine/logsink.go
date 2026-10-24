@@ -20,6 +20,9 @@ type LogLine struct {
 	Seq   int64  `json:"seq"`   // 单调递增，前端用作 key 和去重
 	Level string `json:"level"` // trace debug info warn error
 	Text  string `json:"text"`
+	// Private 表示这行属于云端配置或订阅的运行（配置对用户是黑盒）：只给引擎判断状态用，
+	// 不进缓冲（Lines、导出都拿不到），订阅者也不能转给界面。
+	Private bool `json:"-"`
 }
 
 // LogSink 是装到 frp 全局 Logger 上的 io.Writer：保留最近 N 行，并把每一行转发给订阅者。
@@ -38,13 +41,46 @@ type LogSink struct {
 	subID int
 
 	hide concealer // 官方节点的地址换成节点名，见 conceal.go
+
+	// 黑盒运行的日志不给界面看（见 LogLine.Private）：带 [run-N] 标签的按标签判断，
+	// 不带标签的（frp 少数全局日志）按当前运行判断。
+	private    map[string]bool
+	privateCur bool
 }
 
 func NewLogSink(max int) *LogSink {
 	if max <= 0 {
 		max = DefaultLogLines
 	}
-	return &LogSink{lines: make([]LogLine, max), max: max, subs: map[int]func(LogLine){}}
+	return &LogSink{lines: make([]LogLine, max), max: max, subs: map[int]func(LogLine){}, private: map[string]bool{}}
+}
+
+// BeginRun 在启动一次运行时调用：private 时这次运行（tag 为 [run-N] 里的 N 部分，可以为空）的日志都不给界面看。
+func (s *LogSink) BeginRun(tag string, private bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.privateCur = private
+	if private && tag != "" {
+		s.private[tag] = true
+	}
+}
+
+// Privatef 写一行只给引擎看的日志（黑盒运行相关、还没有 run 标签的行）。
+func (s *LogSink) Privatef(level, format string, args ...any) {
+	s.appendf(level, true, format, args...)
+}
+
+// isPrivateLocked 判断一行日志属不属于黑盒运行。
+func (s *LogSink) isPrivateLocked(text string) bool {
+	i := strings.Index(text, "[run-")
+	if i < 0 {
+		return s.privateCur
+	}
+	j := strings.IndexByte(text[i:], ']')
+	if j < 0 {
+		return s.privateCur
+	}
+	return s.private[text[i+1:i+j]]
 }
 
 func (s *LogSink) Write(p []byte) (int, error) {
@@ -58,7 +94,7 @@ func (s *LogSink) Write(p []byte) (int, error) {
 		}
 		text := string(bytes.TrimRight(data[:i], "\r"))
 		data = data[i+1:]
-		complete = append(complete, s.storeLocked(text, parseLevel(text)))
+		complete = append(complete, s.storeLocked(text, parseLevel(text), s.isPrivateLocked(text)))
 	}
 	s.partial = append([]byte(nil), data...)
 	s.mu.Unlock()
@@ -69,21 +105,28 @@ func (s *LogSink) Write(p []byte) (int, error) {
 
 // Appendf 写一行客户端自己的日志（例如连接失败的中文解释），格式和 frp 的日志行一致。
 func (s *LogSink) Appendf(level, format string, args ...any) {
+	s.appendf(level, false, format, args...)
+}
+
+func (s *LogSink) appendf(level string, private bool, format string, args ...any) {
 	tag := map[string]string{"trace": "T", "debug": "D", "info": "I", "warn": "W", "error": "E"}[level]
 	if tag == "" {
 		tag, level = "I", "info"
 	}
 	text := fmt.Sprintf("%s [%s] [moefrp] %s", time.Now().Format("2006-01-02 15:04:05.000"), tag, fmt.Sprintf(format, args...))
 	s.mu.Lock()
-	line := s.storeLocked(text, level)
+	line := s.storeLocked(text, level, private || s.isPrivateLocked(text))
 	s.mu.Unlock()
 	s.publish([]LogLine{line})
 }
 
-func (s *LogSink) storeLocked(text, level string) LogLine {
+func (s *LogSink) storeLocked(text, level string, private bool) LogLine {
 	text = s.hide.apply(text)
 	s.seq++
-	line := LogLine{Seq: s.seq, Level: level, Text: text}
+	line := LogLine{Seq: s.seq, Level: level, Text: text, Private: private}
+	if private {
+		return line
+	}
 	s.lines[s.next] = line
 	s.next = (s.next + 1) % s.max
 	if s.next == 0 {

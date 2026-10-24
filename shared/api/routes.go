@@ -15,6 +15,8 @@ const Prefix = "/api/v1"
 const (
 	RouteHealthz      = "/healthz"
 	RouteClientConfig = Prefix + "/client/config"
+	// RouteClientImages 是图片面板的图源，登录后才能拿（公开的 client/config 里不带）。
+	RouteClientImages = Prefix + "/client/images"
 
 	RouteRegister       = Prefix + "/auth/register"
 	RouteLogin          = Prefix + "/auth/login"

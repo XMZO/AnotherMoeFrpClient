@@ -51,7 +51,19 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/v1/client/config
 func (s *Server) handleClientConfig(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.clientCfg().ClientConfig())
+	writeJSON(w, http.StatusOK, s.publicClientConfig())
+}
+
+// publicClientConfig 是不需要登录就能拿的客户端配置：不带图源（图源只给登录的用户）。
+func (s *Server) publicClientConfig() api.ClientConfigResponse {
+	cc := s.clientCfg().ClientConfig()
+	cc.ImageSources = []api.ImageSource{}
+	return cc
+}
+
+// GET /api/v1/client/images
+func (s *Server) handleClientImages(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, api.ClientImagesResponse{ImageSources: s.clientCfg().ClientConfig().ImageSources})
 }
 
 // POST /api/v1/auth/register

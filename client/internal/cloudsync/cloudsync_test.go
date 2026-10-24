@@ -85,6 +85,7 @@ type device struct {
 	m        *Manager
 	offMu    sync.Mutex
 	official [][]api.OfficialNode // 每次 OnOfficial 回调收到的列表
+	images   [][]api.ImageSource  // 每次 OnImages 回调收到的列表
 	ps       *store.ProfileStore
 	creds    *credstore.Memory
 	eng      *fakeEngine
@@ -111,6 +112,10 @@ func newDevice(t *testing.T, srv *fakeServer, dir string) *device {
 		Logf: t.Logf, OnOfficial: func(n []api.OfficialNode) {
 			d.offMu.Lock()
 			d.official = append(d.official, n)
+			d.offMu.Unlock()
+		}, OnImages: func(src []api.ImageSource) {
+			d.offMu.Lock()
+			d.images = append(d.images, src)
 			d.offMu.Unlock()
 		}})
 	d.m.SetEmitter(d.ev.emit)
@@ -651,6 +656,41 @@ func TestOfficialNodesSync(t *testing.T) {
 	}
 	if c := d.officialCalls(); c[len(c)-1] != nil || len(d.ps.Sync().Official) != 0 {
 		t.Fatal("退出登录应清空官方节点")
+	}
+}
+
+func (d *device) imageCalls() [][]api.ImageSource {
+	d.offMu.Lock()
+	defer d.offMu.Unlock()
+	return append([][]api.ImageSource(nil), d.images...)
+}
+
+// 图源只给登录的用户：登录后拉一次，之后的同步不重复拉，面板改了配置时再拉；退出登录清空
+func TestImageSourcesSync(t *testing.T) {
+	srv := newFakeServer()
+	defer srv.Close()
+	srv.images = []api.ImageSource{{URL: "https://img.example/a", Weight: 1}}
+	d := newDevice(t, srv, "")
+	d.login(t, true)
+	if c := d.imageCalls(); len(c) != 1 || len(c[0]) != 1 || c[0][0].URL != "https://img.example/a" {
+		t.Fatalf("登录后拿到图源：%+v", c)
+	}
+	d.syncNow(t)
+	srv.mu.Lock()
+	calls := srv.imagesCalls
+	srv.images = append(srv.images, api.ImageSource{URL: "https://img.example/b", Weight: 2})
+	srv.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("普通同步不应重复拉图源：%d 次", calls)
+	}
+	d.m.RefreshImages()
+	waitFor(t, "图源刷新", func() bool { c := d.imageCalls(); return len(c) == 2 && len(c[1]) == 2 })
+
+	if err := d.m.Logout(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if c := d.imageCalls(); c[len(c)-1] != nil {
+		t.Fatal("退出登录应清空图源")
 	}
 }
 

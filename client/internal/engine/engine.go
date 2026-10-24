@@ -97,6 +97,21 @@ type Options struct {
 	// ProxyFor 返回连接这个节点地址时 frp 要走的代理（设置里"frp 连接也走网络代理"），空串表示直连。
 	// 节点自己填了代理时不调用。为空时总是直连。
 	ProxyFor func(serverAddr string) string
+	// Private 判断这份配置的日志是不是只给引擎看（云端配置、订阅：配置对用户是黑盒，界面只显示状态）。为空时都给看。
+	Private func(profileID string) bool
+}
+
+func (e *Engine) private(profileID string) bool {
+	return e.opts.Private != nil && e.opts.Private(profileID)
+}
+
+// notef 写一行和某份配置有关、还没有 run 标签的日志；黑盒配置的只给引擎看。
+func (e *Engine) notef(profileID, level, format string, args ...any) {
+	if e.private(profileID) {
+		e.sink.Privatef(level, format, args...)
+		return
+	}
+	e.sink.Appendf(level, format, args...)
 }
 
 // applyProxy：节点自己没填代理时，按设置决定 frp 走不走网络代理（Options.ProxyFor）。
@@ -359,7 +374,7 @@ func (e *Engine) startLocked(prep *Prepared) error {
 	e.status.Pending = true
 	e.notifyLocked()
 	e.mu.Unlock()
-	e.sink.Appendf("info", "switching to profile %q node %s: waiting for the current service to stop", prep.Profile.Name, nodeLabel(prep.Node))
+	e.notef(prep.Profile.ID, "info", "switching to profile %q node %s: waiting for the current service to stop", prep.Profile.Name, nodeLabel(prep.Node))
 	if first {
 		r.svc.GracefulClose(e.opts.StopGrace)
 	}
@@ -368,6 +383,8 @@ func (e *Engine) startLocked(prep *Prepared) error {
 
 // launchLocked 新建 Service 并在后台运行。调用方持有 e.ctl，且 e.cur 为 nil。
 func (e *Engine) launchLocked(prep *Prepared) error {
+	private := e.private(prep.Profile.ID)
+	e.sink.BeginRun("", private) // 还没有 run 标签时 frp 打的行也按这次运行算
 	fail := func(err error) error {
 		ae := apperr.Wrap(apperr.TunnelStart, err)
 		e.mu.Lock()
@@ -375,7 +392,7 @@ func (e *Engine) launchLocked(prep *Prepared) error {
 			NodeID: prep.Node.ID, NodeLabel: nodeLabel(prep.Node), Error: ae}
 		e.notifyLocked()
 		e.mu.Unlock()
-		e.sink.Appendf("error", "start failed: %v", err)
+		e.notef(prep.Profile.ID, "error", "start failed: %v", err)
 		return ae
 	}
 
@@ -413,6 +430,7 @@ func (e *Engine) launchLocked(prep *Prepared) error {
 		profile: prep.Profile,
 		node:    prep.Node,
 	}
+	e.sink.BeginRun(r.tag, private)
 	// frp 的 Run 会沿用 ctx 里的 xlog.Logger，于是这个 Service 打出的每一行都带 [run-N] 前缀。
 	// 全局日志出口是共享的（PLAN 6.3.7），靠这个前缀才能确定一行日志属于哪个 Service。
 	xl := xlog.New().AddPrefix(xlog.LogPrefix{Name: "moefrp", Value: r.tag, Priority: 1})
@@ -793,14 +811,22 @@ func (e *Engine) pollLoop(r *run) {
 
 		exp := r.svc.StatusExporter()
 		list := make([]ProxyStatus, 0, len(proxies))
-		for _, p := range proxies {
-			st := ProxyStatus{ID: p.ID, Name: p.Name, Type: p.Type}
-			if ws, ok := exp.GetProxyStatus(p.Name); ok && ws != nil {
+		read := func(name string) ProxyStatus {
+			var st ProxyStatus
+			if ws, ok := exp.GetProxyStatus(name); ok && ws != nil {
 				st.Phase, st.Err, st.RemoteAddr = ws.Phase, ws.Err, ws.RemoteAddr
 				if ws.Err != "" {
 					st.Code = ClassifyProxyError(ws.Err)
 				}
 			}
+			return st
+		}
+		for _, p := range proxies {
+			st := read(p.Name)
+			if p.Type == model.ProxyTCP && p.WithUDP {
+				st = mergeUDPHalf(st, read(p.UDPName()))
+			}
+			st.ID, st.Name, st.Type = p.ID, p.Name, p.Type
 			list = append(list, st)
 		}
 
@@ -811,6 +837,22 @@ func (e *Engine) pollLoop(r *run) {
 		}
 		e.mu.Unlock()
 	}
+}
+
+// mergeUDPHalf 把 tcp+udp 代理两半的状态合成界面上的一行：两半都在运行才算运行中；
+// 有一半出错就显示出错的那一半（udp 的错误前面加"UDP："）；否则显示还没就绪的那一半。
+func mergeUDPHalf(tcp, udp ProxyStatus) ProxyStatus {
+	switch {
+	case tcp.Err != "" || tcp.Phase == "start error" || tcp.Phase == "check failed":
+		return tcp
+	case udp.Err != "" || udp.Phase == "start error" || udp.Phase == "check failed":
+		tcp.Phase, tcp.Code = udp.Phase, udp.Code
+		tcp.Err = "UDP：" + udp.Err
+		return tcp
+	case tcp.Phase == "running" && udp.Phase != "running":
+		tcp.Phase = udp.Phase
+	}
+	return tcp
 }
 
 // ClassifyProxyError 把 frps 拒绝代理时的原文分类（文本出自 frp server/ports、server/control.go 等）。

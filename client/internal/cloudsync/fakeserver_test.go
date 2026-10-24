@@ -40,6 +40,9 @@ type fakeServer struct {
 
 	official      []api.OfficialNode // nil 表示服务端没有这个接口（旧版本，返回 404）
 	officialCalls int
+
+	images      []api.ImageSource // nil 表示服务端没有这个接口（旧版本，返回 404）
+	imagesCalls int
 }
 
 func newFakeServer() *fakeServer {
@@ -167,6 +170,14 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == api.RouteClientImages:
+		f.imagesCalls++
+		if f.images == nil {
+			writeErr(w, apierr.New(apierr.NotFound))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ClientImagesResponse{ImageSources: f.images})
 	case r.Method == http.MethodGet && r.URL.Path == api.RouteOfficialNodes:
 		if f.official == nil {
 			writeErr(w, apierr.New(apierr.NotFound))

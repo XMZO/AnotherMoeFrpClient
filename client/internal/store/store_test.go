@@ -18,7 +18,7 @@ func TestSettingsDefaultsAndRoundTrip(t *testing.T) {
 		t.Fatalf("open: %v %q", err, warn)
 	}
 	s := st.Get()
-	if s.InstallID == "" || s.Theme != ThemeSystem || s.CloseAction != CloseToTray || s.LogLevel != "info" {
+	if s.InstallID == "" || s.Theme != ThemeSystem || s.CloseAction != CloseAsk || s.LogLevel != "info" {
 		t.Fatalf("defaults: %+v", s)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -76,7 +76,7 @@ func TestSettingsCorruptAndPartial(t *testing.T) {
 	if err != nil || warn != "" {
 		t.Fatal(err, warn)
 	}
-	if s := st.Get(); s.Theme != ThemeDark || s.CloseAction != CloseToTray || s.InstallID == "" {
+	if s := st.Get(); s.Theme != ThemeDark || s.CloseAction != CloseAsk || s.InstallID == "" {
 		t.Fatalf("fill: %+v", s)
 	}
 }

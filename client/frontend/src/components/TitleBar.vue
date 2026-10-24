@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 自绘标题栏（窗口是无边框的，见 main.go 的 Frameless）。拖动、贴边、改大小由 Wails 运行时处理：
-// 带 --wails-draggable: drag 的区域能拖动窗口，窗口边缘能拖动改大小。关闭按钮和系统的一样走 WindowClosing（默认最小化到托盘）。
+// 带 --wails-draggable: drag 的区域能拖动窗口，窗口边缘能拖动改大小。关闭按钮和系统的一样走 WindowClosing（默认弹窗询问最小化到托盘还是退出，可在设置里固定）。
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { Window } from '@wailsio/runtime'
 

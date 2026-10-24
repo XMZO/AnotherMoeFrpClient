@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import Icon from '../ui/Icon.vue'
+import Select from '../ui/Select.vue'
 import Modal from '../ui/Modal.vue'
 import Check from '../ui/Check.vue'
 import { message } from '../ui/feedback'
 import { ShareService, type SharePreview, type P2PBind } from '../api'
 import { useProfilesStore } from '../stores/profiles'
 import { describeError, toAppError } from '../errors'
-import { shareKindHints, shareKindLabels } from '../labels'
+import { proxyTypeLabel, shareKindHints, shareKindLabels } from '../labels'
 import { formatTime } from './shareFormat'
 import { portValue } from '../util'
 
@@ -32,6 +33,10 @@ watch(show, (v) => {
 })
 
 const kind = computed(() => preview.value?.kind ?? '')
+const nodeOptions = computed(() => [
+  ...(kind.value !== 'template' ? [{ value: '', label: '默认第一个节点，启动时也可以换' }] : []),
+  ...(preview.value?.nodes ?? []).map((n) => ({ value: n.id, label: n.remark || n.id })),
+])
 
 async function load() {
   error.value = ''
@@ -138,17 +143,14 @@ async function subscribe() {
         <template v-else>
           <div v-if="kind !== 'p2p'" class="fld">
             <label for="sb-node">节点</label>
-            <select id="sb-node" v-model="nodeId" class="inp" data-testid="subscribe-node">
-              <option v-if="kind !== 'template'" value="">默认第一个节点，启动时也可以换</option>
-              <option v-for="n in preview.nodes ?? []" :key="n.id" :value="n.id">{{ n.remark || n.id }}</option>
-            </select>
+            <Select id="sb-node" v-model="nodeId" :options="nodeOptions" data-testid="subscribe-node" />
           </div>
 
           <div v-if="kind === 'full'" class="fld">
             <span class="lbl">会运行的代理</span>
             <div class="pv-list">
               <div v-for="p in preview.proxies ?? []" :key="p.name" class="pv-item">
-                <b>{{ p.name }}</b><span class="type">{{ p.type }}</span>
+                <b>{{ p.name }}</b><span class="type">{{ proxyTypeLabel(p) }}</span>
                 <span class="mono pv-remote">{{ p.remotePort ? `:${p.remotePort}` : (p.customDomains ?? []).join(', ') || p.subdomain || '' }}</span>
               </div>
             </div>

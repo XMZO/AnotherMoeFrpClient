@@ -20,6 +20,7 @@ const (
 	ThemeLight  = "light"
 	ThemeDark   = "dark"
 
+	CloseAsk    = "ask" // 每次点关闭都询问（询问窗口里勾"记住"后改成下面两个之一）
 	CloseToTray = "tray"
 	CloseQuit   = "quit"
 
@@ -35,13 +36,14 @@ const (
 
 var (
 	Themes       = []string{ThemeSystem, ThemeLight, ThemeDark}
-	CloseActions = []string{CloseToTray, CloseQuit}
+	CloseActions = []string{CloseAsk, CloseToTray, CloseQuit}
 	LogLevels    = []string{"trace", "debug", "info", "warn", "error"}
 	NetProxies   = []string{NetProxySystem, NetProxyNone, NetProxyCustom}
 )
 
 // settingsSchema 2：新增 proxyUrl、autoStart、imagePanel（Phase 5）。
-const settingsSchema = 2
+// 3：点关闭按钮默认改为每次询问。
+const settingsSchema = 3
 
 // Settings 是 %APPDATA%\MoeFrp\settings.json 的内容：明文，不含任何机密（PLAN 6.5）。
 type Settings struct {
@@ -84,7 +86,7 @@ func DefaultSettings() Settings {
 		SchemaVersion: settingsSchema,
 		InstallID:     model.NewID(),
 		Theme:         ThemeSystem,
-		CloseAction:   CloseToTray,
+		CloseAction:   CloseAsk,
 		LogLevel:      "info",
 		NetworkProxy:  NetProxySystem,
 		ImagePanel:    true,
@@ -134,6 +136,9 @@ func (s *Settings) fill() {
 	if s.SchemaVersion < 2 { // 旧文件没有 imagePanel、releaseOnHide，按默认开启
 		s.ImagePanel = true
 		s.ReleaseOnHide = true
+	}
+	if s.SchemaVersion < 3 && s.CloseAction == CloseToTray { // 以前的默认值，不是用户选的：改成每次询问，勾"记住"后不再问
+		s.CloseAction = CloseAsk
 	}
 	s.SchemaVersion = settingsSchema
 }

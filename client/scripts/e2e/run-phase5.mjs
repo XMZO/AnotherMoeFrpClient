@@ -1,7 +1,7 @@
 // PLAN Phase 5（体验完善）的端到端验收，用 MoeFrp-e2e.exe（不登录）：
 //
 //   1. 公告、新版本提示（服务端配置 latest_version 高于客户端）；"关于"页检查更新、开源许可
-//   2. 图片面板：图源由服务端下发，图片显示出来，右键菜单，"换一张"，关闭后面板消失
+//   2. 图片面板：没登录时不显示、不发图片请求；登录后图源由服务端下发，图片显示出来，右键菜单，"换一张"，关闭后面板消失
 //   3. 自定义网络代理：地址不合法时报错；合法时图片请求走代理（只有代理能解析的域名也能取到图）
 //   4. 隐藏到托盘时释放 WebView2：关窗后 msedgewebview2 退出、进程树内存下降、隧道照常运行；
 //      再次启动 exe（单实例）重新创建窗口，状态正常
@@ -9,7 +9,8 @@
 //   6. 启动后自动连接：重启后隧道自动运行
 //   7. 以 --autostart 启动：只有托盘、不创建窗口、自动连接照常；再次启动 exe 才出现窗口
 //
-// 前提：已构建 bin\MoeFrp-e2e.exe。用法：node scripts/e2e/run-phase5.mjs [--keep]
+// 前提：已构建 bin\MoeFrp-e2e.exe。图片面板要登录，第 2 步起是登录状态（账号通过管理接口发邀请码注册）。
+// 用法：node scripts/e2e/run-phase5.mjs [--keep]
 // 占用 127.0.0.1 的 18082（服务端）、18095（图片）、18096（HTTP 代理）、17200–17202（frps、echo、远程端口）、9381（CDP）。
 import { spawn, execFileSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -20,6 +21,7 @@ import path from 'node:path'
 import zlib from 'node:zlib'
 import { fileURLToPath } from 'node:url'
 import { connect, sleep, tid, waitUntil } from './cdp.mjs'
+import { ADMIN_SETUP_CODE, adminClient } from './adminapi.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const client = path.resolve(here, '..', '..')
@@ -36,6 +38,8 @@ const ECHO_PORT = 17201
 const REMOTE_PORT = 17202
 const CDP = 9381
 const TOKEN = 'e2e-phase5-token'
+const NICK = 'phase5user'
+const PASSWORD = 'phase5-password-1'
 const ANNOUNCE = 'e2e 公告：服务器今晚维护'
 const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
 
@@ -118,7 +122,10 @@ const proxyServer = http.createServer((req, res) => {
 // ---------- 进程 ----------
 const serverExe = path.join(T, 'moefrp-server.exe')
 const localfrps = path.join(T, 'localfrps.exe')
-log('building server, localfrps')
+const credtool = path.join(T, 'credtool.exe')
+const CRED_PREFIX = 'MoeFrp/session/e2e-'
+log('building server, credtool, localfrps')
+execFileSync('go', ['build', '-o', credtool, './scripts/e2e/credtool'], { cwd: client, stdio: 'inherit' })
 execFileSync('go', ['build', '-o', serverExe, './cmd/moefrp-server'], { cwd: path.join(gogogo, 'server'), stdio: 'inherit' })
 execFileSync('go', ['build', '-o', localfrps, './cmd/localfrps'], { cwd: client, stdio: 'inherit' })
 const cfgFile = path.join(T, 'server.toml')
@@ -277,7 +284,7 @@ async function main() {
   await new Promise((r) => proxyServer.listen(PROXY_PORT, '127.0.0.1', r))
   execFileSync(serverExe, ['migrate', '-c', cfgFile], { stdio: 'ignore' })
   const logFile = fs.openSync(path.join(OUT, 'server.log'), 'a')
-  server = spawn(serverExe, ['serve', '-c', cfgFile], { stdio: ['ignore', logFile, logFile] })
+  server = spawn(serverExe, ['serve', '-c', cfgFile], { stdio: ['ignore', logFile, logFile], env: { ...process.env, MOEFRP_ADMIN_SETUP_CODE: ADMIN_SETUP_CODE } })
   await waitUntil('server', async () => (await fetch(`http://127.0.0.1:${SERVER_PORT}/healthz`)).ok, 15000, 100)
   frps = spawn(localfrps, ['-port', String(FRPS_PORT), '-token', TOKEN, '-echo', `127.0.0.1:${ECHO_PORT}`], { stdio: 'ignore' })
   await waitUntil('frps', async () => !(await portFree(FRPS_PORT)), 10000, 100)
@@ -301,7 +308,23 @@ async function main() {
   check('about_update_and_licenses', (await page.text(tid('about-update-available'))).includes('3.9.0') && /frp/.test(licenses) && /Apache/.test(licenses))
 
   // ---- 2. 图片面板（系统代理下 img.e2e.test 解析不了，靠回退到本机图源）----
+  // 图源只给登录的用户：没登录时侧栏没有图片面板，也不发图片请求
   await page.click(tid('nav-tunnel'))
+  const noPanelLoggedOut = !(await page.exists(tid('image-panel')))
+  check('image_panel_needs_login', noPanelLoggedOut && imgRequests === 0, { noPanelLoggedOut, imgRequests })
+  const [invite] = await adminClient(`http://127.0.0.1:${SERVER_PORT}`).createInvites(1)
+  const reg = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/v1/auth/register`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nickname: NICK, password: PASSWORD, inviteCode: invite }),
+  })
+  if (!reg.ok) throw new Error('register: ' + reg.status + ' ' + (await reg.text()))
+  await page.click(tid('account-login'))
+  await page.waitFor('auth modal', () => page.exists(tid('login-nickname')))
+  await page.clickText('.tab', '登录')
+  await page.type(tid('login-nickname'), NICK)
+  await page.type(tid('login-password'), PASSWORD)
+  await page.click(tid('login-submit'))
+  await page.waitFor('logged in', async () => (await page.attr(tid('account-area'), 'data-logged-in')) === '1', 15000)
   await page.waitFor('image shown', imgLoaded, 30000)
   const id1 = await imgId()
   check('image_panel_shows_server_sources', !!id1 && (await imgLoaded()), { id1, imgRequests })
@@ -312,7 +335,7 @@ async function main() {
   await page.clickText('.menu-item', '换一张')
   await page.waitFor('image changed', async () => (await imgId()) !== id1 && (await imgLoaded()), 15000).catch(() => {})
   const id2 = await imgId()
-  check('image_context_menu_and_next', JSON.stringify(menuItems) === JSON.stringify(['换一张', '复制', '另存为…', '在浏览器打开原图']) && id2 && id2 !== id1, { menuItems, id1, id2 })
+  check('image_context_menu_and_next', JSON.stringify(menuItems) === JSON.stringify(['换一张', '复制', '另存为…']) && id2 && id2 !== id1, { menuItems, id1, id2 })
 
   // ---- 3. 自定义网络代理 ----
   await page.click(tid('nav-settings'))
@@ -336,13 +359,14 @@ async function main() {
   check('custom_proxy_validated_and_used', /代理地址格式不对/.test(badToast) && viaProxy.some((h) => h.startsWith('img.e2e.test')), { badToast, viaProxy })
   // 改回不使用代理，避免影响后面
   await page.click(tid('nav-settings'))
-  await page.clickText('.radio', '不使用代理')
+  await page.clickText('.radio', '不使用')
   await sleep(300)
 
   // ---- 隧道：本地配置 + 节点 + 代理，启动 ----
   await page.click(tid('nav-tunnel'))
   await page.click(tid('profile-new'))
   await page.type(tid('profile-name-input'), '自动连接测试')
+  if (await page.exists(tid('profile-origin-local'))) await page.click(tid('profile-origin-local'))
   await page.clickText('.dlg-actions button', '确定')
   await page.waitFor('profile', () => page.exists(tid('profile-item-自动连接测试')))
   await page.clickText('.tab', '节点')
@@ -367,13 +391,14 @@ async function main() {
   check('tunnel_running_before_hide', await echoEventually(REMOTE_PORT))
 
   // ---- 4. 隐藏到托盘时释放 WebView2 ----
+  await setSetting('最小化') // 默认是每次询问；这里固定为最小化到托盘
   await sleep(1500)
   const memWith = treeMemory(appProc.pid)
   const releases = diagCount(/release WebView2/)
   page.close()
   page = null
   try {
-    execFileSync('taskkill', ['/PID', String(appProc.pid)], { stdio: 'ignore' }) // WM_CLOSE → 关闭按钮的行为（默认：最小化到托盘并释放）
+    execFileSync('taskkill', ['/PID', String(appProc.pid)], { stdio: 'ignore' }) // WM_CLOSE → 关闭按钮的行为（上面设成了最小化到托盘，默认释放界面）
   } catch {}
   await waitUntil('window released', () => diagCount(/release WebView2/) > releases, 10000, 100)
   let memHidden = null
@@ -410,7 +435,7 @@ async function main() {
   // ---- 6. 启动后自动连接 ----
   await page.click(tid('settings-autoconnect'))
   await sleep(300)
-  await setSetting('退出程序')
+  await setSetting('退出')
   await quitApp()
   check('quit_stops_tunnel', !(await echoOk(REMOTE_PORT)))
   await startApp()
@@ -456,7 +481,7 @@ try {
 try {
   if (page) {
     await page.click(tid('nav-settings')).catch(() => {})
-    await page.clickText('.radio', '退出程序').catch(() => {})
+    await page.clickText('.radio', '退出').catch(() => {})
     await sleep(300)
   }
 } catch {}
@@ -467,6 +492,9 @@ for (const v of runValues()) {
     execFileSync('reg', ['delete', RUN_KEY, '/v', name, '/f'], { stdio: 'ignore' })
   } catch {}
 }
+try {
+  execFileSync(credtool, ['delete', CRED_PREFIX], { stdio: 'ignore' }) // 登录时"保持登录"存的令牌
+} catch {}
 if (server) server.kill()
 if (frps) frps.kill()
 imgServer.close()

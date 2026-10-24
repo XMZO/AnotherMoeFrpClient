@@ -161,9 +161,9 @@ async function main() {
   await p.waitFor('running', async () => (await p.attr(tid('run-state'), 'data-state')) === 'running', 20000)
   await p.waitFor('proxy running', async () => (await p.attr(tid('proxy-status-web'), 'data-phase')) === 'running', 15000)
   check('tunnel_running_on_official', true)
-  // 官方节点对用户是黑盒：日志里不出现节点地址
+  // 官方节点只给云端配置用，云端配置对用户是黑盒：这次运行的原始日志根本不发给界面
   const logText = await p.evaluate(`document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('logs').lines.map((l) => l.text).join('\\n')`)
-  check('logs_hide_node_address', logText.includes('东京') && !logText.includes(`:${FRPS_PORT}`), logText.split('\n').filter((l) => l.includes('via node')))
+  check('cloud_run_logs_not_sent', !logText.includes('via node') && !logText.includes('login to server') && !logText.includes(`:${FRPS_PORT}`), logText.split('\n').slice(-5))
   check('traffic_through_official', (await echoOnce(20010, 'hello-official')).includes('hello-official'))
   const px = await admin.request('GET', `/nodes/${nodeId}/proxies`)
   check('proxy_name_prefixed', px.proxies.some((x) => x.name === `${NICK}.web` && x.user === NICK && x.online), px.proxies.map((x) => x.name))

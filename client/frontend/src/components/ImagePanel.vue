@@ -4,12 +4,12 @@ import Icon from '../ui/Icon.vue'
 import Menu from '../ui/Menu.vue'
 import Modal from '../ui/Modal.vue'
 import { message } from '../ui/feedback'
-import { AppService, ImageService, type ImageInfo } from '../api'
+import { ImageService, type ImageInfo } from '../api'
 import { useSettingsStore } from '../stores/settings'
 import { codeText, describeError, toAppError } from '../errors'
 
-// 图片面板（PLAN 6.9）：图源由服务端下发，图片由 Go 端下载后从本地地址显示。
-// 每 60 秒换一张（窗口不可见时不换）；右键：换一张、复制、另存为、查看原图。
+// 图片面板（PLAN 6.9）：图源由服务端下发，登录后才有（没登录时侧栏不显示这个面板）；图片由 Go 端下载后从本地地址显示。
+// 每 60 秒换一张（窗口不可见时不换）；右键：换一张、复制、另存为（随机图接口每次返回的都不一样，所以没有"打开原图"）。
 const REFRESH_MS = 60_000
 
 const settings = useSettingsStore()
@@ -31,7 +31,7 @@ async function next(manual = false) {
   try {
     const enabled = await ImageService.Enabled()
     if (!enabled) {
-      // 图源还没下发（启动后要先拉一次客户端配置），过一会再试
+      // 图源还没拿到（登录后第一次同步时拉取），过一会再试
       clearTimeout(retry)
       retry = setTimeout(() => next(), 5000)
       return
@@ -78,7 +78,6 @@ const items = computed(() => [
   { key: 'next', label: '换一张', icon: 'refresh' as const },
   { key: 'copy', label: '复制', icon: 'copy' as const, disabled: !img.value },
   { key: 'save', label: '另存为…', icon: 'save' as const, disabled: !img.value },
-  { key: 'source', label: '在浏览器打开原图', icon: 'ext' as const, disabled: !img.value?.source },
 ])
 
 async function act(key: string) {
@@ -92,7 +91,7 @@ async function act(key: string) {
     } else if (key === 'save' && cur) {
       const path = await ImageService.SaveAs(cur.id)
       if (path) message.success(`已保存到 ${path}`)
-    } else if (key === 'source' && cur?.source) await AppService.OpenURL(cur.source)
+    }
   } catch (e) {
     message.error(describeError(toAppError(e)))
   }
@@ -136,7 +135,6 @@ function wheel(e: WheelEvent) {
         <button type="button" class="btn quiet xs" @click="act('next')"><Icon name="refresh" size="xs" />换一张</button>
         <button type="button" class="btn quiet xs" :disabled="!img" @click="act('copy')"><Icon name="copy" size="xs" />复制</button>
         <button type="button" class="btn quiet xs" :disabled="!img" @click="act('save')"><Icon name="save" size="xs" />另存为…</button>
-        <button type="button" class="btn quiet xs" :disabled="!img?.source" @click="act('source')"><Icon name="ext" size="xs" />打开原图</button>
       </template>
     </Modal>
   </div>
@@ -211,9 +209,11 @@ function wheel(e: WheelEvent) {
   border-radius: 16px;
   background: var(--fill);
 }
+/* 铺满舞台再按比例缩进去：横图竖图都完整显示（max-height 的百分比在网格里算不出来，会被裁掉） */
 .viewer-stage img {
-  max-width: 100%;
-  max-height: 100%;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
   transition: transform 0.15s;
 }
 @media (min-width: 1360px) {

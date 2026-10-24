@@ -33,7 +33,7 @@ import (
 	"moefrp/shared/api"
 )
 
-// 图片面板（PLAN 6.9）：图源由服务端下发（GET /api/v1/client/config 的 imageSources）。
+// 图片面板（PLAN 6.9）：图源由服务端下发，登录后才有（GET /api/v1/client/images）。
 // 图片由 Go 端下载（走应用的代理设置），存进 %LOCALAPPDATA%\MoeFrp\images\，
 // 前端通过本地地址 /moefrp-img/<id> 显示，不受 CORS 限制。设置里关闭后不发任何图片请求。
 
@@ -54,7 +54,7 @@ type ImageInfo struct {
 	URL    string `json:"url"` // 前端用的本地地址
 	Mime   string `json:"mime"`
 	Size   int64  `json:"size"`
-	Source string `json:"source"` // 图片的原始地址（右键"查看原图"可以在浏览器打开）
+	Source string `json:"source"` // 图片的原始地址（记录用；随机图接口每次返回的不一样，界面上不提供打开）
 }
 
 // ImageService 绑定给前端。
@@ -79,10 +79,13 @@ func NewImageService(dir string, settings *store.SettingsStore, client func() *h
 	return s, &ImageControl{s: s}
 }
 
-// SetSources 更新图源（拿到服务端的客户端配置后调用）。
+// SetSources 更新图源（登录后拿到图源时调用；退出登录时传 nil，当前的图也不再显示）。
 func (c *ImageControl) SetSources(src []api.ImageSource) {
 	c.s.mu.Lock()
 	c.s.sources = slices.Clone(src)
+	if len(src) == 0 {
+		c.s.current = nil
+	}
 	c.s.mu.Unlock()
 }
 

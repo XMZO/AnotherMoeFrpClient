@@ -20,8 +20,8 @@ const st = computed(() => tunnel.status)
 const runningHere = computed(() => !!profiles.current && tunnel.runningProfileId === profiles.current.id)
 const failedHere = computed(() => st.value.state === 'failed' && st.value.profileId === profiles.current?.id)
 
-// 官方节点：自己的配置（云端、本地）都能用，订阅来的配置不能用
-const officialNodes = computed(() => (profiles.isSubscription ? [] : tunnel.official))
+// 官方节点只给云端配置用（和云端配置一样是黑盒）；本地配置、订阅来的配置都不能用
+const officialNodes = computed(() => (profiles.isCloud ? tunnel.official : []))
 
 // 默认节点：正在运行的 → 上次给这份配置选的 → 第一个（先自己的节点，再官方节点）
 watch(

@@ -31,7 +31,7 @@ export interface ImageInfo {
     "size": number;
 
     /**
-     * 图片的原始地址（右键"查看原图"可以在浏览器打开）
+     * 图片的原始地址（记录用；随机图接口每次返回的不一样，界面上不提供打开）
      */
     "source": string;
 }

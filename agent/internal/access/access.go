@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -66,6 +67,11 @@ type Store struct {
 	Online func(user, except string, live func(runID string) bool) int
 	// Now 返回当前时间，测试时替换。
 	Now func() time.Time
+	// Kick 关闭 run ID 对应的 frpc（frpsrv.Manager.CloseClient）：它的登录已经失效（会话被吊销、没有权限了、凭证被重置、
+	// 面板换了密钥）时调用，连同代理和正在传的连接一起断开。重连时会被拒绝，所以不会来回踢。
+	// Alive 判断 run ID 对应的 frpc 还连着（frpsrv.Manager.HasClient），用来清理已经断开的记录。都可以为 nil。
+	Kick  func(runID string) bool
+	Alive func(runID string) bool
 
 	mu      sync.Mutex
 	enabled bool
@@ -76,6 +82,7 @@ type Store struct {
 	used    map[string]int64                 // 用过的票据随机数 → 票据过期时间
 	active  map[string]string                // 会话 → 当前生效的 run ID（同一会话后登录的生效）
 	runs    map[string]bool                  // 生效中的 run ID
+	metas   map[string]map[string]string     // 生效中的 run ID → 登录时的 metadatas（新表来了用它重新核对身份）
 }
 
 // state 是需要跨重启保存的准入状态。
@@ -111,7 +118,7 @@ func Load(path string, v *vault.Vault) (*Store, error) {
 		path: path, statePath: strings.TrimSuffix(path, ".json") + "-state.json", vault: v,
 		Online: onlineFromStats, Now: time.Now,
 		users: map[string]agentproto.AccessUser{}, revoked: map[string]int64{}, used: map[string]int64{},
-		active: map[string]string{}, runs: map[string]bool{},
+		active: map[string]string{}, runs: map[string]bool{}, metas: map[string]map[string]string{},
 	}
 	return s, s.Reload()
 }
@@ -206,13 +213,56 @@ func (s *Store) Apply(t agentproto.AccessTable) (enabledChanged bool, err error)
 		return false, err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err := s.writeLocked(vaultTable, s.path, b); err != nil {
+		s.mu.Unlock()
 		return false, err
 	}
 	enabledChanged = s.enabled != t.Enabled
 	s.set(t)
-	return enabledChanged, s.saveLocked()
+	stale := s.staleRunsLocked()
+	err = s.saveLocked()
+	s.mu.Unlock()
+	s.kick(stale)
+	return enabledChanged, err
+}
+
+// staleRunsLocked 用当前的表重新核对每个已登录 frpc 的身份（会话被吊销、没有权限了、凭证被重置、面板换了密钥），
+// 不再有效的从记录里去掉并返回，由调用方在锁外关掉；已经断开的顺便清理。调用方持有锁。
+func (s *Store) staleRunsLocked() []string {
+	var stale []string
+	for runID := range s.runs {
+		if s.Alive != nil && !s.Alive(runID) {
+			s.dropRunLocked(runID)
+			continue
+		}
+		if _, _, reject := s.identify(s.metas[runID]); reject != "" {
+			s.dropRunLocked(runID)
+			stale = append(stale, runID)
+		}
+	}
+	return stale
+}
+
+func (s *Store) dropRunLocked(runID string) {
+	delete(s.runs, runID)
+	delete(s.metas, runID)
+	for sess, r := range s.active {
+		if r == runID {
+			delete(s.active, sess)
+		}
+	}
+}
+
+// kick 关掉这些 frpc（在锁外调用：关闭时 frps 可能回调插件）。
+func (s *Store) kick(runIDs []string) {
+	if s.Kick == nil || len(runIDs) == 0 {
+		return
+	}
+	go func() {
+		for _, id := range runIDs {
+			s.Kick(id)
+		}
+	}()
 }
 
 // saveLocked 清理过期的记录并保存状态。调用方持有锁。
@@ -398,10 +448,14 @@ func (s *Store) login(c *plugin.LoginContent) (string, any) {
 		content = c
 	}
 	if old := s.active[claims.Session]; old != "" && old != c.RunID {
+		// 同一会话在别处重新连接：旧的那个停用（不接受新代理和新连接），但不主动断开——
+		// 它的会话还有效，断开后会领新票据重连，又把这个顶掉，两边来回互踢
 		delete(s.runs, old)
+		delete(s.metas, old)
 	}
 	s.active[claims.Session] = c.RunID
 	s.runs[c.RunID] = true
+	s.metas[c.RunID] = maps.Clone(c.Metas)
 	return "", content
 }
 

@@ -104,6 +104,11 @@ try {
     $summary.quitWhileRunning = $q
 
     # ---- 第二次运行：配置持久化、连接失败原因、外壳 ----
+    # 点关闭默认是每次询问（前端弹窗）；这里固定为最小化到托盘、不释放界面，下面检查隐藏到托盘
+    $sf = Join-Path $dataHome "Roaming\settings.json"
+    $sj = Get-Content $sf -Raw | ConvertFrom-Json
+    $sj.closeAction = "tray"; $sj.releaseOnHide = $false
+    [IO.File]::WriteAllText($sf, ($sj | ConvertTo-Json -Depth 5))
     $app = Start-App
     node "$PSScriptRoot\drive-e2e.mjs" $CdpPort $OutDir relaunch > (Join-Path $OutDir "relaunch.json")
     $summary.relaunchScenarioOk = ($LASTEXITCODE -eq 0)

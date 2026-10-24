@@ -116,6 +116,14 @@ func ProfileData(d model.ProfileData) error {
 	for i, p := range d.Proxies {
 		checkProxy(&c, i, p)
 		checkName(path("proxies", i, "name"), p.Name)
+		if p.Type == model.ProxyTCP && p.WithUDP && p.Name != "" {
+			// udp 那一半在 frp 里叫 name-udp，也不能和别的代理、访客重名
+			if first, ok := names[p.UDPName()]; ok {
+				c.add(path("proxies", i, "name"), ReasonDuplicate, "同时转发 UDP 时会用到名称 %q，与 %s 重复", p.UDPName(), first)
+			} else {
+				names[p.UDPName()] = path("proxies", i, "name")
+			}
+		}
 		if p.ID != "" {
 			if proxyIDs[p.ID] {
 				c.add(path("proxies", i, "id"), ReasonDuplicate, "代理 ID 重复")
@@ -191,6 +199,15 @@ func checkProxy(c *collector, i int, p model.Proxy) {
 	checkPort(c, path("proxies", i, "localPort"), p.LocalPort, true)
 	if p.RemotePort != 0 {
 		checkPort(c, path("proxies", i, "remotePort"), p.RemotePort, false)
+	}
+	if p.WithUDP {
+		switch {
+		case p.Type != model.ProxyTCP:
+			c.add(path("proxies", i, "withUdp"), ReasonInvalid, "只有 tcp 代理可以同时转发 UDP")
+		case p.RemotePort == 0:
+			// 留空时节点给 tcp 和 udp 各分配一个随机端口，两边对不上
+			c.add(path("proxies", i, "remotePort"), ReasonRequired, "同时转发 TCP 和 UDP 时要填远程端口（两种协议用同一个端口）")
+		}
 	}
 
 	for j, d := range p.CustomDomains {

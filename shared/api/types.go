@@ -129,6 +129,7 @@ func (r UpdateProfileRequest) Data() model.ProfileData {
 // ---- 公开接口 ----
 
 // ClientConfigResponse：GET /api/v1/client/config（不需要登录）。
+// ImageSources 只在管理后台的概览里有值；公开接口和实时通道推送里总是空的，图源要登录后从 GET /api/v1/client/images 拿。
 type ClientConfigResponse struct {
 	LatestVersion string        `json:"latestVersion"`
 	MinVersion    string        `json:"minVersion"`
@@ -137,6 +138,11 @@ type ClientConfigResponse struct {
 	ReleaseNotes  string        `json:"releaseNotes"`
 	Announcement  string        `json:"announcement"`
 	ImageSources  []ImageSource `json:"imageSources"`
+}
+
+// ClientImagesResponse：GET /api/v1/client/images（需要登录）。
+type ClientImagesResponse struct {
+	ImageSources []ImageSource `json:"imageSources"`
 }
 
 // ImageSource 是图片面板的一个图源（PLAN 6.9）。

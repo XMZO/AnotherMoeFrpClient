@@ -83,6 +83,7 @@ type PreviewNode struct {
 type PreviewProxy struct {
 	Name          string   `json:"name"`
 	Type          string   `json:"type"`
+	WithUDP       bool     `json:"withUdp,omitempty"` // tcp 代理同时转发 UDP
 	RemotePort    int      `json:"remotePort,omitempty"`
 	CustomDomains []string `json:"customDomains,omitempty"`
 	SubDomain     string   `json:"subdomain,omitempty"`

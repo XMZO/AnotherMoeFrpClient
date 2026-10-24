@@ -299,6 +299,18 @@ func (c *Client) State(ctx context.Context, stateVersion int64) (st api.StateRes
 	return st, false, nil
 }
 
+// ClientImages：GET /api/v1/client/images，图片面板的图源（需要登录）。
+func (c *Client) ClientImages(ctx context.Context) ([]api.ImageSource, error) {
+	var out api.ClientImagesResponse
+	if _, _, err := c.do(ctx, http.MethodGet, api.RouteClientImages, nil, nil, &out); err != nil {
+		return nil, err
+	}
+	if out.ImageSources == nil {
+		out.ImageSources = []api.ImageSource{}
+	}
+	return out.ImageSources, nil
+}
+
 // OfficialNodes：GET /api/v1/official-nodes。etag 不为空时带 If-None-Match，没有变化返回 notModified=true。
 // 返回新的 ETag。
 func (c *Client) OfficialNodes(ctx context.Context, etag string) (nodes []api.OfficialNode, newETag string, notModified bool, err error) {

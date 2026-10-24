@@ -10,7 +10,7 @@ import { useProfilesStore } from '../stores/profiles'
 import { useTunnelStore } from '../stores/tunnel'
 import { Clipboard } from '@wailsio/runtime'
 import { codeText, describeError } from '../errors'
-import { isDomainType, isP2PType, phaseLabels } from '../labels'
+import { frpTypesOf, isDomainType, isP2PType, phaseLabels, proxyTypeLabel } from '../labels'
 import { proxyRemote } from '../util'
 import mascot from '../assets/mascot.png'
 
@@ -66,9 +66,10 @@ interface StatusView {
 function status(p: Proxy): StatusView {
   if (!p.enabled) return { tone: '', label: '未启用', text: '', title: '' }
   // 选中的官方节点不允许这种类型（用户组或单个用户的限制，面板改了实时更新）
-  if (!tunnel.typeAllowed(p.type)) {
+  const blocked = frpTypesOf(p).filter((t) => !tunnel.typeAllowed(t))
+  if (blocked.length) {
     const node = tunnel.limits?.node
-    return { tone: 'bad', label: '节点不允许', text: '', title: `「${node}」不允许你使用 ${p.type}，换其他节点可以用` }
+    return { tone: 'bad', label: '节点不允许', text: '', title: `「${node}」不允许你使用 ${blocked.join(' / ')}，换其他节点可以用` }
   }
   if (!isRunningHere.value) return { tone: '', label: '未运行', text: '', title: '' }
   const st = tunnel.proxyById[p.id]
@@ -139,7 +140,7 @@ async function copyAddr(text: string) {
         />
         <div class="row-name">
           <b :title="row.name" :data-testid="`proxy-row-${row.name}`">{{ row.name }}</b>
-          <span class="type" :class="typeTone(row.type)">{{ row.type }}</span>
+          <span class="type" :class="typeTone(row.type)">{{ proxyTypeLabel(row) }}</span>
           <span v-if="row.useEncryption" class="enc" title="已开启加密"><Icon name="lock" size="xs" /></span>
         </div>
         <div

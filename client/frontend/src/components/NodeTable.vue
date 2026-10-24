@@ -15,7 +15,7 @@ const tunnel = useTunnelStore()
 const drawer = ref<{ show: boolean; index: number }>({ show: false, index: -1 })
 const rows = computed(() => (profiles.current?.nodes ?? []).map((n, index) => ({ ...n, index })))
 const ro = computed(() => profiles.readonly('nodes'))
-const official = computed(() => (profiles.isSubscription ? [] : tunnel.official))
+const official = computed(() => (profiles.isCloud ? tunnel.official : [])) // 官方节点只给云端配置用
 
 defineExpose({ openAdd: () => (drawer.value = { show: true, index: -1 }) })
 

@@ -303,7 +303,7 @@ func (s *Service) Preview(ctx context.Context, userID, id string) (api.SharePrev
 		}
 		for _, p := range payload.Proxies {
 			out.Proxies = append(out.Proxies, api.PreviewProxy{
-				Name: p.Name, Type: p.Type, RemotePort: p.RemotePort, CustomDomains: p.CustomDomains, SubDomain: p.SubDomain,
+				Name: p.Name, Type: p.Type, WithUDP: p.Type == model.ProxyTCP && p.WithUDP, RemotePort: p.RemotePort, CustomDomains: p.CustomDomains, SubDomain: p.SubDomain,
 			})
 		}
 		if sub, err := store.FindSubscription(ctx, tx, userID, row.ID); err == nil {
@@ -620,7 +620,7 @@ func buildPayload(kind string, prof model.Profile, nodeIDs, proxyIDs []string) (
 			if !seen[id] {
 				payload.Targets = append(payload.Targets, model.P2PTarget{
 					ID: p.ID, ServerName: p.Name, Type: p.Type, SecretKey: p.SecretKey,
-					ServerUser: user, LocalPort: p.LocalPort,
+					ServerUser: user, LocalPort: p.LocalPort, UseEncryption: p.UseEncryption, UseCompression: p.UseCompression,
 				})
 				seen[id] = true
 			}

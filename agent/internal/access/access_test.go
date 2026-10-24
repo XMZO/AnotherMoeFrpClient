@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -319,6 +320,7 @@ func TestWithFrps(t *testing.T) {
 		t.Fatalf("frps: %+v", r)
 	}
 	defer m.Close()
+	s.Kick, s.Alive = m.CloseClient, m.HasClient
 	echo := echoServer(t)
 
 	type client struct {
@@ -450,6 +452,36 @@ func TestWithFrps(t *testing.T) {
 	c2 := run("alice", newTicket("sess-1"), true, []string{"q0"}, 20009)
 	waitFor("新 frpc 的代理运行", func() bool { ph, _ := status(c2, "q0"); return ph == "running" && echoOK(20009) })
 	waitFor("原来的 frpc 失效", func() bool { return !echoOK(runningPort) })
+
+	// 会话被吊销：这个 frpc 被直接断开，已经建立的连接也断（以前只是不接受新连接，已有的连接一直通）
+	long, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", 20009))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer long.Close()
+	buf := make([]byte, 64)
+	if _, err := long.Write([]byte("hold\n")); err != nil {
+		t.Fatal(err)
+	}
+	long.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := long.Read(buf); err != nil {
+		t.Fatalf("长连接应能通：%v", err)
+	}
+	revoked := table(true)
+	revoked.RevokedSessions = []string{"sess-1"}
+	if _, err := s.Apply(revoked); err != nil {
+		t.Fatal(err)
+	}
+	long.SetReadDeadline(time.Now().Add(10 * time.Second))
+	if _, err := long.Read(buf); err == nil || isTimeout(err) {
+		t.Fatalf("吊销后已建立的连接应被断开：%v", err)
+	}
+	waitFor("被吊销的 frpc 连不上", func() bool { return !echoOK(20009) })
+}
+
+func isTimeout(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 // 面板轮换密钥后，旧密钥签的票据给出"密钥已更换"的原因（客户端据此自动领新票据重连），

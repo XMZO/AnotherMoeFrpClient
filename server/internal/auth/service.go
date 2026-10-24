@@ -450,6 +450,7 @@ func (s *Service) login(ctx context.Context, nickname, password string, meta Cli
 		InstallID:  meta.InstallID,
 		DeviceID:   meta.DeviceID,
 		DeviceName: meta.DeviceName,
+		LoginIP:    meta.IP,
 		CreatedAt:  now.Unix(),
 		LastSeenAt: now.Unix(),
 		ExpiresAt:  now.Add(s.ttl(kind)).Unix(),

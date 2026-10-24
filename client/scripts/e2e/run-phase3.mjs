@@ -173,7 +173,7 @@ const loggedIn = async (p) => (await p.attr(tid('account-area'), 'data-logged-in
 
 async function setCloseToQuit(p) {
   await p.click(tid('nav-settings'))
-  await p.clickText('.radio', '退出程序')
+  await p.clickText('.radio', '退出')
   await sleep(300)
   await p.click(tid('nav-tunnel'))
 }

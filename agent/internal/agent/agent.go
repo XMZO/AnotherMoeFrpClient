@@ -84,6 +84,8 @@ func Run(ctx context.Context, version string) error {
 		log.Error("读取授权表失败", "err", err)
 	}
 	a.access = acc
+	// 登录失效（吊销、撤权、重置凭证、换密钥）的 frpc 直接关掉
+	acc.Kick, acc.Alive = a.frps.CloseClient, a.frps.HasClient
 	pluginAddr, err := acc.Listen()
 	if err != nil {
 		return fmt.Errorf("启动准入插件：%w", err)

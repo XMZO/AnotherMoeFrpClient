@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import Icon from '../ui/Icon.vue'
+import Select from '../ui/Select.vue'
 import Modal from '../ui/Modal.vue'
 import Check from '../ui/Check.vue'
 import type { IconName } from '../ui/icons'
 import { ProfileService, ShareService, type Profile, type Share } from '../api'
 import { useProfilesStore } from '../stores/profiles'
 import { describeError, toAppError } from '../errors'
-import { isDomainType, isP2PType, shareKindHints, shareKindLabels } from '../labels'
+import { isDomainType, isP2PType, proxyTypeLabel, shareKindHints, shareKindLabels } from '../labels'
 import { nodeLabel, portValue } from '../util'
 
 // 创建分享向导（PLAN 6.7）：选配置 → 选类型 → 选节点和代理 → 过期时间、人数上限。
@@ -146,10 +147,7 @@ async function submit() {
     <div class="grid2">
       <div class="fld">
         <label for="cs-src">来源配置</label>
-        <select id="cs-src" v-model="profileId" class="inp" data-testid="share-create-profile">
-          <option v-if="!cloudProfiles.length" value="">没有云端配置</option>
-          <option v-for="p in cloudProfiles" :key="p.id" :value="p.id">{{ p.name }}</option>
-        </select>
+        <Select id="cs-src" v-model="profileId" :options="cloudProfiles.map((p) => ({ value: p.id, label: p.name }))" placeholder="没有云端配置" data-testid="share-create-profile" />
       </div>
       <div class="fld">
         <label for="cs-name">名称</label>
@@ -211,7 +209,7 @@ async function submit() {
             @update:model-value="(v: boolean) => toggleIn('proxies', x.id, v)"
           >
             <span class="ck-t">{{ x.name }}</span>
-            <span class="type" :class="isP2PType(x.type) ? 'p2p' : isDomainType(x.type) ? 'web' : ''">{{ x.type }}</span>
+            <span class="type" :class="isP2PType(x.type) ? 'p2p' : isDomainType(x.type) ? 'web' : ''">{{ proxyTypeLabel(x) }}</span>
           </Check>
           <span v-if="candidateProxies.length && !shownProxies.length" class="fld-help">没有匹配的代理</span>
           <span v-if="!candidateProxies.length" class="fld-help">{{ kind === 'p2p' ? '这份配置里没有 stcp/xtcp/sudp 代理' : '这份配置还没有代理' }}</span>

@@ -85,6 +85,12 @@ export interface P2PTarget {
      * 仅用于预览时提示（例如 3389），不参与运行
      */
     "localPort"?: number;
+
+    /**
+     * 目标代理的加密、压缩设置：订阅者的访客照着设（xtcp 两边必须一致）。旧的分享快照里没有，重新发布后才有
+     */
+    "useEncryption"?: boolean;
+    "useCompression"?: boolean;
 }
 
 /**
@@ -128,6 +134,12 @@ export interface Proxy {
     "allowUsers"?: string[] | null;
     "useEncryption"?: boolean;
     "useCompression"?: boolean;
+
+    /**
+     * WithUDP 只用于 tcp 代理：同一个本地端口、同一个远程端口同时转发 UDP（很多游戏两种都要）。
+     * 运行时拆成两个 frp 代理：Name（tcp）和 UDPName()（udp），在节点上占两个代理名额。
+     */
+    "withUdp"?: boolean;
 }
 
 /**
@@ -191,4 +203,11 @@ export interface Visitor {
      * xtcp 打洞失败时回退到某个 stcp visitor
      */
     "fallbackTo"?: string;
+
+    /**
+     * 加密、压缩：xtcp 打洞成功后两边直连，必须和对方代理的设置一致，否则数据对不上、连不通；
+     * stcp / sudp 经过 frps 中转，访客这一段和代理那一段各自独立，不需要一致。
+     */
+    "useEncryption"?: boolean;
+    "useCompression"?: boolean;
 }

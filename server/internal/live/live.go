@@ -59,6 +59,7 @@ type Info struct {
 	OS          string             `json:"os"`
 	Hostname    string             `json:"hostname"`
 	Tunnel      api.LiveTunnelInfo `json:"tunnel"`
+	Device      api.LiveHelloBody  `json:"device"` // 完整的设备信息
 }
 
 func (c *Client) info() Info {
@@ -67,6 +68,7 @@ func (c *Client) info() Info {
 	return Info{
 		SessionID: c.SessionID, UserID: c.UserID, Nickname: c.Nickname, Role: c.Role, DeviceID: c.DeviceID, IP: c.IP,
 		ConnectedAt: c.ConnectedAt, Version: c.hello.Version, OS: c.hello.OS, Hostname: c.hello.Hostname, Tunnel: c.status,
+		Device: c.hello,
 	}
 }
 
@@ -74,6 +76,9 @@ func (c *Client) info() Info {
 type Hub struct {
 	log *slog.Logger
 	now func() time.Time
+
+	// OnHello 在客户端报上设备信息后调用（面板把它记到会话上），在单独的 goroutine 里。
+	OnHello func(sessionID, ip string, hello api.LiveHelloBody)
 
 	mu      sync.Mutex
 	clients map[string]*Client // 按会话 ID；同一会话新连接顶掉旧的
@@ -160,7 +165,14 @@ func (h *Hub) readLoop(ctx context.Context, cancel context.CancelFunc, ws *webso
 		switch m.Type {
 		case api.LiveHello:
 			if m.Hello != nil {
-				c.hello = api.LiveHelloBody{Version: clip(m.Hello.Version, 40), OS: clip(m.Hello.OS, 80), Hostname: clip(m.Hello.Hostname, 80)}
+				x := m.Hello
+				c.hello = api.LiveHelloBody{Version: clip(x.Version, 40), OS: clip(x.OS, 80), Hostname: clip(x.Hostname, 80),
+					OSBuild: clip(x.OSBuild, 40), Arch: clip(x.Arch, 20), CPU: clip(x.CPU, 120), Cores: max(0, min(x.Cores, 4096)),
+					MemoryMB: max(0, min(x.MemoryMB, 1<<24)), Model: clip(x.Model, 120)}
+				if h.OnHello != nil {
+					hello := c.hello
+					go h.OnHello(c.SessionID, c.IP, hello)
+				}
 			}
 		case api.LiveStatus:
 			if m.Status != nil {

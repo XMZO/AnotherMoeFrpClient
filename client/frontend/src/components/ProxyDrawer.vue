@@ -11,7 +11,7 @@ import { ProfileService } from '../api'
 import { useProfilesStore } from '../stores/profiles'
 import { useTunnelStore } from '../stores/tunnel'
 import { describeError, fieldErrorsFor, fieldErrorsOf, type AppError } from '../errors'
-import { hasRemotePort, isDomainType, isP2PType, proxyTypeHints, proxyTypes } from '../labels'
+import { frpTypesOf, hasRemotePort, isDomainType, isP2PType, proxyTypeHints, proxyTypeLabel, proxyTypes } from '../labels'
 import { saveFeedback } from './saveFeedback'
 import { clone, portValue } from '../util'
 
@@ -24,7 +24,11 @@ const tunnel = useTunnelStore()
 const limitText = computed(() => {
   const l = tunnel.limits
   if (!l) return ''
-  const parts = [l.types.length ? `只允许 ${l.types.join(' / ')}` : '', l.ports ? `远程端口 ${l.ports}` : '', l.maxProxies ? `最多同时 ${l.maxProxies} 个代理` : '']
+  const parts = [
+    l.types.length ? `只允许 ${l.types.join(' / ')}` : '',
+    l.ports ? `远程端口 ${l.ports}` : '',
+    l.maxProxies ? `最多同时 ${l.maxProxies} 个代理${form.value.withUdp ? '（TCP+UDP 算 2 个）' : ''}` : '',
+  ]
   return parts.filter(Boolean).join(' · ')
 })
 
@@ -42,9 +46,24 @@ const empty = (): Proxy => ({
   allowUsers: [],
   useEncryption: false,
   useCompression: false,
+  withUdp: false,
 })
 
 const form = ref<Proxy>(empty())
+
+// 类型一般只能选一个；TCP 和 UDP 可以同时选（同一个端口两种协议都转发，很多游戏需要），存成 tcp + withUdp。
+// 其它组合没有意义（http/https 要本地也是对应协议，P2P 类型还要访问方配套），不开放。
+const chipOn = (t: string) => form.value.type === t || (t === 'udp' && form.value.type === 'tcp' && !!form.value.withUdp)
+function pickType(t: string) {
+  const f = form.value
+  const both = f.type === 'tcp' && !!f.withUdp
+  if (t === 'udp' && f.type === 'tcp') f.withUdp = !f.withUdp // 加上 / 去掉 UDP
+  else if (t === 'tcp' && f.type === 'udp') [f.type, f.withUdp] = ['tcp', true] // 加上 TCP
+  else if (t === 'tcp' && both) [f.type, f.withUdp] = ['udp', false] // 去掉 TCP
+  else if (f.type !== t) [f.type, f.withUdp] = [t, false]
+}
+const typeLabel = computed(() => proxyTypeLabel(form.value))
+const blockedTypes = computed(() => frpTypesOf(form.value).filter((t) => !tunnel.typeAllowed(t)))
 const localPort = ref('')
 const remotePort = ref('')
 const error = ref<AppError | null>(null)
@@ -81,13 +100,34 @@ async function genSecret() {
   }
 }
 
+// 名称留空时自动起一个：类型-4 位随机字母数字（例如 tcp-k3f9），和这份配置里别的代理、访客都不重名
+function autoName(type: string): string {
+  const cur = profiles.current
+  const taken = new Set<string>()
+  ;(cur?.proxies ?? []).forEach((x, i) => {
+    if (i === props.index) return // 正在编辑的这一项自己的旧名字不算
+    taken.add(x.name)
+    if (x.type === 'tcp' && x.withUdp) taken.add(`${x.name}-udp`)
+  })
+  ;(cur?.visitors ?? []).forEach((v) => taken.add(v.name))
+  const chars = 'abcdefghijkmnpqrstuvwxyz23456789' // 去掉容易看错的 0 o 1 l
+  for (;;) {
+    let r = ''
+    for (let i = 0; i < 4; i++) r += chars[Math.floor(Math.random() * chars.length)]
+    const n = `${type}-${r}`
+    if (!taken.has(n) && !taken.has(`${n}-udp`)) return n
+  }
+}
+
 async function save() {
   saving.value = true
   error.value = null
   const p = clone(form.value)
+  p.name = p.name.trim() || autoName(p.type)
   p.localPort = portValue(localPort.value)
   p.remotePort = portValue(remotePort.value)
   if (!hasRemotePort(p.type)) p.remotePort = 0
+  if (p.type !== 'tcp') p.withUdp = false
   if (!isDomainType(p.type)) {
     p.customDomains = []
     p.subdomain = ''
@@ -120,31 +160,30 @@ async function save() {
       <div v-if="otherError" class="alert bad" style="margin-bottom: 14px" data-testid="proxy-form-error"><Icon name="alert" size="s" /><span>{{ otherError }}</span></div>
       <div class="fld">
         <label for="px-name">名称</label>
-        <input id="px-name" v-model="form.name" class="inp" :class="{ err: fieldErr.name }" placeholder="例如 ssh、web" maxlength="50" data-testid="proxy-form-name" />
-        <span v-if="fieldErr.name" class="fld-help err">{{ fieldErr.name }}</span>
+        <input id="px-name" v-model="form.name" class="inp" :class="{ err: fieldErr.name }" placeholder="留空自动生成" maxlength="50" data-testid="proxy-form-name" />
+        <span class="fld-help" :class="{ err: fieldErr.name }">{{ fieldErr.name ?? '留空时自动起一个短名字（例如 tcp-k3f9），同一份配置里不会重复' }}</span>
       </div>
       <div class="fld">
         <span class="lbl">类型</span>
-        <div class="chips" role="radiogroup" aria-label="代理类型" data-testid="proxy-form-type">
+        <div class="chips" role="group" aria-label="代理类型（TCP、UDP 可以同时选）" data-testid="proxy-form-type">
           <button
             v-for="t in proxyTypes"
             :key="t"
             type="button"
-            role="radio"
             class="chip-opt"
-            :class="{ on: form.type === t, na: !tunnel.typeAllowed(t) }"
-            :aria-checked="form.type === t"
-            :disabled="!tunnel.typeAllowed(t) && form.type !== t"
+            :class="{ on: chipOn(t), na: !tunnel.typeAllowed(t) }"
+            :aria-pressed="chipOn(t)"
+            :disabled="!tunnel.typeAllowed(t) && !chipOn(t)"
             :title="tunnel.typeAllowed(t) ? undefined : `「${tunnel.limits?.node}」不允许你使用 ${t}，换其他节点可以用`"
-            @click="form.type = t"
+            @click="pickType(t)"
           >
             {{ t }}
           </button>
         </div>
         <div v-if="limitText" class="type-hint limit" data-testid="proxy-form-limits"><Icon name="shield" size="xs" /><span>「{{ tunnel.limits?.node }}」对你的限制：{{ limitText }}</span></div>
-        <div v-if="!tunnel.typeAllowed(form.type)" class="type-hint bad"><Icon name="alert" size="xs" /><span>「{{ tunnel.limits?.node }}」不允许 {{ form.type }}，用这个节点时这个代理会被拒绝</span></div>
+        <div v-if="blockedTypes.length" class="type-hint bad"><Icon name="alert" size="xs" /><span>「{{ tunnel.limits?.node }}」不允许 {{ blockedTypes.join(' / ') }}，用这个节点时会被拒绝</span></div>
         <Transition name="fade" mode="out-in">
-          <div :key="form.type" class="type-hint"><Icon name="info" size="xs" /><span>{{ proxyTypeHints[form.type] }}</span></div>
+          <div :key="typeLabel" class="type-hint" data-testid="proxy-form-type-hint"><Icon name="info" size="xs" /><span>{{ proxyTypeHints[typeLabel] }}</span></div>
         </Transition>
       </div>
       <div class="grid2">
@@ -162,8 +201,16 @@ async function save() {
       <Transition name="collapse">
         <div v-if="hasRemotePort(form.type)" class="fld">
           <label for="px-rport">远程端口</label>
-          <input id="px-rport" v-model="remotePort" class="inp mono" :class="{ err: fieldErr.remotePort }" inputmode="numeric" :placeholder="tunnel.limits?.ports ? `留空自动分配（可用 ${tunnel.limits.ports}）` : '留空自动分配'" data-testid="proxy-form-remotePort" />
-          <span class="fld-help" :class="{ err: fieldErr.remotePort }">{{ fieldErr.remotePort ?? '留空表示由节点分配' }}</span>
+          <input
+            id="px-rport"
+            v-model="remotePort"
+            class="inp mono"
+            :class="{ err: fieldErr.remotePort }"
+            inputmode="numeric"
+            :placeholder="form.withUdp ? (tunnel.limits?.ports ? `必填（可用 ${tunnel.limits.ports}）` : '必填') : tunnel.limits?.ports ? `留空自动分配（可用 ${tunnel.limits.ports}）` : '留空自动分配'"
+            data-testid="proxy-form-remotePort"
+          />
+          <span class="fld-help" :class="{ err: fieldErr.remotePort }">{{ form.withUdp && fieldErr.remotePort && !remotePort ? '要填远程端口：TCP 和 UDP 用同一个端口' : (fieldErr.remotePort ?? (form.withUdp ? 'TCP 和 UDP 用同一个端口，所以要填' : '留空表示由节点分配')) }}</span>
         </div>
       </Transition>
       <Transition name="collapse">
@@ -203,6 +250,9 @@ async function save() {
           <Check v-model="form.useEncryption">加密</Check>
           <Check v-model="form.useCompression">压缩</Check>
         </div>
+        <span v-if="form.type === 'xtcp' && (form.useEncryption || form.useCompression)" class="fld-help warn" data-testid="proxy-form-xtcp-hint">
+          xtcp 打洞后两台电脑直连：访问方的访客也要勾上同样的“加密”“压缩”，否则连不上。通过 P2P 分享出去的会自动对齐
+        </span>
       </div>
       <div class="sw-line">
         <div class="set-txt"><b>启用</b><small>关掉后保留配置，但不运行</small></div>

@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/coder/websocket"
@@ -78,6 +79,12 @@ type clientConfigState struct {
 
 func (s *Server) initLive(ctx context.Context) error {
 	s.live = live.New(s.log, s.now)
+	s.live.OnHello = func(sessionID, ip string, hello api.LiveHelloBody) {
+		b, _ := json.Marshal(hello)
+		if err := store.SetSessionClientInfo(context.Background(), s.st.DB(), sessionID, string(b), ip); err != nil {
+			s.log.Warn("save client info", "session", sessionID, "err", err)
+		}
+	}
 	s.nodes.SetHooks(nodesHooks(s))
 	v, ok, err := store.GetSetting(ctx, s.st.DB(), settingClientConfig)
 	if err != nil {
@@ -224,6 +231,7 @@ func (s *Server) adminLiveRoutes(mux *http.ServeMux, authed func(http.HandlerFun
 	mux.Handle("POST "+p+"/clients/notice", authed(s.handleAdminClientNotice))
 	mux.Handle("POST "+p+"/clients/tunnel", authed(s.handleAdminClientTunnel))
 	mux.Handle("POST "+p+"/clients/kick", authed(s.handleAdminClientKick))
+	mux.Handle("GET "+p+"/users/{nickname}/devices", authed(s.handleAdminUserDevices))
 	mux.Handle("GET "+p+"/client-config", authed(s.handleAdminClientConfig))
 	mux.Handle("PUT "+p+"/client-config", authed(s.handleAdminSetClientConfig))
 	mux.Handle("DELETE "+p+"/client-config", authed(s.handleAdminResetClientConfig))
@@ -470,7 +478,7 @@ func (s *Server) handleAdminResetClientConfig(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) pushClientConfig() {
-	cc := s.clientCfg().ClientConfig()
+	cc := s.publicClientConfig() // 客户端收到后重新拉取 client/config 和图源
 	s.live.Broadcast(api.LiveMessage{Type: api.LiveConfig, Config: &cc})
 }
 
@@ -512,4 +520,63 @@ func newNoticeID() string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// deviceView 是"用户 → 登录设备"的一行：会话、设备指纹、设备信息、IP，以及在线时的隧道状态。
+type deviceView struct {
+	SessionID  string              `json:"sessionId"`
+	Kind       string              `json:"kind"` // client / admin_web
+	DeviceID   string              `json:"deviceId"`
+	InstallID  string              `json:"installId"`
+	DeviceName string              `json:"deviceName"`
+	LoginIP    string              `json:"loginIp"`
+	LastIP     string              `json:"lastIp"`
+	CreatedAt  time.Time           `json:"createdAt"`
+	LastSeenAt time.Time           `json:"lastSeenAt"`
+	ExpiresAt  time.Time           `json:"expiresAt"`
+	Device     *api.LiveHelloBody  `json:"device,omitempty"` // 最近一次上报的设备信息
+	Online     bool                `json:"online"`
+	IP         string              `json:"ip,omitempty"` // 在线时这条连接的 IP
+	Tunnel     *api.LiveTunnelInfo `json:"tunnel,omitempty"`
+}
+
+// GET /api/v1/admin/users/{nickname}/devices：这个用户还有效的登录（客户端和管理后台），最近活跃的在前。
+func (s *Server) handleAdminUserDevices(w http.ResponseWriter, r *http.Request) {
+	u, err := store.GetUserByNickname(r.Context(), s.st.DB(), r.PathValue("nickname"))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			err = apierr.Newf(apierr.NotFound, "用户不存在")
+		}
+		s.writeError(w, r, err)
+		return
+	}
+	list, err := store.ListUserSessions(r.Context(), s.st.DB(), u.ID, s.now().Unix())
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	online := map[string]live.Info{}
+	for _, c := range s.live.List() {
+		if c.UserID == u.ID {
+			online[c.SessionID] = c
+		}
+	}
+	out := make([]deviceView, 0, len(list))
+	for _, d := range list {
+		v := deviceView{SessionID: d.ID, Kind: d.Kind, DeviceID: d.DeviceID, InstallID: d.InstallID, DeviceName: d.DeviceName,
+			LoginIP: d.LoginIP, LastIP: d.LastIP, CreatedAt: time.Unix(d.CreatedAt, 0).UTC(), LastSeenAt: time.Unix(d.LastSeenAt, 0).UTC(),
+			ExpiresAt: time.Unix(d.ExpiresAt, 0).UTC()}
+		if d.ClientInfo != "" {
+			var h api.LiveHelloBody
+			if json.Unmarshal([]byte(d.ClientInfo), &h) == nil {
+				v.Device = &h
+			}
+		}
+		if c, ok := online[d.ID]; ok {
+			dev, tun := c.Device, c.Tunnel
+			v.Online, v.IP, v.Device, v.Tunnel = true, c.IP, &dev, &tun
+		}
+		out = append(out, v)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"devices": out})
 }

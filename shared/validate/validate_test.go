@@ -464,3 +464,36 @@ func TestErrorsString(t *testing.T) {
 		t.Fatalf("Error() = %q", err.Error())
 	}
 }
+
+// tcp+udp：只有 tcp 能同时转发 UDP，要填远程端口，udp 那一半的名字（name-udp）也不能重名
+func TestWithUDP(t *testing.T) {
+	d := validData()
+	d.Proxies[0].WithUDP = true
+	if err := ProfileData(d); err != nil {
+		t.Fatalf("tcp+udp 应该合法：%v", err)
+	}
+	if got := d.Proxies[0].FrpNames(); len(got) != 2 || got[1] != "ssh-udp" {
+		t.Fatalf("frp 名字：%v", got)
+	}
+
+	d = validData()
+	d.Proxies[0].WithUDP, d.Proxies[0].RemotePort = true, 0
+	d.Proxies[1].WithUDP = true // udp 代理不能再勾
+	es := asErrors(t, ProfileData(d))
+	if !es.Has(proxyField(0, "remotePort"), ReasonRequired) || !es.Has(proxyField(1, "withUdp"), ReasonInvalid) {
+		t.Errorf("应报远程端口必填、非 tcp 不能勾：%v", es)
+	}
+
+	d = validData()
+	d.Proxies[0].WithUDP = true
+	d.Proxies[1].Name = "ssh-udp" // 和 ssh 的 udp 那一半重名
+	es = asErrors(t, ProfileData(d))
+	if !es.Has(proxyField(1, "name"), ReasonDuplicate) {
+		t.Errorf("和 udp 那一半重名应报错：%v", es)
+	}
+	d.Proxies[0], d.Proxies[1] = d.Proxies[1], d.Proxies[0] // 顺序反过来也要查出来
+	es = asErrors(t, ProfileData(d))
+	if !es.Has(proxyField(1, "name"), ReasonDuplicate) {
+		t.Errorf("顺序反过来也应报错：%v", es)
+	}
+}

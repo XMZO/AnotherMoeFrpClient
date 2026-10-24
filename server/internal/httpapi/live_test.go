@@ -102,7 +102,8 @@ func TestLive(t *testing.T) {
 	n.register("alice", "password-alice")
 	tokA := n.deviceLogin("alice", devA)
 	a := n.dialLive(tokA)
-	a.send(api.LiveMessage{Type: api.LiveHello, Hello: &api.LiveHelloBody{Version: "3.0.0", OS: "windows", Hostname: "alice-pc"}})
+	a.send(api.LiveMessage{Type: api.LiveHello, Hello: &api.LiveHelloBody{Version: "3.0.0", OS: "Windows 11 专业版 24H2", Hostname: "alice-pc",
+		OSBuild: "10.0.26100.2894", Arch: "amd64", CPU: "AMD Ryzen 7 7840HS", Cores: 16, MemoryMB: 32000, Model: "LENOVO 21D0"}})
 	a.send(api.LiveMessage{Type: api.LiveStatus, Status: &api.LiveTunnelInfo{State: "running", ProfileKind: "cloud", NodeName: "东京", Proxies: 2, Running: 2}})
 
 	// 后台看得到在线设备和隧道状态
@@ -113,6 +114,30 @@ func TestLive(t *testing.T) {
 			list.Clients[0]["tunnel"].(map[string]any)["state"] == "running"
 	})
 	sess := list.Clients[0]["sessionId"].(string)
+
+	// 用户的登录设备：会话、设备指纹、登录 IP、设备信息、在线和隧道状态
+	type devView struct {
+		SessionID, DeviceID, LoginIP, LastIP string
+		Online                                bool
+		Device                                *api.LiveHelloBody
+		Tunnel                                *api.LiveTunnelInfo
+	}
+	var devs struct{ Devices []devView }
+	eventually(t, "登录设备", func() bool {
+		n.admin("GET", "/users/alice/devices", nil).expect(http.StatusOK).decode(&devs)
+		for _, d := range devs.Devices {
+			if d.SessionID == sess {
+				return d.LastIP != "" && d.Device != nil && d.Device.CPU == "AMD Ryzen 7 7840HS"
+			}
+		}
+		return false
+	})
+	for _, d := range devs.Devices {
+		if d.SessionID == sess && (d.DeviceID != devA || d.LoginIP == "" || !d.Online || d.Device.MemoryMB != 32000 || d.Tunnel.State != "running") {
+			t.Fatalf("登录设备：%+v %+v", d, d.Device)
+		}
+	}
+	n.admin("GET", "/users/nobody/devices", nil).apiErr(apierr.NotFound)
 
 	// 推送通知：校验、发送
 	n.admin("POST", "/clients/notice", map[string]any{"target": map[string]any{"all": true},
@@ -211,8 +236,9 @@ func TestPanelSettings(t *testing.T) {
 		{"url": "https://umi.example.com/random", "weight": 5},
 		{"url": "https://img.example.com/api", "weight": 2, "isApi": true, "jsonPath": "data.0.url"},
 	}}).expect(http.StatusOK)
-	var cc api.ClientConfigResponse
-	n.do(req{method: "GET", path: api.RouteClientConfig}).expect(http.StatusOK).decode(&cc)
+	var cc api.ClientImagesResponse
+	n.register("carol", "password-carol")
+	n.do(req{method: "GET", path: api.RouteClientImages, token: n.login("carol", "password-carol")}).expect(http.StatusOK).decode(&cc)
 	if len(cc.ImageSources) != 2 || cc.ImageSources[1].JSONPath != "data.0.url" || !cc.ImageSources[1].IsAPI {
 		t.Fatalf("图源：%+v", cc.ImageSources)
 	}

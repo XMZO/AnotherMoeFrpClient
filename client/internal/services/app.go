@@ -46,6 +46,7 @@ type AppService struct {
 	// 由 main 注入
 	OpenBrowser func(string) error
 	QuitApp     func()
+	CloseAs     func(action string) // 按询问窗口的选择关闭主窗口：tray 或 quit
 	OnReady     func(sinceStart time.Duration)
 	Updater     *Updater
 	Notices     *Notices // 管理员推送的通知
@@ -130,6 +131,21 @@ func (s *AppService) OpenURL(raw string) error {
 		return apperr.New(apperr.InvalidArg, "browser not available")
 	}
 	return apperr.Normalize(s.OpenBrowser(u.String()))
+}
+
+// EventCloseAsk：点了关闭按钮、设置是"每次询问"时推给前端，由前端弹出询问窗口。
+const EventCloseAsk = "app:close-ask"
+
+// CloseWindow 按询问窗口的选择关闭主窗口：tray（最小化到托盘）或 quit（退出程序）。
+// "记住我的选择"由前端先写进设置（closeAction），这里只执行这一次。
+func (s *AppService) CloseWindow(action string) error {
+	if action != store.CloseToTray && action != store.CloseQuit {
+		return apperr.New(apperr.InvalidArg, "action must be tray or quit")
+	}
+	if s.CloseAs != nil {
+		s.CloseAs(action)
+	}
+	return nil
 }
 
 // Quit 退出程序（与托盘的"退出"相同：先停隧道）。

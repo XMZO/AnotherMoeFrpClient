@@ -297,3 +297,52 @@ func TestPrepareOfficialNode(t *testing.T) {
 		t.Fatal("凭证变了要重新连接")
 	}
 }
+
+// 访客的加密、压缩照实传给 frp（xtcp 两边必须一致）
+func TestMapVisitorTransport(t *testing.T) {
+	c, err := MapVisitor(model.Visitor{Name: "v", Type: "xtcp", Enabled: true, ServerName: "rdp", SecretKey: "sk", BindPort: 9000,
+		UseEncryption: true, UseCompression: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := c.GetBaseConfig(); !b.Transport.UseEncryption || !b.Transport.UseCompression {
+		t.Fatalf("transport: %+v", b.Transport)
+	}
+}
+
+// tcp+udp：拆成 tcp（原名）和 udp（name-udp）两个 frp 代理，端口、加密压缩相同
+func TestMapTCPWithUDP(t *testing.T) {
+	p := baseProfile()
+	p.Proxies = []model.Proxy{{ID: model.NewID(), Name: "game", Type: model.ProxyTCP, WithUDP: true, Enabled: true,
+		LocalIP: "127.0.0.1", LocalPort: 27015, RemotePort: 27015, UseEncryption: true}}
+	prep, err := Prepare(p, p.Nodes[0].ID)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if len(prep.Proxies) != 2 {
+		t.Fatalf("应拆成 2 个：%d", len(prep.Proxies))
+	}
+	tcp, ok1 := prep.Proxies[0].(*v1.TCPProxyConfig)
+	udp, ok2 := prep.Proxies[1].(*v1.UDPProxyConfig)
+	if !ok1 || !ok2 || tcp.Name != "game" || udp.Name != "game-udp" || udp.LocalPort != 27015 || udp.RemotePort != 27015 ||
+		!udp.Transport.UseEncryption || udp.Enabled == nil || !*udp.Enabled {
+		t.Fatalf("tcp=%+v udp=%+v", prep.Proxies[0], prep.Proxies[1])
+	}
+}
+
+func TestMergeUDPHalf(t *testing.T) {
+	run := ProxyStatus{Phase: "running", RemoteAddr: ":27015"}
+	if got := mergeUDPHalf(run, ProxyStatus{Phase: "running"}); got.Phase != "running" || got.RemoteAddr != ":27015" {
+		t.Errorf("都在运行：%+v", got)
+	}
+	if got := mergeUDPHalf(run, ProxyStatus{Phase: "wait start"}); got.Phase != "wait start" {
+		t.Errorf("udp 还没就绪：%+v", got)
+	}
+	bad := ProxyStatus{Phase: "start error", Err: "port not allowed", Code: ClassifyProxyError("port not allowed")}
+	if got := mergeUDPHalf(run, bad); got.Phase != "start error" || got.Err != "UDP：port not allowed" || got.Code != bad.Code {
+		t.Errorf("udp 被拒：%+v", got)
+	}
+	if got := mergeUDPHalf(bad, run); got.Err != "port not allowed" {
+		t.Errorf("tcp 被拒：%+v", got)
+	}
+}

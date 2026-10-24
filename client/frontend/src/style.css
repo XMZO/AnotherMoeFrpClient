@@ -452,6 +452,9 @@ a {
 .fld-help.err {
   color: var(--bad-text);
 }
+.fld-help.warn {
+  color: var(--warn-text);
+}
 .fld-help.ok {
   color: var(--ok-text);
 }
@@ -481,14 +484,6 @@ a {
 }
 .inp:disabled {
   opacity: 0.6;
-}
-select.inp {
-  appearance: none;
-  padding-right: 34px;
-  background-image: linear-gradient(45deg, transparent 50%, var(--text-3) 50%), linear-gradient(135deg, var(--text-3) 50%, transparent 50%);
-  background-position: calc(100% - 18px) 17px, calc(100% - 13px) 17px;
-  background-size: 5px 5px;
-  background-repeat: no-repeat;
 }
 .inp-group {
   display: flex;
@@ -779,9 +774,6 @@ select.inp {
 .menu-leave-to {
   opacity: 0;
   transform: scale(0.92) translateY(-4px);
-}
-.page-enter-active {
-  animation: pageIn 0.45s var(--ease-out);
 }
 .collapse-enter-active,
 .collapse-leave-active {

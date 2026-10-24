@@ -25,8 +25,9 @@ export const visitorTypes = ['stcp', 'xtcp', 'sudp'] as const
 export const protocols = ['tcp', 'kcp', 'quic', 'websocket', 'wss'] as const
 
 export const proxyTypeHints: Record<string, string> = {
-  tcp: '把本地 TCP 端口映射到节点的远程端口',
-  udp: '把本地 UDP 端口映射到节点的远程端口',
+  tcp: '把本地 TCP 端口映射到节点的远程端口；游戏同时要 UDP 的话，把 UDP 也点上',
+  udp: '把本地 UDP 端口映射到节点的远程端口；同时要 TCP 的话，把 TCP 也点上',
+  'tcp+udp': '同一个本地端口、同一个远程端口同时转发 TCP 和 UDP（很多游戏需要）；远程端口要填，在节点上算两个代理',
   http: '按域名转发 HTTP（需要节点开启 vhostHTTPPort）',
   https: '按域名转发 HTTPS（需要节点开启 vhostHTTPSPort）',
   tcpmux: '按域名复用一个端口转发 TCP（HTTP CONNECT）',
@@ -38,6 +39,10 @@ export const proxyTypeHints: Record<string, string> = {
 export const isDomainType = (t: string) => t === 'http' || t === 'https' || t === 'tcpmux'
 export const isP2PType = (t: string) => t === 'stcp' || t === 'xtcp' || t === 'sudp'
 export const hasRemotePort = (t: string) => t === 'tcp' || t === 'udp'
+/** 显示用的类型：tcp 代理勾了同时转发 UDP 时是 tcp+udp。 */
+export const proxyTypeLabel = (p: { type: string; withUdp?: boolean }) => (p.type === 'tcp' && p.withUdp ? 'tcp+udp' : p.type)
+/** 代理在 frp 里实际用到的类型：tcp+udp 是两种。 */
+export const frpTypesOf = (p: { type: string; withUdp?: boolean }) => (p.type === 'tcp' && p.withUdp ? ['tcp', 'udp'] : [p.type])
 
 /** frp 代理 Phase（client/proxy/proxy_wrapper.go）→ 中文。空串表示还没在 frp 里注册（多半还在连接）。 */
 export const phaseLabels: Record<string, string> = {

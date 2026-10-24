@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import Icon from '../ui/Icon.vue'
+import Select from '../ui/Select.vue'
 import Switch from '../ui/Switch.vue'
 import Options from '../ui/Options.vue'
 import { message } from '../ui/feedback'
@@ -91,7 +92,7 @@ async function applyCustom() {
             </div>
           </div>
           <div class="set-item inline">
-            <div class="set-txt"><b>图片面板</b><small>侧栏里每分钟换一张图；关闭后不会发出任何图片请求</small></div>
+            <div class="set-txt"><b>图片面板</b><small>登录后侧栏里每分钟换一张图；关闭后不会发出任何图片请求</small></div>
             <Switch :model-value="s.imagePanel" label="图片面板" data-testid="settings-image-panel" @change="(v: boolean) => set({ imagePanel: v })" />
           </div>
           <div class="set-item">
@@ -99,8 +100,9 @@ async function applyCustom() {
             <Options
               :model-value="s.closeAction"
               :options="[
-                { value: 'tray', label: '最小化到托盘' },
-                { value: 'quit', label: '退出程序' },
+                { value: 'ask', label: '每次询问' },
+                { value: 'tray', label: '最小化' },
+                { value: 'quit', label: '退出' },
               ]"
               label="点关闭按钮时"
               @pick="(v: string) => set({ closeAction: v })"
@@ -110,9 +112,9 @@ async function applyCustom() {
 
         <section class="card set-card" style="animation-delay: 0.05s">
           <div class="card-h"><span class="tile-ic"><Icon name="power" size="s" /></span>后台与启动</div>
-          <div class="set-item inline" :class="{ dim: s.closeAction !== 'tray' }">
+          <div class="set-item inline" :class="{ dim: s.closeAction === 'quit' }">
             <div class="set-txt"><b>托盘时释放界面内存</b><small>后台只占几十 MB（隧道照常运行），再次打开窗口约需半秒</small></div>
-            <Switch :model-value="s.releaseOnHide" :disabled="s.closeAction !== 'tray'" label="释放界面内存" data-testid="settings-release-on-hide" @change="(v: boolean) => set({ releaseOnHide: v })" />
+            <Switch :model-value="s.releaseOnHide" :disabled="s.closeAction === 'quit'" label="释放界面内存" data-testid="settings-release-on-hide" @change="(v: boolean) => set({ releaseOnHide: v })" />
           </div>
           <div class="set-item inline">
             <div class="set-txt"><b>开机自启</b><small>开机后只在托盘显示图标，不弹出窗口</small></div>
@@ -162,9 +164,7 @@ async function applyCustom() {
           </div>
           <div class="set-item">
             <div class="set-txt"><b>frp 日志级别</b><small>排查问题时调到 debug，平时 info 就够了</small></div>
-            <select class="inp mono log-sel" :value="s.logLevel" aria-label="frp 日志级别" data-testid="settings-log-level" @change="(e: Event) => set({ logLevel: (e.target as HTMLSelectElement).value })">
-              <option v-for="l in levels" :key="l.value" :value="l.value">{{ l.label }}</option>
-            </select>
+            <Select class="log-sel" mono :model-value="s.logLevel" :options="levels" aria-label="frp 日志级别" data-testid="settings-log-level" @change="(v: string) => set({ logLevel: v })" />
           </div>
         </section>
       </div>

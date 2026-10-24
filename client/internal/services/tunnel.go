@@ -46,6 +46,9 @@ type TunnelControl struct{ t *TunnelService }
 func NewTunnelService(eng *engine.Engine, sink *engine.LogSink, profiles *store.ProfileStore, settings *store.SettingsStore) (*TunnelService, *TunnelControl) {
 	t := &TunnelService{eng: eng, sink: sink, profiles: profiles, settings: settings, stop: make(chan struct{})}
 	sink.Subscribe(func(l engine.LogLine) {
+		if l.Private { // 云端配置、订阅的日志不给界面（它们只显示运行状态）
+			return
+		}
 		t.mu.Lock()
 		t.pending = append(t.pending, l)
 		if len(t.pending) > engine.DefaultLogLines { // 前端长时间收不到（例如还没启动），只留最新的
@@ -221,8 +224,9 @@ func (t *TunnelService) Start(profileID, nodeID string) error {
 	if !ok {
 		return apperr.New(apperr.ProfileNotFound, profileID)
 	}
-	if c.IsSubscription() && strings.HasPrefix(nodeID, api.OfficialNodePrefix) {
-		return apperr.New(apperr.InvalidArg, "subscribed profiles cannot use official nodes")
+	// 官方节点只给云端配置用（和云端配置一样是黑盒：只显示运行状态，不显示原始日志）；本地配置、订阅都不能用
+	if !c.IsCloud() && strings.HasPrefix(nodeID, api.OfficialNodePrefix) {
+		return apperr.New(apperr.InvalidArg, "official nodes can only be used by cloud profiles")
 	}
 	if c.IsSubscription() && c.Sub != nil && (c.Sub.Summary.Revoked || c.Sub.Summary.Expired) {
 		return apperr.New(apperr.SubscriptionInactive, profileID)
@@ -250,7 +254,15 @@ func (t *TunnelService) StartLast() error {
 	if s.LastProfileID == "" {
 		return apperr.New(apperr.ProfileNotFound, "no last profile")
 	}
-	return t.Start(s.LastProfileID, s.LastNodeIDs[s.LastProfileID])
+	nodeID := s.LastNodeIDs[s.LastProfileID]
+	if c, ok := t.profiles.Get(s.LastProfileID); ok && !c.IsCloud() && strings.HasPrefix(nodeID, api.OfficialNodePrefix) {
+		// 以前本地配置也能选官方节点，现在不行了：改用它自己的第一个节点
+		nodeID = ""
+		if len(c.Profile.Nodes) > 0 {
+			nodeID = c.Profile.Nodes[0].ID
+		}
+	}
+	return t.Start(s.LastProfileID, nodeID)
 }
 
 // Stop 发起停止，立即返回；状态通过 tunnel:state 推送（stopping → idle）。

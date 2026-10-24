@@ -43,7 +43,6 @@ type Updater struct {
 	emit      Emitter
 	notified  string // 已经推送过的最新版本
 	announced string
-	onConfig  []func(api.ClientConfigResponse)
 }
 
 func NewUpdater(c *apiclient.Client, version string) *Updater {
@@ -54,13 +53,6 @@ func NewUpdater(c *apiclient.Client, version string) *Updater {
 func (u *Updater) SetEmitter(emit Emitter) {
 	u.mu.Lock()
 	u.emit = emit
-	u.mu.Unlock()
-}
-
-// OnConfig 注册拿到客户端配置后的回调（图片面板用它更新图源）。
-func (u *Updater) OnConfig(fn func(api.ClientConfigResponse)) {
-	u.mu.Lock()
-	u.onConfig = append(u.onConfig, fn)
 	u.mu.Unlock()
 }
 
@@ -85,7 +77,7 @@ func (u *Updater) Check(ctx context.Context) (UpdateInfo, error) {
 	info := evaluate(u.version, cfg)
 	info.CheckedAt = &now
 	u.info = info
-	emit, hooks := u.emit, append([]func(api.ClientConfigResponse){}, u.onConfig...)
+	emit := u.emit
 	notify := info.Available && info.Latest != u.notified
 	if notify {
 		u.notified = info.Latest
@@ -96,9 +88,6 @@ func (u *Updater) Check(ctx context.Context) (UpdateInfo, error) {
 	}
 	u.mu.Unlock()
 
-	for _, fn := range hooks {
-		fn(cfg)
-	}
 	if emit != nil {
 		if notify {
 			emit(EventUpdateAvailable, info)

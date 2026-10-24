@@ -35,8 +35,17 @@ func TestClientConfig(t *testing.T) {
 	e.do(req{method: "GET", path: api.RouteClientConfig, header: map[string]string{api.HeaderClientVersion: "1.0.0"}}).
 		expect(http.StatusOK).decode(&c)
 	if c.LatestVersion != "3.1.0" || c.MinVersion != "3.0.0" || c.DownloadURL == "" || c.Announcement != "测试公告" ||
-		len(c.ImageSources) != 1 || c.ImageSources[0].Weight != 5 {
-		t.Fatalf("client/config 不对：%+v", c)
+		len(c.ImageSources) != 0 {
+		t.Fatalf("client/config 不对（图源不能公开）：%+v", c)
+	}
+
+	// 图源要登录后拿
+	e.do(req{method: "GET", path: api.RouteClientImages}).apiErr(apierr.Unauthorized)
+	tok := e.user("alice")
+	var im api.ClientImagesResponse
+	e.do(req{method: "GET", path: api.RouteClientImages, token: tok}).expect(http.StatusOK).decode(&im)
+	if len(im.ImageSources) != 1 || im.ImageSources[0].Weight != 5 {
+		t.Fatalf("client/images 不对：%+v", im)
 	}
 }
 

@@ -37,11 +37,10 @@ func TestEvaluateUpdate(t *testing.T) {
 	}
 }
 
-func TestUpdaterEmitsOnceAndFeedsSources(t *testing.T) {
+func TestUpdaterEmitsOnce(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(api.ClientConfigResponse{
 			LatestVersion: "3.2.0", MinVersion: "3.0.0", Announcement: "维护通知",
-			ImageSources: []api.ImageSource{{URL: "https://img.example/a", Weight: 1}},
 		})
 	}))
 	defer srv.Close()
@@ -49,8 +48,6 @@ func TestUpdaterEmitsOnceAndFeedsSources(t *testing.T) {
 	u := NewUpdater(c, "3.0.0")
 	var events []string
 	u.SetEmitter(func(name string, data any) { events = append(events, name) })
-	var sources []api.ImageSource
-	u.OnConfig(func(cfg api.ClientConfigResponse) { sources = cfg.ImageSources })
 	for range 2 {
 		if _, err := u.Check(t.Context()); err != nil {
 			t.Fatal(err)
@@ -59,8 +56,8 @@ func TestUpdaterEmitsOnceAndFeedsSources(t *testing.T) {
 	if strings.Join(events, ",") != EventUpdateAvailable+","+EventAnnouncement {
 		t.Fatalf("events: %v", events)
 	}
-	if len(sources) != 1 || !u.Info().Available || u.Info().CheckedAt == nil {
-		t.Fatalf("info: %+v sources=%v", u.Info(), sources)
+	if !u.Info().Available || u.Info().CheckedAt == nil {
+		t.Fatalf("info: %+v", u.Info())
 	}
 }
 

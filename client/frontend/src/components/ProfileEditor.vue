@@ -13,7 +13,7 @@ import { useProfilesStore } from '../stores/profiles'
 import { shareKindLabels } from '../labels'
 import mascot from '../assets/mascot.png'
 
-// 隧道页右侧：顶部是配置名和运行控制，中间是代理 / 节点 / 访客，底部是日志（本地配置）或运行状态（云端配置、订阅：配置对用户是黑盒，看不懂的原始日志换成状态和事件）。
+// 隧道页右侧：顶部是配置名和运行控制，中间是代理 / 节点 / 访客，底部是日志（本地配置）或运行状态（云端配置、订阅：配置对用户是黑盒，看不懂的原始日志换成状态和事件；它们的日志 Go 端根本不发给界面，见 engine.LogLine.Private）。
 const emit = defineEmits<{ 'toggle-list': [] }>()
 const profiles = useProfilesStore()
 const summary = computed(() => profiles.currentSummary)

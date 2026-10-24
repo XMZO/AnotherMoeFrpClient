@@ -16,6 +16,7 @@ export const useProfilesStore = defineStore('profiles', () => {
   const currentSummary = computed(() => list.value.find((p) => p.id === currentId.value))
   /** 当前选中的是订阅（PLAN 7.6）：内容由分享决定，只有模板订阅的代理和 P2P 的本地绑定可以改。 */
   const isSubscription = computed(() => currentSummary.value?.origin === 'subscription')
+  const isCloud = computed(() => currentSummary.value?.origin === 'cloud')
 
   /** 某一类条目在当前配置里是否只读。 */
   function readonly(col: Collection): boolean {
@@ -164,6 +165,7 @@ export const useProfilesStore = defineStore('profiles', () => {
     nodes,
     currentSummary,
     isSubscription,
+    isCloud,
     readonly,
     updateSubscription,
     loadList,

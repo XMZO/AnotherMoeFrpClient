@@ -82,6 +82,23 @@ type Proxy struct {
 	AllowUsers     []string `json:"allowUsers,omitempty"`
 	UseEncryption  bool     `json:"useEncryption,omitempty"`
 	UseCompression bool     `json:"useCompression,omitempty"`
+	// WithUDP 只用于 tcp 代理：同一个本地端口、同一个远程端口同时转发 UDP（很多游戏两种都要）。
+	// 运行时拆成两个 frp 代理：Name（tcp）和 UDPName()（udp），在节点上占两个代理名额。
+	WithUDP bool `json:"withUdp,omitempty"`
+}
+
+// UDPNameSuffix 是 tcp+udp 代理里 udp 那一半的 frp 代理名后缀。
+const UDPNameSuffix = "-udp"
+
+// UDPName 是 tcp+udp 代理里 udp 那一半的 frp 代理名。
+func (p Proxy) UDPName() string { return p.Name + UDPNameSuffix }
+
+// FrpNames 返回这个代理在 frp 里的名字：一般是一个，tcp+udp 是两个。
+func (p Proxy) FrpNames() []string {
+	if p.Type == ProxyTCP && p.WithUDP {
+		return []string{p.Name, p.UDPName()}
+	}
+	return []string{p.Name}
 }
 
 type Visitor struct {
@@ -95,6 +112,10 @@ type Visitor struct {
 	BindAddr   string `json:"bindAddr"` // 默认 127.0.0.1
 	BindPort   int    `json:"bindPort"`
 	FallbackTo string `json:"fallbackTo,omitempty"` // xtcp 打洞失败时回退到某个 stcp visitor
+	// 加密、压缩：xtcp 打洞成功后两边直连，必须和对方代理的设置一致，否则数据对不上、连不通；
+	// stcp / sudp 经过 frps 中转，访客这一段和代理那一段各自独立，不需要一致。
+	UseEncryption  bool `json:"useEncryption,omitempty"`
+	UseCompression bool `json:"useCompression,omitempty"`
 }
 
 // ProfileData 是配置里除元数据以外的内容，服务端把它整体存成一列 JSON。

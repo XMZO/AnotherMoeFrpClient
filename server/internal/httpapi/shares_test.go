@@ -29,7 +29,7 @@ func (e *env) ownerProfile(token string) model.Profile {
 		Proxies: []model.Proxy{
 			{ID: "px-ssh", Name: "ssh", Type: "tcp", Enabled: true, LocalIP: "127.0.0.1", LocalPort: 22, RemotePort: 6022},
 			{ID: "px-web", Name: "web", Type: "http", Enabled: true, LocalIP: "127.0.0.1", LocalPort: 80, CustomDomains: []string{"w.example.com"}},
-			{ID: "px-rdp", Name: "rdp", Type: "stcp", Enabled: true, LocalIP: "127.0.0.1", LocalPort: 3389, SecretKey: secretKey},
+			{ID: "px-rdp", Name: "rdp", Type: "stcp", Enabled: true, LocalIP: "127.0.0.1", LocalPort: 3389, SecretKey: secretKey, UseEncryption: true},
 		},
 	}
 	var p model.Profile
@@ -132,7 +132,8 @@ func TestShareLifecycleAllKinds(t *testing.T) {
 	e.do(req{method: "POST", path: api.RouteShares, token: owner, body: api.CreateShareRequest{ProfileID: p.ID, Name: "p2p", Kind: model.ShareP2P, NodeIDs: []string{"node-a"}, ProxyIDs: []string{"px-ssh"}}}).
 		apiErr(apierr.ValidationFailed) // tcp 不能做 p2p 目标
 	p2p := e.createShare(owner, api.CreateShareRequest{ProfileID: p.ID, Name: "远程桌面", Kind: model.ShareP2P, NodeIDs: []string{"node-a"}, ProxyIDs: []string{"px-rdp"}})
-	if len(p2p.Payload.Targets) != 1 || p2p.Payload.Targets[0].ServerUser != "owner" {
+	// 目标代理的加密设置跟着快照走，订阅者的访客照着设
+	if len(p2p.Payload.Targets) != 1 || p2p.Payload.Targets[0].ServerUser != "owner" || !p2p.Payload.Targets[0].UseEncryption {
 		t.Fatalf("p2p payload: %+v", p2p.Payload)
 	}
 	pv = e.do(req{method: "GET", path: api.SharePreviewPath(p2p.ID), token: sub}).expect(http.StatusOK)

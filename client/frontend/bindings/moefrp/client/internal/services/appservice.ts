@@ -26,7 +26,16 @@ export function CheckUpdate(): $CancellablePromise<$models.UpdateInfo> {
 }
 
 /**
+ * CloseWindow 按询问窗口的选择关闭主窗口：tray（最小化到托盘）或 quit（退出程序）。
+ * "记住我的选择"由前端先写进设置（closeAction），这里只执行这一次。
+ */
+export function CloseWindow(action: string): $CancellablePromise<void> {
+    return $Call.ByID(1347197915, action);
+}
+
+/**
  * Licenses 返回客户端用到的主要开源组件。
+ * "关于"页分两列显示，条数保持偶数，两列最后一行才对齐（不留空、不拉伸）。
  */
 export function Licenses(): $CancellablePromise<$models.License[] | null> {
     return $Call.ByID(1238449973);

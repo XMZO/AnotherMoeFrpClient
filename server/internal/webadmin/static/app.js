@@ -1153,7 +1153,8 @@
         h('div', { class: 'role-row' }, h('span', { class: 'field-label' }, '角色'), roleSeg),
         h('div', { class: 'ops' },
           statusBtn, kickBtn, resetBtn,
-          opButton('节点权限', '官方节点、限额、节点凭证', { icon: 'server', onclick: () => userNodesDialog(u) })),
+          opButton('节点权限', '官方节点、限额、节点凭证', { icon: 'server', onclick: () => userNodesDialog(u) }),
+          opButton('登录设备', '设备指纹、系统和硬件、IP', { icon: 'activity', onclick: () => userDevicesDialog(u) })),
         secretBox,
       ],
       onClose: () => { if (changed) reload(); },
@@ -1433,14 +1434,6 @@
   // 按分组切换，一次显示一组：整页一屏，放不下时在卡片里滚动（手机上也一样）。分组记在地址里 #/settings/<分组>。
   const SETTING_TABS = [['client', '客户端'], ['images', '图源'], ['auth', '登录'], ['nodes', '节点'], ['deploy', '部署']];
 
-  // 推荐的图源（旧版客户端内置的那几个），一键填入
-  const SUGGESTED_IMAGE_SOURCES = [
-    { url: 'https://umi.li/random?dir=lucky&type=img', weight: 5, isApi: false, jsonPath: '' },
-    { url: 'https://api.lolicon.app/setu/v2?r18=0&num=1&size=regular&proxy=i.pixiv.re&excludeAI=true', weight: 2, isApi: true, jsonPath: 'data.0.urls.regular' },
-    { url: 'https://image.anosu.top/pixiv/json?r18=0&size=regular&num=1&keyword=loli', weight: 2, isApi: true, jsonPath: '0.url' },
-    { url: 'https://moe.jitsu.top/img', weight: 1, isApi: false, jsonPath: '' },
-  ];
-
   async function pageSettings(p) {
     let tab = SETTING_TABS.some((t) => t[0] === p.params[0]) ? p.params[0] : 'client';
     const host = h('div', { class: 'set-host' }, loadingBox());
@@ -1555,7 +1548,7 @@
         err], [resetClientButton(), save]);
     }
 
-    // 图源：图片面板的图源，保存后马上推给在线客户端
+    // 图源：图片面板的图源，只给登录的用户；保存后马上推给在线客户端
     function imagesCard() {
       const images = imageEditor(data.client.config.imageSources || []);
       const err = formError();
@@ -1571,7 +1564,7 @@
           }
         }),
       });
-      return card('图源', data.client.fromPanel, [images.el, err], [images.suggest, resetClientButton(), save]);
+      return card('图源', data.client.fromPanel, [images.el, err], [resetClientButton(), save]);
     }
 
     // 图源编辑：每行地址、类型（直接返回图片 / JSON 接口）、JSON 路径、权重
@@ -1602,15 +1595,6 @@
       }
       initial.forEach(addRow);
       recount();
-      const suggest = button('填入推荐', {
-        small: true,
-        onclick: () => {
-          const have = new Set([...rows.children].map((r) => r.value().url));
-          const add = SUGGESTED_IMAGE_SOURCES.filter((x) => !have.has(x.url));
-          add.forEach(addRow);
-          toast(add.length ? '已填入 ' + add.length + ' 个，记得保存' : '推荐的图源都已经在列表里了');
-        },
-      });
       return {
         el: h('div', { class: 'img-editor' },
           h('div', { class: 'img-head' },
@@ -1618,7 +1602,6 @@
             h('span', { class: 'img-hint muted' }, '“图片”：地址直接返回图片；“JSON”：返回 JSON，按路径取图片地址。权重越大越常出现'),
             button('添加图源', { small: true, icon: 'plus', onclick: () => addRow({ weight: 1 }) })),
           rows, empty),
-        suggest,
         value: () => [...rows.children].map((r) => r.value()),
       };
     }
@@ -1708,6 +1691,72 @@
           row('面板版本', d.version), row('监听地址', d.listen), row('数据库', d.dbPath), row('受信任的反向代理', d.trustedProxies),
           row('日志级别', d.logLevel), row('agent 来源', d.agentSource), row('面板主密钥', d.secretKey))]);
     }
+  }
+
+
+  // userDevicesDialog 用户还有效的登录：每台设备的会话 ID、设备指纹（HWID）、系统和硬件、IP、在线和隧道状态，可以单独让它下线。
+  // 设备信息是客户端连实时通道时上报的，离线后显示最近一次的。
+  async function userDevicesDialog(u) {
+    const box = h('div', { class: 'dev-list' }, loadingBox());
+    const d = openDialog({ title: u.nickname + ' 的登录设备', titleIcon: 'activity', wide: true, body: box,
+      actions: [button('关闭', { onclick: () => d.close() })] });
+    const load = async () => {
+      let res;
+      try {
+        res = await api('GET', '/users/' + encodeURIComponent(u.nickname) + '/devices');
+      } catch (e) {
+        box.replaceChildren(errorBox(e, load));
+        return;
+      }
+      const list = res.devices || [];
+      if (!list.length) {
+        box.replaceChildren(stateBox('inbox', '没有有效的登录', '用户登录客户端或管理后台后会出现在这里'));
+        return;
+      }
+      box.replaceChildren(...list.map(card));
+    };
+    const copyable = (v) => (v ? h('span', { class: 'dev-copy' }, h('code', null, v), iconButton('copy', '复制', () => copyText(v))) : h('span', { class: 'faint' }, '—'));
+    const card = (x) => {
+      const dv = x.device || {};
+      const t = x.tunnel || {};
+      const [tl, tk] = TUNNEL_STATES[t.state] || ['', ''];
+      const hw = [dv.cpu, dv.cores ? dv.cores + ' 线程' : '', dv.memoryMb ? (dv.memoryMb / 1024).toFixed(1) + ' GB 内存' : ''].filter(Boolean).join(' · ');
+      const kick = button('下线', {
+        small: true, kind: 'danger',
+        onclick: async () => {
+          if (!(await confirmDialog({ title: '让这台设备下线', danger: true, ok: '下线',
+            message: '这台设备上的登录马上失效，客户端回到未登录状态（本地配置不受影响），用户可以重新登录。' }))) return;
+          await busy(kick, async () => {
+            try {
+              await api('POST', '/clients/kick', { sessions: [x.sessionId] });
+              toast('已让这台设备下线');
+              load();
+            } catch (e) {
+              fail(e);
+            }
+          });
+        },
+      });
+      return h('section', { class: 'dev-card' },
+        h('div', { class: 'dev-head' },
+          h('b', null, dv.hostname || x.deviceName || (x.kind === 'admin_web' ? '管理后台' : '未知设备')),
+          badge(x.kind === 'admin_web' ? '管理后台' : '客户端', 'outline'),
+          x.online ? badge('在线', 'ok') : badge('离线'),
+          x.online && t.state ? badge('隧道' + tl, tk) : null,
+          h('span', { class: 'grow' }), kick),
+        h('dl', { class: 'kv dev-kv' },
+          h('dt', null, '设备指纹'), h('dd', null, copyable(x.deviceId)),
+          h('dt', null, '会话 ID'), h('dd', null, copyable(x.sessionId)),
+          h('dt', null, '安装 ID'), h('dd', null, copyable(x.installId)),
+          h('dt', null, '系统'), h('dd', null, [dv.os, dv.osBuild, dv.arch].filter(Boolean).join(' · ') || h('span', { class: 'faint' }, '没上报（客户端版本较旧或还没连过实时通道）')),
+          h('dt', null, '硬件'), h('dd', null, [dv.model, hw].filter(Boolean).join(' · ') || h('span', { class: 'faint' }, '—')),
+          h('dt', null, '客户端'), h('dd', null, dv.version || h('span', { class: 'faint' }, '—')),
+          h('dt', null, 'IP'), h('dd', null, [x.ip ? '现在 ' + x.ip : (x.lastIp ? '最近 ' + x.lastIp : ''), x.loginIp ? '登录时 ' + x.loginIp : ''].filter(Boolean).join(' · ') || '—'),
+          h('dt', null, '时间'), h('dd', null, '登录于 ', timeEl(x.createdAt), ' · 最近活跃 ', timeEl(x.lastSeenAt)),
+          x.online && t.state && t.state !== 'idle' ? [h('dt', null, '隧道'), h('dd', null,
+            [PROFILE_KINDS[t.profileKind], t.profileName, t.nodeName, (t.running || 0) + '/' + (t.proxies || 0) + ' 代理'].filter(Boolean).join(' · '))] : null));
+    };
+    load();
   }
 
   // ---------- 审计日志 ----------
@@ -2416,13 +2465,17 @@
     return el;
   }
 
+  const NODE_TABS = [['overview', '概况'], ['config', '配置'], ['proxies', '代理'], ['logs', '日志'], ['exec', '命令'], ['settings', '设置']];
+
   async function pageNode(p, id) {
     let n = null;
-    let tab = 'overview';
+    // 当前标签记在地址里（#/nodes/<ID>/<标签>），刷新、分享链接后还在这一页
+    let tab = NODE_TABS.some((t) => t[0] === p.params[1]) ? p.params[1] : 'overview';
     let settingsPane = 'basic'; // "设置"页当前的分组
-    const tabs = segmented([['overview', '概况'], ['config', '配置'], ['proxies', '代理'], ['logs', '日志'], ['exec', '命令'], ['settings', '设置']], tab, (v, set) => {
+    const tabs = segmented(NODE_TABS, tab, (v, set) => {
       tab = v;
       set(v);
+      history.replaceState(null, '', '#/nodes/' + encodeURIComponent(id) + '/' + v);
       drawTab();
     }, { label: '节点页面' });
     // 标签栏固定，下面的内容区占满剩余高度：列表、日志、编辑器在里面自己滚动

@@ -2,8 +2,10 @@
 import { computed, ref, watch } from 'vue'
 import Drawer from '../ui/Drawer.vue'
 import Icon from '../ui/Icon.vue'
+import Select from '../ui/Select.vue'
 import Switch from '../ui/Switch.vue'
 import Options from '../ui/Options.vue'
+import Check from '../ui/Check.vue'
 import { message } from '../ui/feedback'
 import type { Visitor } from '../api'
 import { useProfilesStore } from '../stores/profiles'
@@ -28,6 +30,8 @@ const empty = (): Visitor => ({
   bindAddr: '127.0.0.1',
   bindPort: 0,
   fallbackTo: '',
+  useEncryption: false,
+  useCompression: false,
 })
 
 const form = ref<Visitor>(empty())
@@ -129,13 +133,22 @@ async function save() {
       <Transition name="collapse">
         <div v-if="form.type === 'xtcp'" class="fld">
           <label for="vs-fb">回退到</label>
-          <select id="vs-fb" v-model="form.fallbackTo" class="inp">
-            <option value="">不回退</option>
-            <option v-for="n in fallbackOptions" :key="n" :value="n">{{ n }}</option>
-          </select>
+          <Select id="vs-fb" v-model="form.fallbackTo" :options="[{ value: '', label: '不回退' }, ...fallbackOptions.map((n) => ({ value: n, label: n }))]" />
           <span class="fld-help" :class="{ err: fieldErr.fallbackTo }">{{ fieldErr.fallbackTo ?? '打洞失败时改用同一配置里的这个 stcp 访客' }}</span>
         </div>
       </Transition>
+      <div class="fld">
+        <span class="lbl">传输</span>
+        <div class="toggles">
+          <Check v-model="form.useEncryption">加密</Check>
+          <Check v-model="form.useCompression">压缩</Check>
+        </div>
+        <span class="fld-help" :class="{ warn: form.type === 'xtcp' }" data-testid="visitor-form-transport-hint">{{
+          form.type === 'xtcp'
+            ? 'xtcp 打洞后两台电脑直连：这两项必须和对方代理的设置一样，否则连不上'
+            : 'stcp / sudp 经过节点中转，只影响你到节点这一段，不用和对方一致'
+        }}</span>
+      </div>
       <div class="sw-line">
         <div class="set-txt"><b>启用</b></div>
         <Switch v-model="form.enabled" label="启用" />

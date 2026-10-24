@@ -43,6 +43,9 @@ func (m *Manager) syncOnce(s *session, reason string) time.Duration {
 	err := m.pull(s, reason)
 	if err == nil {
 		m.syncOfficial(s)
+		if !s.images || m.imagesStale.Swap(false) {
+			m.syncImages(s)
+		}
 		err = m.push(s.ctx)
 	}
 	if s.ctx.Err() != nil || !m.isCurrent(s) {
@@ -113,6 +116,28 @@ func (m *Manager) syncOfficial(s *session) {
 	m.logf("official nodes: %d", len(nodes))
 	if m.onOfficial != nil {
 		m.onOfficial(nodes)
+	}
+}
+
+// syncImages 拉取图片面板的图源（每次登录拉一次，面板改了客户端配置时再拉）。
+// 旧版服务端没有这个接口（404）时不再重试。
+func (m *Manager) syncImages(s *session) {
+	src, err := m.api.ClientImages(s.ctx)
+	if err != nil {
+		if apierr.CodeOf(err) == apierr.NotFound {
+			s.images = true
+		} else {
+			m.logf("image sources: %v", err)
+		}
+		return
+	}
+	if !m.isCurrent(s) {
+		return
+	}
+	s.images = true
+	m.logf("image sources: %d", len(src))
+	if m.onImages != nil {
+		m.onImages(src)
 	}
 }
 

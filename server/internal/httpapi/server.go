@@ -216,6 +216,7 @@ func (s *Server) routes() {
 	mux.Handle("GET "+api.RouteMe, authed(s.handleMe))
 	mux.Handle("GET "+api.RouteState, authed(s.handleState))
 	mux.Handle("GET "+api.RouteOfficialNodes, authed(s.handleOfficialNodes))
+	mux.Handle("GET "+api.RouteClientImages, authed(s.handleClientImages))
 	mux.Handle("GET "+api.RouteClientLive, authed(s.handleLive))
 	mux.Handle("POST "+api.RouteOfficialTickets, chain(http.HandlerFunc(s.handleNodeTickets),
 		s.requireAuth, s.limit(s.limUser, byUser), s.limit(s.limTickets, bySession)))

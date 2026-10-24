@@ -66,7 +66,7 @@ curl -s https://frp.example.com/healthz
 
 ## 3. 验证
 
-- [ ] `curl -s https://frp.example.com/api/v1/client/config` 返回新版本号、公告和图源。
+- [ ] `curl -s https://frp.example.com/api/v1/client/config` 返回新版本号和公告（图源只给登录的用户，这里总是空的）。
 - [ ] 用新客户端登录一个**导入的老账号**，密码不变；云端配置都在。
 - [ ] 订阅一个**旧分享 ID**，能看到预览，并且能运行。
 - [ ] 旧客户端登录时弹出"请下载新版客户端：<下载地址>"。新服务对旧路径的处理是：`get_challenge` 返回假挑战码，`/api/login` 返回 426。

@@ -51,6 +51,9 @@ type P2PTarget struct {
 	SecretKey  string `json:"secretKey"`
 	ServerUser string `json:"serverUser,omitempty"` // 分享者节点上的 frp user
 	LocalPort  int    `json:"localPort,omitempty"`  // 仅用于预览时提示（例如 3389），不参与运行
+	// 目标代理的加密、压缩设置：订阅者的访客照着设（xtcp 两边必须一致）。旧的分享快照里没有，重新发布后才有
+	UseEncryption  bool `json:"useEncryption,omitempty"`
+	UseCompression bool `json:"useCompression,omitempty"`
 }
 
 // SubscriptionParams 是订阅者为订阅提供的参数，结构随分享类型不同。
@@ -107,7 +110,7 @@ func BuildRuntime(kind string, payload SharePayload, params SubscriptionParams) 
 			data.Visitors = append(data.Visitors, Visitor{
 				ID: b.ID, Name: b.Name, Type: t.Type, Enabled: b.Enabled,
 				ServerName: t.ServerName, ServerUser: t.ServerUser, SecretKey: t.SecretKey,
-				BindAddr: addr, BindPort: b.BindPort,
+				BindAddr: addr, BindPort: b.BindPort, UseEncryption: t.UseEncryption, UseCompression: t.UseCompression,
 			})
 		}
 	}

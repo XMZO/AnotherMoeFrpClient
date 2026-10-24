@@ -160,7 +160,7 @@ const runState = (p) => p.attr(tid('run-state'), 'data-state')
 
 async function setCloseToQuit(p) {
   await p.click(tid('nav-settings'))
-  await p.clickText('.radio', '退出程序')
+  await p.clickText('.radio', '退出')
   await sleep(300)
   await p.click(tid('nav-tunnel'))
 }

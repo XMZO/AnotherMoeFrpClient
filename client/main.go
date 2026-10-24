@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strconv"
 	"sync"
@@ -197,10 +198,16 @@ func main() {
 			}
 			return apiclient.ProxyURLFor(s.NetworkProxy, s.ProxyURL, addr)
 		},
+		// 云端配置和订阅的日志不给界面看（界面只显示运行状态），本地配置的照常显示
+		Private: func(id string) bool {
+			c, ok := profiles.Get(id)
+			return ok && (c.IsCloud() || c.IsSubscription())
+		},
 	})
 	tunnelSvc, tunnelCtl := services.NewTunnelService(eng, sink, profiles, settings)
 	tunnelCtl.SetTicketPool(nodeTickets)
 	tunnelCtl.SetOfficial(profiles.Sync().Official) // 上次缓存的官方节点，离线也能用
+	imageSvc, imageCtl := services.NewImageService(paths.ImagesDir(), settings, func() *http.Client { return api.NewHTTPClient(30 * time.Second) })
 	syncMgr := cloudsync.New(cloudsync.Options{
 		API: api, Creds: credstore.NewWinCred(credTarget), Profiles: profiles, Engine: eng, DeviceName: hostname,
 		Logf: func(format string, args ...any) {
@@ -208,6 +215,7 @@ func main() {
 			diag("cloud: "+format, args...)
 		},
 		OnOfficial: tunnelCtl.SetOfficial,
+		OnImages:   imageCtl.SetSources, // 图源只给登录的用户
 	})
 	profileSvc := services.NewProfileService(profiles, settings, eng, syncMgr)
 	authSvc := services.NewAuthService(syncMgr, profiles, eng)
@@ -215,13 +223,12 @@ func main() {
 	appSvc := services.NewAppService(version, paths, warnings, started)
 	updater := services.NewUpdater(api, version)
 	appSvc.Updater = updater
-	imageSvc, imageCtl := services.NewImageService(paths.ImagesDir(), settings, func() *http.Client { return api.NewHTTPClient(30 * time.Second) })
-	updater.OnConfig(func(cfg apiConfig) { imageCtl.SetSources(cfg.ImageSources) })
 
 	// 实时通道（docs/client-live.md）：面板的变化秒推过来，管理员的通知、远程控制也走它
 	notices := &services.Notices{}
 	appSvc.Notices = notices
-	liveCh := live.New(api, apiLiveHello{Version: version, OS: osName(), Hostname: hostname}, live.Handlers{
+	liveCh := live.New(api, apiLiveHello{Version: version, OS: osName(), Hostname: hostname,
+		OSBuild: osBuild(), Arch: runtime.GOARCH, CPU: cpuName(), Cores: runtime.NumCPU(), MemoryMB: memoryMB(), Model: machineModel()}, live.Handlers{
 		Sync:     syncMgr.SyncNow,
 		Official: syncMgr.SyncNow,
 		Tickets:  func(string) { tunnelCtl.TicketsInvalid() },
@@ -229,8 +236,8 @@ func main() {
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), apiclient.DefaultTimeout)
 				defer cancel()
-				_, _ = updater.Check(ctx) // 新版本、公告、图源
-				syncMgr.SyncNow()         // 最低版本提高了的话，这次请求会被拒绝，账号功能随之停用
+				_, _ = updater.Check(ctx) // 新版本、公告
+				syncMgr.RefreshImages()   // 重新拉图源并同步一次；最低版本提高了的话，这次请求会被拒绝，账号功能随之停用
 			}()
 		},
 		Notice: notices.Push,
@@ -272,7 +279,9 @@ func main() {
 		winMu    sync.Mutex
 		window   *application.WebviewWindow // 隐藏到托盘并释放 WebView2 后为 nil
 		quitting atomic.Bool
-		stopOnce sync.Once
+		// closeChoice 是询问窗口里选好的动作，下一次 WindowClosing 用它代替设置
+		closeChoice atomic.Value
+		stopOnce    sync.Once
 	)
 	currentWindow := func() *application.WebviewWindow {
 		winMu.Lock()
@@ -382,13 +391,23 @@ func main() {
 			URL:       "/",
 			Hidden:    !visible,
 		})
-		// 点关闭按钮：默认最小化到托盘，设置里可改为退出（PLAN 6.8）。
+		// 点关闭按钮：默认每次询问（前端弹窗，勾"记住"后写进设置），也可以在设置里固定为最小化到托盘或退出（PLAN 6.8）。
 		// 最小化到托盘时默认关闭窗口、释放 WebView2，从托盘打开时重新创建；设置里关掉则只是隐藏。
 		w.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 			if quitting.Load() {
 				return
 			}
-			if settings.Get().CloseAction == store.CloseQuit {
+			action := settings.Get().CloseAction
+			if a, _ := closeChoice.Swap("").(string); a != "" {
+				action = a // 询问窗口里刚选的
+			}
+			if action == store.CloseAsk {
+				diag("WindowClosing -> ask")
+				e.Cancel()
+				app.Event.Emit(services.EventCloseAsk, nil)
+				return
+			}
+			if action == store.CloseQuit {
 				diag("WindowClosing -> quit")
 				e.Cancel()
 				go quit()
@@ -436,6 +455,16 @@ func main() {
 	})
 	appSvc.OpenBrowser = app.Browser.OpenURL
 	appSvc.QuitApp = func() { go quit() }
+	appSvc.CloseAs = func(action string) {
+		if action == store.CloseQuit {
+			go quit()
+			return
+		}
+		if w := currentWindow(); w != nil {
+			closeChoice.Store(action)
+			w.Close()
+		}
+	}
 	appSvc.OnReady = func(d time.Duration) { diag("frontend ready: %d ms since process creation", d.Milliseconds()) }
 
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {

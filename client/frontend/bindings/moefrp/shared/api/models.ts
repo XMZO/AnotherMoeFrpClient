@@ -81,6 +81,11 @@ export interface PreviewNode {
 export interface PreviewProxy {
     "name": string;
     "type": string;
+
+    /**
+     * tcp 代理同时转发 UDP
+     */
+    "withUdp"?: boolean;
     "remotePort"?: number;
     "customDomains"?: string[] | null;
     "subdomain"?: string;

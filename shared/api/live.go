@@ -85,11 +85,17 @@ type LiveEndedBody struct {
 	Message string `json:"message"`
 }
 
-// LiveHelloBody 是客户端的基本信息。
+// LiveHelloBody 是客户端的基本信息和设备信息（管理后台"用户 → 登录设备"里显示，离线后也能看到）。
 type LiveHelloBody struct {
 	Version  string `json:"version"`
-	OS       string `json:"os"`
+	OS       string `json:"os"` // 例如 Windows 11 专业版 24H2
 	Hostname string `json:"hostname"`
+	OSBuild  string `json:"osBuild,omitempty"` // 例如 10.0.26100.2894
+	Arch     string `json:"arch,omitempty"`    // amd64 / arm64
+	CPU      string `json:"cpu,omitempty"`     // 处理器型号
+	Cores    int    `json:"cores,omitempty"`   // 逻辑处理器数
+	MemoryMB int    `json:"memoryMb,omitempty"`
+	Model    string `json:"model,omitempty"` // 电脑的品牌和型号，例如 LENOVO 21D0
 }
 
 // LiveTunnelInfo 是客户端上报的隧道状态（不含地址、令牌等配置细节）。

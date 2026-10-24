@@ -7,6 +7,7 @@ import AboutPage from './pages/AboutPage.vue'
 import AccountArea from './components/AccountArea.vue'
 import AuthModal from './components/AuthModal.vue'
 import ConflictDialog from './components/ConflictDialog.vue'
+import CloseAsk from './components/CloseAsk.vue'
 import SyncNotices from './components/SyncNotices.vue'
 import ImagePanel from './components/ImagePanel.vue'
 import TitleBar from './components/TitleBar.vue'
@@ -149,7 +150,7 @@ onMounted(async () => {
           </button>
         </div>
         <div class="rail-fill" />
-        <ImagePanel />
+        <ImagePanel v-if="account.loggedIn" />
         <button type="button" class="theme-btn" :title="`主题：${theme.label}（点击切换）`" :aria-label="`切换主题，当前${theme.label}`" @click="cycleTheme">
           <span class="theme-ic"><Transition name="theme-ic" mode="out-in"><Icon :key="theme.icon" :name="theme.icon" size="s" /></Transition></span>
           <span class="theme-lbl">{{ theme.label }}</span>
@@ -158,15 +159,16 @@ onMounted(async () => {
       </nav>
 
       <main class="main">
-        <Transition name="page"><TunnelPage v-show="page === 'tunnel'" /></Transition>
-        <Transition name="page"><SharesPage v-if="page === 'shares'" /></Transition>
-        <Transition name="page"><SettingsPage v-if="page === 'settings'" /></Transition>
-        <Transition name="page"><AboutPage v-if="page === 'about'" /></Transition>
+        <TunnelPage v-show="page === 'tunnel'" />
+        <SharesPage v-if="page === 'shares'" />
+        <SettingsPage v-if="page === 'settings'" />
+        <AboutPage v-if="page === 'about'" />
       </main>
     </div>
 
     <AuthModal />
     <ConflictDialog />
+    <CloseAsk />
     <SyncNotices />
   </div>
 </template>
@@ -338,6 +340,8 @@ onMounted(async () => {
 .main > * {
   flex: 1;
   min-height: 0;
+  /* 只做 CSS 入场动画，切走时立即隐藏或卸载，避免旧页面滞留。 */
+  animation: pageIn 0.45s var(--ease-out);
 }
 
 @media (min-width: 1360px) {

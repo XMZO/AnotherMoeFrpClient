@@ -113,6 +113,12 @@ func TestBuildRuntime(t *testing.T) {
 	if err := ProfileData(d); err != nil {
 		t.Errorf("p2p runtime invalid: %v", err)
 	}
+	// 目标代理开了加密、压缩：访客照着设（xtcp 两边必须一致）
+	payload.Targets[0].Type, payload.Targets[0].UseEncryption, payload.Targets[0].UseCompression = "xtcp", true, true
+	d, _ = model.BuildRuntime(model.ShareP2P, payload, model.SubscriptionParams{Binds: []model.P2PBind{{ID: "b1", TargetID: "t1", Name: "v", Enabled: true, BindPort: 9000}}})
+	if !d.Visitors[0].UseEncryption || !d.Visitors[0].UseCompression {
+		t.Errorf("访客应和目标代理一致：%+v", d.Visitors[0])
+	}
 	d, _ = model.BuildRuntime(model.ShareTemplate, payload, model.SubscriptionParams{NodeID: "n1", Proxies: []model.Proxy{{ID: "x", Name: "mine", Type: "tcp", LocalPort: 1}}})
 	if len(d.Proxies) != 1 || d.Proxies[0].Name != "mine" {
 		t.Errorf("template: %+v", d)

@@ -27,7 +27,7 @@ const ticketErrPrefix = "无法领取官方节点的登录票据："
 // 用真的 frps 和 frpc 盯着它（包括断线重连）。
 //
 // 票据在连接建立（Connect 成功、登录消息马上发出）后才算用掉：连不上节点、反复重试时不消耗票据。
-func ticketConnector(src TicketSource, nodeID string) func(context.Context, *v1.ClientCommonConfig) frpclient.Connector {
+func ticketConnector(src TicketSource, nodeID, deviceID string) func(context.Context, *v1.ClientCommonConfig) frpclient.Connector {
 	return func(ctx context.Context, c *v1.ClientCommonConfig) frpclient.Connector {
 		tk, err := src.Peek(ctx, nodeID)
 		if err != nil {
@@ -38,6 +38,7 @@ func ticketConnector(src TicketSource, nodeID string) func(context.Context, *v1.
 			m = map[string]string{}
 		}
 		m[api.MetaCredential] = tk
+		m[api.MetaDevice] = deviceID
 		c.Metadatas = m
 		return &ticketedConnector{Connector: frpclient.NewConnector(ctx, c), used: func() { src.Used(nodeID, tk) }}
 	}

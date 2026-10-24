@@ -3,6 +3,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -27,6 +28,7 @@ import (
 	"moefrp/agent/internal/paths"
 	"moefrp/agent/internal/selfupdate"
 	"moefrp/agent/internal/sysinfo"
+	"moefrp/agent/internal/vault"
 	"moefrp/shared/agentproto"
 )
 
@@ -39,6 +41,8 @@ type Agent struct {
 	logs    *logbuf.Buffer
 	frps    *frpsrv.Manager
 	access  *access.Store
+	vault   *vault.Vault // 本地加密存储：frps 配置、授权表
+	machine string       // 机器指纹
 	sampler sysinfo.Sampler
 	static  sysinfo.Static
 
@@ -67,10 +71,17 @@ func Run(ctx context.Context, version string) error {
 		static: sysinfo.ReadStatic(),
 		exit:   os.Exit,
 	}
-	// 官方节点：本机起 frps 插件，是官方节点时挂到 frps 上
-	acc, err := access.Load(p.Access())
+	// 本地加密存储：用面板下发的存储密钥加密，密钥本身用机器指纹和令牌封存（租约内重启、面板离线也能解开）
+	a.machine = sysinfo.MachineID(p.MachineIDFallback())
+	a.vault = vault.Open(p.ConfDir, a.machine, cfg.Token, nil)
+	if !a.vault.Unlocked() {
+		log.Warn("本地加密存储还锁着，frps 等面板下发存储密钥后再启动", "reason", a.vault.Reason())
+	}
+	a.frps.Vault = a.vault
+	// 准入：本机起 frps 插件，按面板签发的登录票据放行
+	acc, err := access.Load(p.Access(), a.vault)
 	if err != nil {
-		log.Error("读取授权用户表失败，按非官方节点处理", "err", err)
+		log.Error("读取授权表失败", "err", err)
 	}
 	a.access = acc
 	pluginAddr, err := acc.Listen()
@@ -102,6 +113,19 @@ func Run(ctx context.Context, version string) error {
 		log.Error("frps 启动失败", "err", err)
 	}
 	a.sampler.Sample() // 第一次采样只是为了下次能算出 CPU 占用率
+	// 每小时推高本地存储的时间高水位：之后把系统时间往回调就能被发现
+	go func() {
+		t := time.NewTicker(time.Hour)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				a.vault.Touch()
+			}
+		}
+	}()
 
 	link.Run(ctx, link.Options{
 		Server: cfg.Server, Token: cfg.Token,
@@ -134,7 +158,8 @@ func (a *Agent) hello() agentproto.Hello {
 		OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Distro: a.static.Distro, Kernel: a.static.Kernel, Hostname: a.static.Hostname, BootTime: a.static.BootTime,
 		ExecEnabled: a.cfg.Exec, AppliedRev: a.frps.AppliedRev(),
-		Features: []string{agentproto.FeatureAccess, agentproto.FeatureTickets},
+		Features:  []string{agentproto.FeatureAccess, agentproto.FeatureTickets, agentproto.FeatureSettings},
+		MachineID: a.machine,
 	}
 	if a.pending != nil && !a.confirmed.Load() {
 		h.Upgrade = selfupdate.Result(a.pending, a.version)
@@ -170,9 +195,39 @@ func (a *Agent) handle(ctx context.Context, method string, data json.RawMessage)
 		if err := json.Unmarshal(data, &req); err != nil {
 			return nil, bad(err)
 		}
-		res := a.frps.Apply(req.Rev, req.Config)
+		var res agentproto.ApplyResult
+		if req.Settings != nil {
+			res = a.frps.ApplySettings(req.Rev, *req.Settings)
+		} else {
+			res = a.frps.Apply(req.Rev, req.Config) // 旧面板下发的 TOML
+		}
 		a.log.Info("应用 frps 配置", "rev", req.Rev, "applied", res.Applied, "rolled_back", res.RolledBack, "err", res.Error)
 		return res, nil
+
+	case agentproto.MethodStoreLease:
+		var l agentproto.StoreLease
+		if err := json.Unmarshal(data, &l); err != nil {
+			return nil, bad(err)
+		}
+		key, err := base64.StdEncoding.DecodeString(l.Key)
+		if err != nil {
+			return nil, bad(err)
+		}
+		unlocked, err := a.vault.SetLease(key, l.LeaseUntil, l.ServerTime)
+		if err != nil {
+			return nil, err
+		}
+		if unlocked {
+			// 刚解锁：读出加密保存的授权表，再用保存的配置启动 frps（之前因为锁着没启动）
+			if err := a.access.Reload(); err != nil {
+				a.log.Error("读取授权表失败", "err", err)
+			}
+			if err := a.frps.Boot(); err != nil {
+				a.log.Error("frps 启动失败", "err", err)
+			}
+			a.log.Info("本地加密存储已解锁", "lease_until", a.vault.LeaseUntil().Format(time.RFC3339))
+		}
+		return struct{}{}, nil
 
 	case agentproto.MethodFrpsRestart:
 		return struct{}{}, a.frps.Restart()
@@ -187,7 +242,12 @@ func (a *Agent) handle(ctx context.Context, method string, data json.RawMessage)
 			return nil, err
 		}
 		res := agentproto.AccessResult{Users: len(t.Users)}
-		if changed {
+		if a.frps.Status().State != agentproto.FrpsRunning {
+			// frps 可能因为授权表还没到（没有准入插件不能启动）而没启动
+			if err := a.frps.Boot(); err != nil {
+				a.log.Error("frps 启动失败", "err", err)
+			}
+		} else if changed {
 			// 挂上或去掉插件要重启 frps；还没有 frps 配置时等配置下发后自然生效
 			if err := a.frps.Restart(); err == nil {
 				res.Restarted = true

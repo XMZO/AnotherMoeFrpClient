@@ -52,7 +52,7 @@ func (c *fakeConnector) Close() error { return nil }
 
 func TestTicketConnector(t *testing.T) {
 	src := &fakeTickets{}
-	create := ticketConnector(src, "n1")
+	create := ticketConnector(src, "n1", "dev-1")
 	cfg := &v1.ClientCommonConfig{Metadatas: map[string]string{"other": "x"}}
 	orig := cfg.Metadatas
 
@@ -60,7 +60,7 @@ func TestTicketConnector(t *testing.T) {
 	if _, ok := create(context.Background(), cfg).(*ticketedConnector); !ok {
 		t.Fatal("应返回带票据的连接器")
 	}
-	if cfg.Metadatas[api.MetaCredential] != "n1-t1" || cfg.Metadatas["other"] != "x" || orig[api.MetaCredential] != "" {
+	if cfg.Metadatas[api.MetaCredential] != "n1-t1" || cfg.Metadatas[api.MetaDevice] != "dev-1" || cfg.Metadatas["other"] != "x" || orig[api.MetaCredential] != "" {
 		t.Fatalf("metadatas：%v（原来的 %v）", cfg.Metadatas, orig)
 	}
 

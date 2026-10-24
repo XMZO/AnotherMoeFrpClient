@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"moefrp/client/internal/device"
 	"net/http"
 	"net/url"
 	"strings"
@@ -36,6 +37,7 @@ type Client struct {
 	base      *url.URL
 	version   string
 	installID string
+	deviceID  string // 设备指纹，每个请求都带上（登录时记在会话上，领官方节点票据时要对得上）
 
 	mu     sync.RWMutex
 	token  string
@@ -50,7 +52,7 @@ func New(base, version, installID, proxyMode string) (*Client, error) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, fmt.Errorf("apiclient: invalid base url %q", base)
 	}
-	c := &Client{base: u, version: version, installID: installID}
+	c := &Client{base: u, version: version, installID: installID, deviceID: device.ID(installID)}
 	c.SetProxyMode(proxyMode)
 	return c, nil
 }
@@ -124,6 +126,7 @@ func (c *Client) do(ctx context.Context, method, path string, hdr http.Header, i
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set(api.HeaderClientVersion, c.version)
 	req.Header.Set(api.HeaderInstallID, c.installID)
+	req.Header.Set(api.HeaderDeviceID, c.deviceID)
 	c.mu.RLock()
 	token, hc := c.token, c.hc
 	c.mu.RUnlock()

@@ -28,6 +28,7 @@ type Session struct {
 	TokenHash    []byte
 	InstallID    string
 	DeviceName   string
+	DeviceID     string // 客户端的设备指纹（登录时上报），领官方节点票据时要对得上
 	CreatedAt    int64
 	LastSeenAt   int64
 	ExpiresAt    int64
@@ -38,9 +39,9 @@ type Session struct {
 // InsertSession 插入会话。
 func InsertSession(ctx context.Context, q Querier, s Session) error {
 	_, err := q.ExecContext(ctx,
-		`INSERT INTO sessions (id, user_id, token_hash, install_id, device_name, created_at, last_seen_at, expires_at, kind)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.ID, s.UserID, s.TokenHash, s.InstallID, nullString(s.DeviceName), s.CreatedAt, s.LastSeenAt, s.ExpiresAt, sessionKind(s.Kind))
+		`INSERT INTO sessions (id, user_id, token_hash, install_id, device_name, device_id, created_at, last_seen_at, expires_at, kind)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.ID, s.UserID, s.TokenHash, s.InstallID, nullString(s.DeviceName), s.DeviceID, s.CreatedAt, s.LastSeenAt, s.ExpiresAt, sessionKind(s.Kind))
 	return err
 }
 
@@ -59,12 +60,12 @@ func GetSessionByTokenHash(ctx context.Context, q Querier, tokenHash []byte) (Se
 		reason     sql.NullString
 	)
 	err := q.QueryRowContext(ctx,
-		`SELECT s.id, s.user_id, s.token_hash, s.install_id, s.device_name, s.created_at, s.last_seen_at, s.expires_at,
+		`SELECT s.id, s.user_id, s.token_hash, s.install_id, s.device_name, s.device_id, s.created_at, s.last_seen_at, s.expires_at,
 		        s.revoked_at, s.revoke_reason, s.kind,
 		        u.id, u.nickname, u.password_hash, u.role, u.status, u.state_version, u.created_at, u.updated_at
 		   FROM sessions s JOIN users u ON u.id = s.user_id
 		  WHERE s.token_hash = ?`, tokenHash).Scan(
-		&r.Session.ID, &r.Session.UserID, &r.Session.TokenHash, &r.Session.InstallID, &deviceName,
+		&r.Session.ID, &r.Session.UserID, &r.Session.TokenHash, &r.Session.InstallID, &deviceName, &r.Session.DeviceID,
 		&r.Session.CreatedAt, &r.Session.LastSeenAt, &r.Session.ExpiresAt, &revokedAt, &reason, &r.Session.Kind,
 		&r.User.ID, &r.User.Nickname, &r.User.PasswordHash, &r.User.Role, &r.User.Status,
 		&r.User.StateVersion, &r.User.CreatedAt, &r.User.UpdatedAt)

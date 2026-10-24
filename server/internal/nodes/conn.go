@@ -222,6 +222,23 @@ func (s *Service) handleHello(ctx context.Context, c *agentConn, node store.Node
 	}
 	c.hello = h
 	now := s.now()
+	// 机器指纹：第一次上线时记下；之后对不上说明令牌被拷到了别的机器上（或者重装了系统），拒绝
+	if h.MachineID != "" {
+		switch node.MachineID {
+		case "":
+			if err := store.SetNodeMachineID(ctx, s.st.DB(), node.ID, h.MachineID); err != nil {
+				return err
+			}
+		case h.MachineID:
+		default:
+			_ = c.send(ctx, agentproto.Message{ID: m.ID, Type: agentproto.TypeResponse, Method: m.Method, Error: &agentproto.Error{
+				Code:    agentproto.ErrMachineMismatch,
+				Message: "这个节点的令牌是在另一台机器上注册的（机器指纹不同）。重装了系统或换了机器的话，请在面板上重置令牌，再用新的安装命令加 --force 重新安装",
+			}})
+			s.log.Warn("node machine id mismatch", "node", node.ID, "ip", c.ip)
+			return errors.New("machine id mismatch")
+		}
+	}
 	info, _ := json.Marshal(h)
 	if err := store.SetNodeSeen(ctx, s.st.DB(), node.ID, string(info), c.ip, now.Unix()); err != nil {
 		return err
@@ -282,14 +299,18 @@ func (s *Service) afterHello(id string, h agentproto.Hello) {
 		}
 		return
 	}
-	// 先推授权表（官方节点会让 frps 挂上准入插件），再补发配置
+	// 先下发存储租约（节点要用它解开、加密本地存储），再推授权表（frps 的准入插件要用），最后补发配置
+	if err := s.pushLease(ctx, id, true); err != nil {
+		s.log.Warn("push store lease failed", "node", id, "err", err)
+	}
 	if err := s.syncAccess(ctx, id, true); err != nil {
 		s.log.Warn("sync node access failed", "node", id, "err", err)
 	}
+	// 旧 agent（不支持结构化配置）不补发：它照旧用自己的 TOML，升级后再下发。
 	// 节点已经拒绝过的版本（apply_error 不为空）不自动重发：每次重发都会让 frps 重启再回滚。
 	// 管理员保存新配置时 apply_error 会被清空
-	if n.FrpsConfig != "" && n.ConfigRev != h.AppliedRev && n.ApplyError == "" {
-		res, err := s.push(ctx, id, n.ConfigRev, n.FrpsConfig)
+	if hasFeature(&h, agentproto.FeatureSettings) && n.ConfigRev != h.AppliedRev && n.ApplyError == "" {
+		res, err := s.push(ctx, id, n.ConfigRev, settingsOf(n))
 		switch {
 		case err != nil:
 			s.log.Warn("push config failed", "node", id, "err", err)

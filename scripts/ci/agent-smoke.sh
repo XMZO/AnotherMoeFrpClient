@@ -60,13 +60,18 @@ must_fail grep -q mfn_ /etc/systemd/system/moefrp-agent.service # 令牌不在�
 wait_for "节点上线" 30 bash -c "[ \"\$(curl -fsS -b $JAR -H 'X-MoeFrp-Admin: 1' $BASE/api/v1/admin/nodes/$ID | jq -r .status)\" = online ]"
 test "$(node_field "$ID" .info.agentVersion)" = "$VERSION"
 
-# ---- 2. frps 配置：生效、端口被占时回滚 ----
-R=$(api -X PUT "$BASE/api/v1/admin/nodes/$ID/config" -d '{"config":"bindPort = 17000\nauth.token = \"ci-token\"\n"}')
+# ---- 2. frps 配置（结构化，没有 token）：生效、端口被占时回滚；节点上加密保存，没有明文 ----
+SET=$(api "$BASE/api/v1/admin/frps-schema" | jq -c '.defaults')
+R=$(api -X PUT "$BASE/api/v1/admin/nodes/$ID/settings" -d "$(jq -c '.bindPort = 17000' <<<"$SET")")
 jq -e '.pushed and .result.applied' <<<"$R"
 wait_for "frps 监听 17000" 10 bash -c 'echo > /dev/tcp/127.0.0.1/17000'
-R=$(api -X PUT "$BASE/api/v1/admin/nodes/$ID/config" -d '{"config":"bindPort = 18090\n"}') # 被面板占用
+R=$(api -X PUT "$BASE/api/v1/admin/nodes/$ID/settings" -d "$(jq -c '.bindPort = 18090' <<<"$SET")") # 被面板占用
 jq -e '.result.applied == false and .result.rolledBack == true' <<<"$R"
 bash -c 'echo > /dev/tcp/127.0.0.1/17000'
+sudo test -s /etc/moefrp-agent/vault.seal
+sudo test -s /etc/moefrp-agent/frps.enc
+must_fail sudo grep -q 17000 /etc/moefrp-agent/frps.enc # 加密保存
+must_fail sudo test -e /etc/moefrp-agent/frps.toml
 
 # ---- 3. 以 root 执行命令 ----
 TID=$(api -X POST "$BASE/api/v1/admin/nodes/exec" -d "{\"nodes\":[\"$ID\"],\"command\":\"id -u; head -1 /etc/os-release\"}" | jq -r '.tasks[0].id')

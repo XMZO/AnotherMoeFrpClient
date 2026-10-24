@@ -1,6 +1,7 @@
 package access
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -21,8 +22,10 @@ import (
 	plugin "github.com/fatedier/frp/pkg/plugin/server"
 
 	"moefrp/agent/internal/frpsrv"
+	"moefrp/agent/internal/vault"
 	"moefrp/shared/agentproto"
 	"moefrp/shared/api"
+	"moefrp/shared/frpsset"
 	"moefrp/shared/nodeticket"
 	"moefrp/shared/quota"
 )
@@ -43,14 +46,18 @@ func table(enabled bool) agentproto.AccessTable {
 // ticket 签发一张 alice 在会话 sess 上的票据，edit 可以改声明。
 func ticket(sess string, edit ...func(*nodeticket.Claims)) string {
 	now := time.Now().Unix()
-	c := nodeticket.Claims{User: "u1", Session: sess, Node: "node-1", Gen: 1, Issued: now, Expires: now + 900, Nonce: nodeticket.NewNonce()}
+	c := nodeticket.Claims{User: "u1", Session: sess, Node: "node-1", Gen: 1, Issued: now, Expires: now + 900, Nonce: nodeticket.NewNonce(),
+		Device: nodeticket.DeviceTag(testKey, "dev-1")}
 	for _, e := range edit {
 		e(&c)
 	}
 	return nodeticket.Sign(testKey, c)
 }
 
-func metas(tk string) map[string]string { return map[string]string{api.MetaCredential: tk} }
+// metas 是 frpc 登录时带的 metadatas：票据和设备指纹（dev-1）。
+func metas(tk string) map[string]string {
+	return map[string]string{api.MetaCredential: tk, api.MetaDevice: "dev-1"}
+}
 
 func decide(t *testing.T, s *Store, op string, content any) (string, any) {
 	t.Helper()
@@ -69,7 +76,7 @@ func login(t *testing.T, s *Store, user, tk, runID string) (string, string) {
 }
 
 func TestDecide(t *testing.T) {
-	s, err := Load(filepath.Join(t.TempDir(), "access.json"))
+	s, err := Load(filepath.Join(t.TempDir(), "access.json"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,6 +125,14 @@ func TestDecide(t *testing.T) {
 	}
 	if r, _ := login(t, s, "bob", ticket("sess-a"), ""); !strings.Contains(r, "alice") {
 		t.Fatalf("user 不是昵称：%q", r)
+	}
+	// 设备绑定：票据是发给 dev-1 的，换一台设备（或不带设备指纹）登录不了
+	for _, dev := range []string{"dev-2", ""} {
+		r, _ := decide(t, s, plugin.OpLogin, plugin.LoginContent{Login: msg.Login{User: "alice",
+			Metas: map[string]string{api.MetaCredential: ticket("sess-a"), api.MetaDevice: dev}}})
+		if !strings.Contains(r, "设备") {
+			t.Fatalf("设备 %q：%q", dev, r)
+		}
 	}
 
 	user := plugin.UserInfo{User: "alice", Metas: metas(tk), RunID: run1}
@@ -204,7 +219,7 @@ func TestDecide(t *testing.T) {
 	}
 
 	// 表、用过的票据、见过的已撤销会话都保存在文件里，重启后还在（即使新表里不再列出这个会话）
-	s2, err := Load(s.path)
+	s2, err := Load(s.path, nil)
 	if err != nil || !s2.Enabled() || s2.Users() != 0 {
 		t.Fatalf("reload: %v", err)
 	}
@@ -271,7 +286,12 @@ func echoOK(port int) bool {
 // 每次登录（包括重连）前调用 ConnectorCreator，传入的就是随后拼登录消息时读 Metadatas 的那份配置。
 // 升级 frp 后这个测试失败，说明这个行为变了，客户端的票据注入要跟着改。
 func TestWithFrps(t *testing.T) {
-	s, _ := Load(filepath.Join(t.TempDir(), "access.json"))
+	dir := t.TempDir()
+	v := vault.Open(dir, "machine-1", "agent-token", nil)
+	if _, err := v.SetLease(bytes.Repeat([]byte{7}, 32), time.Now().Add(time.Hour).Unix(), time.Now().Unix()); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := Load(filepath.Join(dir, "access.json"), v)
 	if _, err := s.Apply(table(true)); err != nil {
 		t.Fatal(err)
 	}
@@ -279,12 +299,23 @@ func TestWithFrps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := frpsrv.New(filepath.Join(t.TempDir(), "frps.toml"))
+	set := frpsset.Defaults()
+	set.BindAddr, set.BindPort, set.AllowPorts = "127.0.0.1", freePort(t), "20000-20010"
+	bind := set.BindPort
+
+	// 没有准入插件时绝不启动（节点没有 token，不挂插件谁都能连）
+	bare := frpsrv.New(filepath.Join(dir, "frps.toml"))
+	bare.Vault = v
+	if r := bare.ApplySettings(1, set); r.Applied || !strings.Contains(r.Error, "授权表") {
+		t.Fatalf("没有插件时应拒绝启动：%+v", r)
+	}
+
+	m := frpsrv.New(filepath.Join(dir, "frps.toml"))
+	m.Vault = v
 	m.Plugin = func() *v1.HTTPPluginOptions {
 		return &v1.HTTPPluginOptions{Name: "moefrp-access", Addr: addr, Path: "/handler", Ops: PluginOps}
 	}
-	bind := freePort(t)
-	if r := m.Apply(1, fmt.Sprintf("bindAddr = \"127.0.0.1\"\nbindPort = %d\nauth.token = \"public\"\nallowPorts = [{ start = 20000, end = 20010 }]\n", bind)); !r.Applied {
+	if r := m.ApplySettings(1, set); !r.Applied {
 		t.Fatalf("frps: %+v", r)
 	}
 	defer m.Close()
@@ -299,8 +330,8 @@ func TestWithFrps(t *testing.T) {
 	run := func(user string, metasFor func() map[string]string, fresh bool, names []string, ports ...int) *client {
 		t.Helper()
 		cl := &client{done: make(chan error, 1)}
+		// 节点没有 token：frpc 也不设
 		common := &v1.ClientCommonConfig{ServerAddr: "127.0.0.1", ServerPort: bind, User: user, Metadatas: metasFor()}
-		common.Auth.Token = "public"
 		f := false
 		common.Transport.TLS.Enable = &f
 		if err := common.Complete(); err != nil {

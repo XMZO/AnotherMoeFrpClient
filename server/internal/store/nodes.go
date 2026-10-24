@@ -14,7 +14,9 @@ type Node struct {
 	DownloadMirror   string // 下载 agent 用的代理前缀，空表示直连
 	Enrolled         bool   // token_hash 不为空
 	EnrollExpiresAt  *int64
-	FrpsConfig       string
+	FrpsConfig       string // 旧的 TOML 配置，只用来转换成 Settings
+	Settings         string // 结构化 frps 配置（JSON，frpsset.Settings）
+	MachineID        string // agent 的机器指纹
 	ConfigRev        int64
 	AppliedRev       int64
 	ApplyError       string
@@ -28,13 +30,14 @@ type Node struct {
 }
 
 const nodeColumns = `id, name, public_addr, download_mirror, token_hash IS NOT NULL, enroll_expires_at, frps_config, config_rev,
-	applied_rev, apply_error, pending_uninstall, info, last_ip, last_seen_at, created_at, updated_at, official, roles, description`
+	applied_rev, apply_error, pending_uninstall, info, last_ip, last_seen_at, created_at, updated_at, official, roles, description,
+	settings, machine_id`
 
 func scanNode(row interface{ Scan(...any) error }) (Node, error) {
 	var n Node
 	err := row.Scan(&n.ID, &n.Name, &n.PublicAddr, &n.DownloadMirror, &n.Enrolled, &n.EnrollExpiresAt, &n.FrpsConfig, &n.ConfigRev,
 		&n.AppliedRev, &n.ApplyError, &n.PendingUninstall, &n.Info, &n.LastIP, &n.LastSeenAt, &n.CreatedAt, &n.UpdatedAt,
-		&n.Official, &n.Roles, &n.Description)
+		&n.Official, &n.Roles, &n.Description, &n.Settings, &n.MachineID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Node{}, ErrNotFound
 	}
@@ -44,8 +47,8 @@ func scanNode(row interface{ Scan(...any) error }) (Node, error) {
 // InsertNode 新建节点，同时写入安装码的哈希。
 func InsertNode(ctx context.Context, q Querier, n Node, enrollHash []byte, enrollExpires int64) error {
 	_, err := q.ExecContext(ctx, `INSERT INTO nodes (id, name, public_addr, download_mirror, enroll_hash, enroll_expires_at,
-		frps_config, config_rev, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		n.ID, n.Name, n.PublicAddr, n.DownloadMirror, enrollHash, enrollExpires, n.FrpsConfig, n.ConfigRev, n.CreatedAt, n.UpdatedAt)
+		settings, config_rev, roles, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		n.ID, n.Name, n.PublicAddr, n.DownloadMirror, enrollHash, enrollExpires, n.Settings, n.ConfigRev, n.Roles, n.CreatedAt, n.UpdatedAt)
 	return err
 }
 
@@ -99,10 +102,15 @@ func SetNodeEnrolled(ctx context.Context, q Querier, id string, tokenHash []byte
 		WHERE id = ?`, tokenHash, now, id)
 }
 
-// ResetNodeEnrollment 作废令牌并生成新的安装码（重置令牌 / 重新安装）。
+// ResetNodeEnrollment 作废令牌并生成新的安装码（重置令牌 / 重新安装）。机器指纹一起清掉，可以装到别的机器上。
 func ResetNodeEnrollment(ctx context.Context, q Querier, id string, enrollHash []byte, expires, now int64) error {
-	return execOne(ctx, q, `UPDATE nodes SET token_hash = NULL, enroll_hash = ?, enroll_expires_at = ?, updated_at = ?
+	return execOne(ctx, q, `UPDATE nodes SET token_hash = NULL, enroll_hash = ?, enroll_expires_at = ?, machine_id = '', updated_at = ?
 		WHERE id = ?`, enrollHash, expires, now, id)
+}
+
+// SetNodeMachineID 记下 agent 的机器指纹（第一次上线时）。
+func SetNodeMachineID(ctx context.Context, q Querier, id, machineID string) error {
+	return execOne(ctx, q, `UPDATE nodes SET machine_id = ? WHERE id = ?`, machineID, id)
 }
 
 // UpdateNodeMeta 修改名称、客户端连接地址和下载代理。
@@ -111,11 +119,11 @@ func UpdateNodeMeta(ctx context.Context, q Querier, id, name, publicAddr, mirror
 		name, publicAddr, mirror, now, id)
 }
 
-// SetNodeConfig 保存新的期望配置，版本号 +1，返回新版本号。
-func SetNodeConfig(ctx context.Context, q Querier, id, config string, now int64) (int64, error) {
+// SetNodeSettings 保存新的期望配置（JSON），版本号 +1，返回新版本号。
+func SetNodeSettings(ctx context.Context, q Querier, id, settings string, now int64) (int64, error) {
 	var rev int64
-	err := q.QueryRowContext(ctx, `UPDATE nodes SET frps_config = ?, config_rev = config_rev + 1, apply_error = '', updated_at = ?
-		WHERE id = ? RETURNING config_rev`, config, now, id).Scan(&rev)
+	err := q.QueryRowContext(ctx, `UPDATE nodes SET settings = ?, config_rev = config_rev + 1, apply_error = '', updated_at = ?
+		WHERE id = ? RETURNING config_rev`, settings, now, id).Scan(&rev)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, ErrNotFound
 	}

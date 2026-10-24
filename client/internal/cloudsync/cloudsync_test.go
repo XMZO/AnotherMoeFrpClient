@@ -618,13 +618,13 @@ func (d *device) officialCalls() [][]api.OfficialNode {
 func TestOfficialNodesSync(t *testing.T) {
 	srv := newFakeServer()
 	defer srv.Close()
-	srv.official = []api.OfficialNode{{ID: "n1", Name: "东京", ServerAddr: "tokyo.example.com", ServerPort: 7000, Token: "t",
+	srv.official = []api.OfficialNode{{ID: "n1", Name: "东京", ServerAddr: "tokyo.example.com", ServerPort: 7000,
 		User: "alice", Online: true}}
 	d := newDevice(t, srv, "")
 	d.login(t, true)
 
 	calls := d.officialCalls()
-	if len(calls) != 1 || len(calls[0]) != 1 || calls[0][0].Token != "t" {
+	if len(calls) != 1 || len(calls[0]) != 1 || calls[0][0].ServerAddr != "tokyo.example.com" {
 		t.Fatalf("登录后拉到官方节点：%+v", calls)
 	}
 	if st := d.ps.Sync(); len(st.Official) != 1 || st.OfficialETag == "" {

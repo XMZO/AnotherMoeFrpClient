@@ -655,6 +655,19 @@ dialog.dialog[open] { animation: pop 0.14s ease-out; }
 
 code.clip { display: inline-block; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 
+/* ---------- frps 配置表单 ---------- */
+
+.cfg-body { overflow-y: auto; }
+.cfg-group + .cfg-group { margin-top: 4px; padding-top: 14px; border-top: 1px solid var(--border); }
+.cfg-group-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; min-width: 0; }
+.cfg-group-head h3 { margin: 0; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.cfg-group-head span { font-size: 12px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cfg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px 16px; align-items: start; }
+.cfg-grid .field + .field { margin-top: 0; }
+.field.bool { padding-top: 6px; }
+.field.bool .check { gap: 8px; }
+.input.invalid { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-weak); }
+
 /* ---------- 官方节点 ---------- */
 
 .sub-head { margin: 0 0 8px; font-size: 14px; font-weight: 600; }

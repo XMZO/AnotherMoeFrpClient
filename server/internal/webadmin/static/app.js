@@ -1176,6 +1176,7 @@
     'admin.setup': ['初始化管理员', 'accent'],
     'admin.login': ['登录后台', 'accent'],
     'admin.backup': ['下载备份', 'accent'],
+    'admin.node_secret': ['轮换节点密钥', 'danger'],
     'share.create': ['创建分享', 'info'],
     'share.republish': ['更新分享', 'info'],
     'share.revoke': ['撤销分享', 'info'],
@@ -1437,7 +1438,7 @@
         h('h3', { class: 'sub-head' }, '官方节点'),
         official.length ? h('div', { class: 'grant-list' }, selects.map(([x, sel]) => h('div', { class: 'grant-row' },
           h('div', null, h('div', { class: 'setting-title' }, x.name), h('div', { class: 'setting-desc' },
-            '开放给：' + ((x.roles || []).map((r) => (ROLE_OPTIONS.find(([v]) => v === r) || [r, r])[1]).join('、') || '无') +
+            ((x.roles || []).includes('user') ? '开放给普通用户' : '只给管理员') +
             ' · 现在' + (x.allowed ? '可用' : '不可用'))), sel)))
           : h('p', { class: 'muted' }, '还没有官方节点。在节点的"设置"里开启。'),
         h('div', { class: 'gap' }),
@@ -1470,6 +1471,55 @@
           err.classList.add('show');
         }
       }),
+    });
+  }
+
+  // frpsSchema 返回 frps 配置表单的描述（分组、字段、默认值），只取一次。
+  let schemaCache = null;
+  async function frpsSchema() {
+    if (!schemaCache) schemaCache = await api('GET', '/frps-schema');
+    return schemaCache;
+  }
+
+  // secretDialog 显示面板主密钥的指纹，可以轮换。
+  async function secretDialog() {
+    let info;
+    try {
+      info = await api('GET', '/node-secret');
+    } catch (e) {
+      fail(e);
+      return;
+    }
+    const kv = h('dl', { class: 'kv' });
+    const draw = () => kv.replaceChildren(
+      h('dt', null, '指纹'), h('dd', null, h('code', null, info.fingerprint)),
+      h('dt', null, '上次轮换'), h('dd', null, info.rotatedAt ? fmtTime(info.rotatedAt) : h('span', { class: 'faint' }, '从未轮换（第一次使用时自动生成）')));
+    draw();
+    const rotate = button('轮换密钥', {
+      kind: 'danger',
+      onclick: async () => {
+        if (!(await confirmDialog({ title: '轮换节点密钥', danger: true, ok: '轮换',
+          message: '所有已签发的登录票据立即作废，在线用户会断开几秒、自动领新票据重连；所有节点换用新的存储密钥重新加密本地配置。确定继续？' }))) return;
+        await busy(rotate, async () => {
+          try {
+            info = await api('POST', '/node-secret/rotate');
+            draw();
+            toast('已轮换，正在推送到节点');
+          } catch (e) {
+            fail(e);
+          }
+        });
+      },
+    });
+    const d = openDialog({
+      title: '节点密钥',
+      titleIcon: 'key',
+      body: [h('p', { class: 'dialog-text' }, '面板主密钥用来签发节点登录票据、派生各节点的存储密钥。只存在面板数据库里，不会下发原值。'),
+        h('div', { class: 'gap' }), kv,
+        h('ul', { class: 'hints' },
+          h('li', null, '怀疑密钥泄露（例如数据库备份外泄）时轮换。'),
+          h('li', null, '离线节点上线后自动换用新密钥；节点离线超过 7 天，重启后要等面板连上才能启动 frps。'))],
+      actions: [button('关闭', { onclick: () => d.close() }), rotate],
     });
   }
 
@@ -1611,6 +1661,7 @@
     p.actions.append(
       button('刷新', { icon: 'refresh', onclick: () => load() }),
       button('限额', { icon: 'layers', onclick: () => quotasDialog() }),
+      button('密钥', { icon: 'key', onclick: () => secretDialog() }),
       button('执行命令', { icon: 'terminal', onclick: () => data && execDialog(data.nodes) }),
       button('添加节点', { kind: 'primary', icon: 'plus', onclick: () => createNodeDialog(() => load(), data) }));
     p.body.append(h('div', { class: 'fill' }, notice, box));
@@ -1649,7 +1700,7 @@
             const [fl, fk] = fs ? (FRPS_STATE[fs.state] || [fs.state]) : [null];
             const href = '#/nodes/' + encodeURIComponent(n.id);
             return [
-              h('td', null, h('a', { class: 'node-link', href }, n.name), n.official ? [' ', badge('官方', 'accent')] : null,
+              h('td', null, h('a', { class: 'node-link', href }, n.name), n.official ? [' ', badge('开放', 'accent')] : null,
                 h('div', { class: 'cell-sub' }, [info.hostname, n.client && n.client.addr].filter(Boolean).join(' · ') || '—')),
               h('td', null, nodeStatusBadge(n),
                 h('div', { class: 'cell-sub' }, n.status === 'online' ? dropsText(n) : n.lastSeen ? ['最后在线 ', timeEl(n.lastSeen)] : '')),
@@ -1669,7 +1720,7 @@
             const [fl] = fs ? (FRPS_STATE[fs.state] || [fs.state]) : [null];
             return {
               href: '#/nodes/' + encodeURIComponent(n.id),
-              title: [n.name, n.official ? badge('官方', 'accent') : null],
+              title: [n.name, n.official ? badge('开放', 'accent') : null],
               trail: [nodeStatusBadge(n), icon('chevron', 16)],
               meta: [
                 fs ? 'frps ' + fl + (fs.state === 'running' ? ' :' + fs.bindPort + ' · ' + fs.clients + ' 个客户端' : '') : null,
@@ -1874,9 +1925,9 @@
 
       const side = [];
       if (n.client) {
-        side.push(section('连接信息', '客户端"节点"里填这些', h('dl', { class: 'conn' },
+        side.push(section('连接信息', '只接受 MoeFrp 客户端', h('dl', { class: 'conn' },
           h('dt', null, '地址'), h('dd', null, n.client.addr ? copyBox(n.client.addr + ':' + n.client.port) : h('span', { class: 'faint' }, '节点上线后显示，或在"设置"里填域名')),
-          h('dt', null, 'token'), h('dd', null, n.client.token ? secretBox(n.client.token) : h('span', { class: 'faint' }, '未设置（任何人都能连）')))));
+          h('dt', null, '认证'), h('dd', { class: 'muted' }, '没有 token：用户在客户端登录后，每次连接自动领一次性票据（绑定设备）'))));
       }
 
       if (n.status !== 'pending') side.push(section('系统', null, h('div', { class: 'tiles' },
@@ -1892,50 +1943,97 @@
       return h('div', { class: 'stack' }, parts, side);
     }
 
-    // 显示过的 token 记在 revealed 里，自动刷新重画时保持显示状态
-    const revealed = new Set();
-    function secretBox(text) {
-      const mask = '••••••••••••';
-      return h('div', { class: 'copybox' }, h('code', null, revealed.has(text) ? text : mask),
-        iconButton('eye', '显示', (e) => {
-          if (revealed.has(text)) revealed.delete(text);
-          else revealed.add(text);
-          e.currentTarget.parentNode.querySelector('code').textContent = revealed.has(text) ? text : mask;
-        }),
-        iconButton('copy', '复制', () => copyText(text, 'token 已复制')));
-    }
-
+    // tabConfig 是 frps 配置表单：字段由面板的 schema 生成（shared/frpsset），分组显示，每项带说明。
     function tabConfig() {
-      const ta = h('textarea', { class: 'input mono textarea code-editor', spellcheck: 'false', wrap: 'off', 'aria-label': 'frps 配置' });
-      ta.value = n.frpsConfig || '';
-      const result = h('div', { hidden: true });
-      const show = (el) => { result.replaceChildren(el); result.hidden = false; };
-      const save = button(n.status === 'online' ? '保存并应用' : '保存', {
-        kind: 'primary', small: true,
-        onclick: () => busy(save, async () => {
-          try {
-            const res = await api('PUT', '/nodes/' + encodeURIComponent(id) + '/config', { config: ta.value });
-            const r = res.result;
-            if (!res.pushed) {
-              show(h('div', { class: 'callout info' }, icon('info', 16), h('span', null, '已保存（v' + res.rev + '）。节点不在线，上线后自动下发。')));
-            } else if (r.applied) {
-              show(h('div', { class: 'callout ok' }, icon('check', 16), h('span', null, '已生效（v' + res.rev + '），frps 已用新配置重启。' + (r.warning ? ' 提示：' + r.warning : ''))));
-              toast('frps 配置已生效');
-            } else {
-              show(h('div', { class: 'callout danger' }, icon('alert', 16),
-                h('span', null, r.error + (r.rolledBack ? '。frps 已恢复为之前的配置继续运行。' : ''))));
-            }
-            n = await api('GET', '/nodes/' + encodeURIComponent(id));
-          } catch (e) {
-            fail(e);
+      const card = h('div', { class: 'card grow fill-card' }, loadingBox());
+      (async () => {
+        let sc;
+        try {
+          sc = await frpsSchema();
+        } catch (e) {
+          card.replaceChildren(errorBox(e));
+          return;
+        }
+        const ctl = {};
+        const result = h('div', { hidden: true });
+        const show = (el) => { result.replaceChildren(el); result.hidden = false; };
+        const fill = (vals) => {
+          for (const f of sc.fields) {
+            const el = ctl[f.key];
+            el.classList.remove('invalid');
+            if (f.kind === 'bool') el.checked = !!vals[f.key];
+            else if (f.kind === 'int') el.value = String(vals[f.key] || 0);
+            else el.value = vals[f.key] || '';
           }
-        }),
-      });
-      return h('div', { class: 'card grow fill-card' },
-        h('div', { class: 'card-head' }, h('h2', null, 'frps.toml'),
-          h('div', { class: 'head-btns' }, button('还原', { small: true, onclick: () => { ta.value = n.frpsConfig || ''; result.hidden = true; } }), save)),
-        h('div', { class: 'card-body' }, ta, result,
-          h('p', { class: 'cell-sub' }, 'frps 原生 TOML。保存后 agent 先校验再重启 frps，启动失败（如端口被占用）自动恢复旧配置。不支持 webServer，状态在面板上看。')));
+        };
+        const read = () => {
+          const out = {};
+          for (const f of sc.fields) {
+            const el = ctl[f.key];
+            out[f.key] = f.kind === 'bool' ? el.checked : f.kind === 'int' ? (Number(el.value) || 0) : el.value.trim();
+          }
+          return out;
+        };
+        const control = (f) => {
+          let el;
+          if (f.kind === 'bool') el = h('input', { type: 'checkbox' });
+          else if (f.kind === 'select') el = h('select', { class: 'input' }, f.options.map((o) => h('option', { value: o }, o)));
+          else el = input({ type: f.kind === 'int' ? 'number' : 'text', min: f.min, max: f.max, placeholder: f.placeholder,
+            class: 'input' + (f.kind === 'ports' ? ' mono' : ''), inputmode: f.kind === 'int' ? 'numeric' : null });
+          ctl[f.key] = el;
+          if (f.kind === 'bool') {
+            return h('div', { class: 'field bool' }, h('label', { class: 'check' }, el, h('span', { class: 'field-label' }, f.label)),
+              f.hint ? h('span', { class: 'field-hint' }, f.hint) : null);
+          }
+          return field(f.label, el, f.hint);
+        };
+        const groups = sc.groups.map((g) => h('section', { class: 'cfg-group' },
+          h('div', { class: 'cfg-group-head' }, h('h3', null, g.label), g.hint ? h('span', null, g.hint) : null),
+          h('div', { class: 'cfg-grid' }, sc.fields.filter((f) => f.group === g.key).map(control))));
+        fill(n.settings || sc.defaults);
+
+        const save = button(n.status === 'online' ? '保存并应用' : '保存', {
+          kind: 'primary', small: true,
+          onclick: () => busy(save, async () => {
+            Object.values(ctl).forEach((el) => el.classList.remove('invalid'));
+            try {
+              const res = await api('PUT', '/nodes/' + encodeURIComponent(id) + '/settings', read());
+              const r = res.result;
+              if (!res.pushed) {
+                show(h('div', { class: 'callout info' }, icon('info', 16), h('span', null, '已保存（v' + res.rev + '）。节点不在线，上线后自动下发。')));
+              } else if (r.applied) {
+                show(h('div', { class: 'callout ok' }, icon('check', 16), h('span', null, '已生效（v' + res.rev + '），frps 已用新配置重启。' + (r.warning ? ' 提示：' + r.warning : ''))));
+                toast('frps 配置已生效');
+              } else {
+                show(h('div', { class: 'callout danger' }, icon('alert', 16),
+                  h('span', null, r.error + (r.rolledBack ? '。frps 已恢复为之前的配置继续运行。' : ''))));
+              }
+              n = await api('GET', '/nodes/' + encodeURIComponent(id));
+            } catch (e) {
+              if (e.handled) return;
+              const fields = (e.details && e.details.fields) || [];
+              for (const fe of fields) {
+                if (ctl[fe.field]) {
+                  ctl[fe.field].classList.add('invalid');
+                  ctl[fe.field].focus();
+                }
+              }
+              show(h('div', { class: 'callout ' + (e.code === 'node_failed' ? 'warn' : 'danger') }, icon('alert', 16), h('span', null, errText(e))));
+            }
+          }),
+        });
+        const synced = n.configRev === n.appliedRev;
+        card.replaceChildren(
+          h('div', { class: 'card-head' }, h('h2', null, 'frps 配置'),
+            h('span', null, synced ? '节点上是 v' + n.appliedRev : '已保存 v' + n.configRev + '，节点上还是 v' + n.appliedRev),
+            h('div', { class: 'head-btns' },
+              button('默认值', { small: true, title: '填入新节点的默认配置（还没保存）', onclick: () => fill(sc.defaults) }),
+              button('还原', { small: true, title: '放弃没保存的修改', onclick: () => { fill(n.settings || sc.defaults); result.hidden = true; } }),
+              save)),
+          h('div', { class: 'card-body cfg-body' }, result, groups,
+            h('p', { class: 'cell-sub' }, '节点不设 token，只接受面板签发的登录票据。保存后 agent 先校验再重启 frps，启动失败（如端口被占用）自动恢复旧配置；配置在节点上加密保存。')));
+      })();
+      return card;
     }
 
     function tabProxies() {
@@ -2053,27 +2151,18 @@
       const addr = input({ value: n.publicAddr, placeholder: n.lastIp || 'frp.example.com', maxlength: 253 });
       const [mirror, mirrorList] = mirrorInput(n.downloadMirror, []);
       const on = h('input', { type: 'checkbox' });
-      on.checked = !!n.official;
-      const roleBoxes = ROLE_OPTIONS.map(([v, label]) => {
-        const cb = h('input', { type: 'checkbox', value: v });
-        cb.checked = (n.roles || []).includes(v);
-        return h('label', { class: 'check' }, cb, label);
-      });
+      on.checked = (n.roles || []).includes('user');
       const desc = input({ value: n.description || '', maxlength: 200, placeholder: '例如：东京机房，晚高峰稳定（可选）' });
       const old = n.info && n.info.agentVersion && !n.accessSupported;
-      const roles = () => roleBoxes.map((l) => l.querySelector('input')).filter((c) => c.checked).map((c) => c.value);
       const save = button('保存', {
         kind: 'primary', small: true,
         onclick: () => busy(save, async () => {
-          const official = { official: on.checked, roles: roles(), description: desc.value };
-          const officialChanged = official.official !== !!n.official || official.description !== (n.description || '') ||
-            official.roles.join() !== ROLE_OPTIONS.map(([v]) => v).filter((v) => (n.roles || []).includes(v)).join();
-          if (official.official && !n.official && !(await confirmDialog({ title: '设为官方节点', ok: '开启',
-            message: '开启后，这个节点只接受 MoeFrp 客户端用一次性登录票据登录：直接用 token 连接的 frpc 会被拒绝。节点上的 frps 会重启一次。' }))) return;
+          const access = { roles: on.checked ? ['user'] : [], description: desc.value };
+          const accessChanged = on.checked !== (n.roles || []).includes('user') || access.description !== (n.description || '');
           try {
             await api('PATCH', '/nodes/' + encodeURIComponent(id), { name: name.value, publicAddr: addr.value, downloadMirror: mirror.value });
-            if (officialChanged) await api('PUT', '/nodes/' + encodeURIComponent(id) + '/official', official);
-            toast(officialChanged && official.official ? '已保存，正在推送到节点' : '已保存');
+            if (accessChanged) await api('PUT', '/nodes/' + encodeURIComponent(id) + '/official', access);
+            toast(accessChanged ? '已保存，正在推送到节点' : '已保存');
             load(true);
           } catch (e) {
             fail(e);
@@ -2146,11 +2235,11 @@
               field('名称', name), field('客户端连接地址', addr),
               h('div', { class: 'field span-all' }, h('span', { class: 'field-label' }, '下载代理（升级 agent、生成安装命令时用）'), mirror, mirrorList)),
             h('div', { class: 'official' },
-              old ? h('div', { class: 'callout warn' }, icon('alert', 16), h('span', null, 'agent ' + n.info.agentVersion + ' 不支持官方节点，请先升级。')) : null,
+              old ? h('div', { class: 'callout warn' }, icon('alert', 16), h('span', null, 'agent ' + n.info.agentVersion + ' 要升级到 1.4.0 才能由面板托管（没有 token、加密保存配置），升级前用户用不了这个节点。')) : null,
               h('div', { class: 'official-head' },
-                h('label', { class: 'check setting-title' }, on, '官方节点（下发给用户）'),
-                h('div', { class: 'checks' }, h('span', { class: 'muted' }, '开放给'), roleBoxes)),
-              field('给用户看的说明', desc, '开启后只接受客户端用登录票据登录，frp 的 user 固定为昵称；限额在节点列表的"限额"里设置')))),
+                h('label', { class: 'check setting-title' }, on, '开放给普通用户'),
+                h('span', { class: 'muted' }, '管理员总能用；个别用户在"用户 → 节点权限"里单独允许或禁止')),
+              field('给用户看的说明', desc, '显示在客户端的节点列表里。限额在节点列表的"限额"里按用户组设置')))),
         h('section', { class: 'card' },
           h('div', { class: 'card-head' }, h('h2', null, '维护')),
           h('div', { class: 'card-body' }, h('div', { class: 'ops' },

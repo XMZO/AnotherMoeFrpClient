@@ -44,6 +44,9 @@ func (p Paths) FrpsConfig() string { return filepath.Join(p.ConfDir, "frps.toml"
 // Access 是官方节点的授权用户表（只有凭证哈希）。
 func (p Paths) Access() string { return filepath.Join(p.ConfDir, "access.json") }
 
+// MachineIDFallback 是读不到 /etc/machine-id 时自己生成的机器 ID（容器、测试环境）。
+func (p Paths) MachineIDFallback() string { return filepath.Join(p.StateDir, "machine-id") }
+
 // NewBin 是升级时下载的新版本。
 func (p Paths) NewBin() string { return filepath.Join(p.StateDir, ServiceName+".new") }
 

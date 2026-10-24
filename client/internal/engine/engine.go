@@ -92,6 +92,8 @@ type Options struct {
 	ProbeTimeout time.Duration // 连接失败时 TCP 探测的超时
 	// Tickets 给官方节点的每次登录提供登录票据（client/internal/tickets.Pool）。为空时官方节点登录不带票据。
 	Tickets TicketSource
+	// DeviceID 是设备指纹（client/internal/device），官方节点登录时和票据一起带上，节点核对票据里的设备绑定。
+	DeviceID string
 }
 
 // TicketSource 提供官方节点的登录票据：Peek 拿一张但不取走，连接建立、登录消息发出后再 Used。
@@ -345,7 +347,7 @@ func (e *Engine) launchLocked(prep *Prepared) error {
 		UnsafeFeatures:         prep.Unsafe,
 	}
 	if id, ok := strings.CutPrefix(prep.Node.ID, api.OfficialNodePrefix); ok && e.opts.Tickets != nil {
-		so.ConnectorCreator = ticketConnector(e.opts.Tickets, id)
+		so.ConnectorCreator = ticketConnector(e.opts.Tickets, id, e.opts.DeviceID)
 	}
 	svc, err := frpclient.NewService(so)
 	if err != nil {

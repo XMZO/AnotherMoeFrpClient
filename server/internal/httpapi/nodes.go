@@ -26,6 +26,7 @@ import (
 	"moefrp/shared/agentproto"
 	"moefrp/shared/api"
 	"moefrp/shared/apierr"
+	"moefrp/shared/frpsset"
 	"moefrp/shared/quota"
 )
 
@@ -98,7 +99,10 @@ func (s *Server) nodeRoutes(mux *http.ServeMux) {
 	mux.Handle("GET "+p+"/nodes/{id}", authed(s.handleNode))
 	mux.Handle("PATCH "+p+"/nodes/{id}", authed(s.handleUpdateNode))
 	mux.Handle("DELETE "+p+"/nodes/{id}", elevated(s.handleDeleteNode))
-	mux.Handle("PUT "+p+"/nodes/{id}/config", authed(s.handleNodeConfig))
+	mux.Handle("PUT "+p+"/nodes/{id}/settings", authed(s.handleNodeSettings))
+	mux.Handle("GET "+p+"/frps-schema", authed(s.handleFrpsSchema))
+	mux.Handle("GET "+p+"/node-secret", authed(s.handleNodeSecret))
+	mux.Handle("POST "+p+"/node-secret/rotate", elevated(s.handleRotateNodeSecret))
 	mux.Handle("POST "+p+"/nodes/{id}/reset-token", elevated(s.handleNodeResetToken))
 	mux.Handle("POST "+p+"/nodes/{id}/uninstall", elevated(s.handleNodeUninstall))
 	mux.Handle("POST "+p+"/nodes/{id}/cancel-uninstall", authed(s.handleNodeCancelUninstall))
@@ -316,10 +320,6 @@ func mirrorsOf(list []nodes.View) []string {
 	return out
 }
 
-type nodeConfigRequest struct {
-	Config string `json:"config"`
-}
-
 type nodeExecRequest struct {
 	Nodes      []string `json:"nodes"`
 	Command    string   `json:"command"`
@@ -404,13 +404,39 @@ func (s *Server) handleDeleteNode(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) handleNodeConfig(w http.ResponseWriter, r *http.Request) {
-	var req nodeConfigRequest
+// PUT /api/v1/admin/nodes/{id}/settings：保存节点的 frps 配置（frpsset.Settings），在线时立即下发。
+func (s *Server) handleNodeSettings(w http.ResponseWriter, r *http.Request) {
+	var req frpsset.Settings
 	if err := decodeJSON(r, &req); err != nil {
 		s.writeError(w, r, err)
 		return
 	}
-	out, err := s.nodes.SetConfig(r.Context(), nodeActor(r), r.PathValue("id"), req.Config)
+	out, err := s.nodes.SetSettings(r.Context(), nodeActor(r), r.PathValue("id"), req)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// GET /api/v1/admin/frps-schema：frps 配置表单的描述（分组、字段、默认值）。
+func (s *Server) handleFrpsSchema(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, nodes.SettingsSchema())
+}
+
+// GET /api/v1/admin/node-secret：面板主密钥的指纹和上次轮换时间（不返回密钥）。
+func (s *Server) handleNodeSecret(w http.ResponseWriter, r *http.Request) {
+	out, err := s.nodes.Secret(r.Context())
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// POST /api/v1/admin/node-secret/rotate：轮换面板主密钥（需要重新输入密码）。
+func (s *Server) handleRotateNodeSecret(w http.ResponseWriter, r *http.Request) {
+	out, err := s.nodes.RotateSecret(r.Context(), nodeActor(r))
 	if err != nil {
 		s.writeError(w, r, err)
 		return
@@ -531,7 +557,7 @@ func (s *Server) handleNodeOfficial(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	if err := s.nodes.SetOfficial(r.Context(), nodeActor(r), r.PathValue("id"), req.Official, req.Roles, req.Description); err != nil {
+	if err := s.nodes.SetOfficial(r.Context(), nodeActor(r), r.PathValue("id"), req.Roles, req.Description); err != nil {
 		s.writeError(w, r, err)
 		return
 	}
@@ -618,7 +644,17 @@ func (s *Server) handleNodeTickets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := principalFrom(r)
-	list, err := s.nodes.IssueTickets(r.Context(), p.User.ID, p.Session.ID, r.PathValue("id"), req.Count)
+	// 设备绑定：请求带的设备指纹必须和这个会话登录时的一致，登录凭据被拷到别的机器上就领不到票据
+	dev := deviceID(r)
+	switch {
+	case p.Session.DeviceID == "":
+		s.writeError(w, r, apierr.Newf(apierr.Forbidden, "这次登录没有记下设备指纹（客户端版本太旧），请升级客户端后重新登录"))
+		return
+	case dev != p.Session.DeviceID:
+		s.writeError(w, r, apierr.Newf(apierr.Forbidden, "这台设备和登录时的不是同一台，请在这台设备上重新登录"))
+		return
+	}
+	list, err := s.nodes.IssueTickets(r.Context(), p.User.ID, p.Session.ID, dev, r.PathValue("id"), req.Count)
 	if err != nil {
 		s.writeError(w, r, err)
 		return

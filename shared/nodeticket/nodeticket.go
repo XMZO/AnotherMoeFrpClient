@@ -29,12 +29,29 @@ type Claims struct {
 	Issued  int64  `json:"i"` // 签发时间（Unix 秒）
 	Expires int64  `json:"e"` // 过期时间（Unix 秒）：过期后不能再用来登录
 	Nonce   string `json:"r"` // 随机数：节点记住用过的，同一张票据只能登录一次
+	Device  string `json:"d"` // 设备绑定（DeviceTag）：frpc 登录时带的设备指纹要算出同一个值
+}
+
+// DeviceTag 是票据里的设备绑定：只有拿着节点密钥才能从设备指纹算出来，票据持有者看不出设备指纹，
+// 只拿到票据、不知道设备指纹也登录不了。
+func DeviceTag(key []byte, deviceID string) string {
+	m := hmac.New(sha256.New, key)
+	m.Write([]byte("moefrp-device:" + deviceID))
+	return base64.RawURLEncoding.EncodeToString(m.Sum(nil)[:16])
 }
 
 // NodeKey 由面板主密钥派生出某个节点的票据密钥。
 func NodeKey(master []byte, nodeID string) []byte {
 	m := hmac.New(sha256.New, master)
 	m.Write([]byte("moefrp-node-ticket:" + nodeID))
+	return m.Sum(nil)
+}
+
+// StoreKey 由面板主密钥派生出某个节点本地加密存储的密钥（agentproto.StoreLease）。绑定机器指纹：
+// 节点换了机器（或 agent 的配置被拷走）派生出的密钥就不同，旧的加密文件解不开。
+func StoreKey(master []byte, nodeID, machineID string) []byte {
+	m := hmac.New(sha256.New, master)
+	m.Write([]byte("moefrp-node-store:" + nodeID + ":" + machineID))
 	return m.Sum(nil)
 }
 

@@ -6,6 +6,7 @@ package agentproto
 
 import (
 	"encoding/json"
+	"moefrp/shared/frpsset"
 
 	"moefrp/shared/quota"
 )
@@ -54,6 +55,7 @@ const (
 	MethodUpgrade     = "upgrade"
 	MethodUninstall   = "uninstall"
 	MethodAccessSync  = "access.sync" // 面板 → agent：官方节点的授权用户表
+	MethodStoreLease  = "store.lease" // 面板 → agent：本地加密存储的密钥和租约（FeatureSettings）
 )
 
 // Message 是线上传输的一条消息。
@@ -80,6 +82,9 @@ const (
 	ErrDisabled      = "disabled" // 例如安装时加了 --no-exec
 	ErrFailed        = "failed"
 	ErrBusy          = "busy"
+	// ErrMachineMismatch：节点令牌是在另一台机器上注册的（hello 里的机器指纹和记下的不同），
+	// 要在面板上重置令牌后重新安装。
+	ErrMachineMismatch = "machine_mismatch"
 )
 
 // ---- 注册 ----
@@ -113,6 +118,9 @@ type Hello struct {
 	AppliedRev   int64  `json:"appliedRev"` // 当前生效的 frps 配置版本，0 表示还没收到过面板的配置
 	// Features 是这个 agent 支持的可选功能，面板据此决定能不能开官方节点等（旧版本没有这个字段）。
 	Features []string `json:"features,omitempty"`
+	// MachineID 是机器指纹（/etc/machine-id 加盐哈希，不是原值）：面板据此派生节点的存储密钥，
+	// 也用它发现 agent 的令牌被拷到了别的机器上（FeatureSettings 起）。
+	MachineID string `json:"machineId,omitempty"`
 	// Upgrade 是上一次升级的结果（升级后第一次连接时带上，之后为空）。
 	Upgrade *UpgradeResult `json:"upgrade,omitempty"`
 }
@@ -161,9 +169,12 @@ type FrpsStatus struct {
 // ---- frps ----
 
 // ApplyRequest 下发 frps 配置（frps 原生 TOML）。
+// 支持 FeatureSettings 的 agent 收 Settings（结构化配置，agent 在内存里拼出 frps 配置，加密保存）；
+// 旧 agent 收 Config（frps 原生 TOML）。
 type ApplyRequest struct {
-	Rev    int64  `json:"rev"`
-	Config string `json:"config"`
+	Rev      int64             `json:"rev"`
+	Config   string            `json:"config,omitempty"`
+	Settings *frpsset.Settings `json:"settings,omitempty"`
 }
 
 // ApplyResult 是应用结果。Applied 为 false 时 frps 仍在用旧配置运行（RolledBack）或没有运行。
@@ -262,6 +273,21 @@ const FeatureAccess = "access"
 // FeatureTickets：agent 用一次性登录票据（shared/nodeticket）校验官方节点的用户。
 // 官方节点要求 agent 支持它（agent 1.3.0 起）。
 const FeatureTickets = "tickets"
+
+// FeatureSettings：agent 收结构化的 frps 配置（frpsset），frps 不设 token、始终挂准入插件，
+// 配置和授权表用面板下发的存储密钥加密保存（agent 1.4.0 起）。
+const FeatureSettings = "settings"
+
+// StoreLease 是节点本地加密存储的密钥和租约。
+//
+// 密钥由面板主密钥、节点 ID 和机器指纹派生，agent 用它加密保存 frps 配置和授权表；它自己再用本机指纹和
+// agent 令牌派生的密钥封存。租约到期前节点重启、面板离线也能解开配置照常启动；过期后要等面板重新下发。
+// 时间都是 Unix 秒（UTC，和时区无关）；agent 按 ServerTime 和本机时间的差换算到期时间，本机时钟不准也不影响租约长短。
+type StoreLease struct {
+	Key        string `json:"key"`        // base64
+	LeaseUntil int64  `json:"leaseUntil"` // 面板时间
+	ServerTime int64  `json:"serverTime"` // 面板发出时的时间
+}
 
 // AccessTable 是一个节点的授权表，面板在变化时整表下发。
 // Enabled 为 false 时节点不是官方节点：agent 不挂插件，frps 只按 token 认证。

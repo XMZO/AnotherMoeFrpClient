@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/base64"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -20,6 +21,8 @@ import (
 	"moefrp/server/internal/nodes"
 	"moefrp/shared/agentproto"
 	"moefrp/shared/apierr"
+	"moefrp/shared/frpsset"
+	"moefrp/shared/nodeticket"
 )
 
 // fakeAgent 是测试用的 agent：只实现协议，不跑 frps。
@@ -157,8 +160,8 @@ func (n *nodeEnv) node(id string) map[string]any {
 func TestNodeLifecycle(t *testing.T) {
 	n := newNodeEnv(t)
 	id, code := n.createNode("东京 1")
-	if v := n.node(id); v["status"] != "pending" || !strings.Contains(v["frpsConfig"].(string), "bindPort = 7000") {
-		t.Fatalf("新节点：%v", v)
+	if v := n.node(id); v["status"] != "pending" || v["settings"].(map[string]any)["bindPort"] != float64(7000) || len(v["roles"].([]any)) != 0 {
+		t.Fatalf("新节点（默认配置、只给管理员用）：%v", v)
 	}
 
 	// 注册：安装码只能用一次
@@ -173,16 +176,31 @@ func TestNodeLifecycle(t *testing.T) {
 	if _, resp, err := dialAgent(t, n.http.URL, "mfn_bad", agentproto.Hello{}); err == nil || resp == nil || resp.StatusCode != 401 {
 		t.Fatal("错误令牌应被拒绝")
 	}
-	a, _, err := dialAgent(t, n.http.URL, en.Token, agentproto.Hello{AgentVersion: "1.0", OS: "linux", Arch: "amd64", Hostname: "vps"})
+	a, _, err := dialAgent(t, n.http.URL, en.Token, agentproto.Hello{AgentVersion: "1.4.0", OS: "linux", Arch: "amd64", Hostname: "vps",
+		MachineID: "machine-1", Features: []string{agentproto.FeatureAccess, agentproto.FeatureTickets, agentproto.FeatureSettings}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// 上线后自动下发初始配置
-	m := a.expect(agentproto.MethodFrpsApply)
+	// 上线后：先下发存储租约（7 天），再推授权表（始终启用：节点只认票据），最后下发结构化配置（没有 token）
+	m := a.expect(agentproto.MethodStoreLease)
+	var lease agentproto.StoreLease
+	json.Unmarshal(m.Data, &lease)
+	if lease.Key == "" || lease.LeaseUntil-lease.ServerTime != 7*24*3600 {
+		t.Fatalf("存储租约：%+v", lease)
+	}
+	a.reply(m, struct{}{})
+	m = a.expect(agentproto.MethodAccessSync)
+	var tb agentproto.AccessTable
+	json.Unmarshal(m.Data, &tb)
+	if !tb.Enabled || tb.TicketKey == "" || tb.NodeID != id {
+		t.Fatalf("授权表：%+v", tb)
+	}
+	a.reply(m, agentproto.AccessResult{})
+	m = a.expect(agentproto.MethodFrpsApply)
 	var ap agentproto.ApplyRequest
 	json.Unmarshal(m.Data, &ap)
-	if ap.Rev != 1 || !strings.Contains(ap.Config, "auth.token") {
+	if ap.Rev != 1 || ap.Settings == nil || ap.Settings.BindPort != 7000 || ap.Config != "" {
 		t.Fatalf("初始配置：%+v", ap)
 	}
 	a.reply(m, agentproto.ApplyResult{Rev: 1, Applied: true})
@@ -197,14 +215,33 @@ func TestNodeLifecycle(t *testing.T) {
 	})
 	v := n.node(id)
 	cl := v["client"].(map[string]any)
-	if cl["port"] != float64(7000) || cl["token"] == "" || cl["addr"] != "127.0.0.1" {
-		t.Fatalf("客户端连接信息：%v", cl)
+	if _, hasToken := cl["token"]; cl["port"] != float64(7000) || hasToken || cl["addr"] != "127.0.0.1" {
+		t.Fatalf("客户端连接信息（没有 token）：%v", cl)
+	}
+
+	// 配置不合法：标出字段，不下发
+	bad := frpsset.Defaults()
+	bad.VhostHTTPPort = 7000
+	e := n.admin("PUT", "/nodes/"+id+"/settings", bad).apiErr(apierr.ValidationFailed)
+	if fs, _ := e.Details["fields"].([]any); len(fs) != 1 || fs[0].(map[string]any)["field"] != "vhostHTTPPort" {
+		t.Fatalf("应标出字段：%+v", e)
+	}
+	var schema struct{ Fields []map[string]any }
+	n.admin("GET", "/frps-schema", nil).expect(http.StatusOK).decode(&schema)
+	if len(schema.Fields) < 15 {
+		t.Fatalf("schema：%d", len(schema.Fields))
 	}
 
 	// 改配置：节点回滚时如实返回
+	set := frpsset.Defaults()
+	set.BindPort = 7001
 	done := make(chan resp, 1)
-	go func() { done <- n.admin("PUT", "/nodes/"+id+"/config", nodeConfigRequest{Config: "bindPort = 7001\n"}) }()
+	go func() { done <- n.admin("PUT", "/nodes/"+id+"/settings", set) }()
 	m = a.expect(agentproto.MethodFrpsApply)
+	json.Unmarshal(m.Data, &ap)
+	if ap.Settings == nil || ap.Settings.BindPort != 7001 {
+		t.Fatalf("下发的配置：%+v", ap)
+	}
 	a.reply(m, agentproto.ApplyResult{Rev: 2, RolledBack: true, Error: "frps 启动失败：端口被占用"})
 	var out struct {
 		Rev    int64
@@ -501,5 +538,65 @@ func TestNodeOfflineGrace(t *testing.T) {
 	}
 	if v := n.node(id); v["drops24h"] != float64(0) {
 		t.Fatalf("24 小时后：%v", v["drops24h"])
+	}
+}
+
+// TestNodeMachineAndSecret：机器指纹第一次上线时记下，令牌被拷到别的机器上会被拒绝，重置令牌后可以换机器；
+// 存储密钥绑定机器指纹；轮换面板主密钥后，在线节点马上收到新的存储密钥和授权表。
+func TestNodeMachineAndSecret(t *testing.T) {
+	n := newNodeEnv(t)
+	id, code := n.createNode("机器")
+	en := n.enroll(code)
+	hello := func(machine string) agentproto.Hello {
+		return agentproto.Hello{AgentVersion: "1.4.0", OS: "linux", Arch: "amd64", MachineID: machine,
+			Features: []string{agentproto.FeatureAccess, agentproto.FeatureTickets, agentproto.FeatureSettings}}
+	}
+	auto := func(f *fakeAgent) *autoAgent { a := &autoAgent{fakeAgent: f}; a.run(); return a }
+	a1, _, err := dialAgent(t, n.http.URL, en.Token, hello("machine-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	aa := auto(a1)
+	eventually(t, "租约", func() bool { return aa.lease() != nil })
+	key1 := aa.lease().Key
+
+	// 同一个令牌换一台机器：拒绝，原来的连接不受影响
+	a2, _, err := dialAgent(t, n.http.URL, en.Token, hello("machine-2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-a2.gone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("机器指纹不同的连接应被断开")
+	}
+	if n.node(id)["status"] != "online" {
+		t.Fatal("原来的节点应还在线")
+	}
+
+	// 轮换主密钥：指纹变了，在线节点收到新的存储密钥（和旧的不同）
+	var before, after struct{ Fingerprint string }
+	n.admin("GET", "/node-secret", nil).expect(http.StatusOK).decode(&before)
+	n.admin("POST", "/node-secret/rotate", nil).apiErr(apierr.ReauthRequired)
+	n.admin("POST", "/elevate", elevateRequest{Password: "password-boss"}).expect(http.StatusOK)
+	n.admin("POST", "/node-secret/rotate", nil).expect(http.StatusOK).decode(&after)
+	if after.Fingerprint == before.Fingerprint || before.Fingerprint == "" {
+		t.Fatalf("指纹：%s → %s", before.Fingerprint, after.Fingerprint)
+	}
+	eventually(t, "新存储密钥", func() bool { l := aa.lease(); return l != nil && l.Key != key1 })
+
+	// 重置令牌后可以装到另一台机器上
+	var c struct{ EnrollCode string }
+	n.admin("POST", "/nodes/"+id+"/reset-token", nil).expect(http.StatusOK).decode(&c)
+	en2 := n.enroll(c.EnrollCode)
+	a3, _, err := dialAgent(t, n.http.URL, en2.Token, hello("machine-2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a3a := auto(a3)
+	eventually(t, "新机器上线", func() bool { return a3a.lease() != nil })
+	key3, _ := base64.StdEncoding.DecodeString(a3a.lease().Key)
+	if string(key3) == string(nodeticket.StoreKey([]byte("x"), id, "machine-2")) || len(key3) != 32 {
+		t.Fatal("存储密钥应由面板主密钥派生")
 	}
 }

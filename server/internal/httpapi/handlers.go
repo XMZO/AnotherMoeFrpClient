@@ -27,7 +27,16 @@ func (s *Server) clientMeta(r *http.Request, deviceName string) (auth.ClientMeta
 			return auth.ClientMeta{}, apierr.New(apierr.ValidationFailed).With(apierr.DetailFields, es)
 		}
 	}
-	return auth.ClientMeta{IP: infoFrom(r.Context()).IP, InstallID: installID, DeviceName: deviceName}, nil
+	return auth.ClientMeta{IP: infoFrom(r.Context()).IP, InstallID: installID, DeviceName: deviceName, DeviceID: deviceID(r)}, nil
+}
+
+// deviceID 读取客户端的设备指纹（32 位十六进制），格式不对时当作没有。
+func deviceID(r *http.Request) string {
+	v := strings.ToLower(strings.TrimSpace(r.Header.Get(api.HeaderDeviceID)))
+	if len(v) != 32 || strings.Trim(v, "0123456789abcdef") != "" {
+		return ""
+	}
+	return v
 }
 
 // GET /healthz

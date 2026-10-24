@@ -16,11 +16,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/pelletier/go-toml/v2"
-
 	"moefrp/server/internal/store"
 	"moefrp/shared/agentproto"
 	"moefrp/shared/apierr"
+	"moefrp/shared/frpsset"
 	"moefrp/shared/model"
 	"moefrp/shared/validate"
 )
@@ -29,7 +28,6 @@ const (
 	tokenPrefix   = "mfn_"
 	enrollTTL     = 24 * time.Hour
 	maxNameLen    = 40
-	maxConfigSize = 64 << 10
 	keepTasks     = 100
 	callTimeout   = 20 * time.Second // 要小于 http.Server 的 WriteTimeout（30 秒）
 )
@@ -62,6 +60,7 @@ type Service struct {
 	pushed      map[string]string // 节点 ID → 上次推送的授权表哈希
 	gone        map[string]*goneState // 刚断开、还在宽限期内的节点（见 OfflineGrace）
 	drops       map[string][]time.Time // 节点最近 24 小时的断线时间
+	leased      map[string]time.Time   // 节点上次下发存储租约的时间
 	accessTimer *time.Timer
 
 	keyMu sync.Mutex
@@ -72,7 +71,7 @@ type Service struct {
 func New(o Options) *Service {
 	s := &Service{st: o.Store, log: o.Log, now: o.Now, src: o.Source,
 		conns: map[string]*agentConn{}, live: map[string]*liveState{}, pushed: map[string]string{},
-		gone: map[string]*goneState{}, drops: map[string][]time.Time{}}
+		gone: map[string]*goneState{}, drops: map[string][]time.Time{}, leased: map[string]time.Time{}}
 	if s.log == nil {
 		s.log = slog.Default()
 	}
@@ -82,6 +81,7 @@ func New(o Options) *Service {
 	if err := store.FailStaleTasks(context.Background(), s.st.DB(), s.now().Unix()); err != nil {
 		s.log.Error("nodes: fail stale tasks", "err", err)
 	}
+	s.convertLegacy(context.Background())
 	return s
 }
 
@@ -105,11 +105,10 @@ func (s *Service) cachedBuild() *Build {
 
 // ---- 视图 ----
 
-// ClientInfo 是客户端连接这个节点需要的信息（从 frps 配置里解析）。
+// ClientInfo 是客户端连接这个节点需要的地址和端口（节点只认登录票据，没有 token）。
 type ClientInfo struct {
-	Addr  string `json:"addr"`
-	Port  int    `json:"port"`
-	Token string `json:"token,omitempty"`
+	Addr string `json:"addr"`
+	Port int    `json:"port"`
 }
 
 // View 是返回给管理后台的节点信息。
@@ -137,11 +136,11 @@ type View struct {
 	NetTxRate        float64            `json:"netTxRate"`
 	Client           *ClientInfo        `json:"client,omitempty"`
 	UpgradeTo        string             `json:"upgradeTo,omitempty"`   // 有新版本可升级时为目标版本
-	FrpsConfig       *string            `json:"frpsConfig,omitempty"`  // 只在详情里返回
-	Official         bool               `json:"official"`              // 下发给用户
+	Settings         *frpsset.Settings  `json:"settings,omitempty"`    // frps 配置，只在详情里返回
+	Official         bool               `json:"official"`              // 开放给普通用户（管理员总能用）
 	Roles            []string           `json:"roles"`                 // 开放给哪些角色
 	Description      string             `json:"description,omitempty"` // 给用户看的说明
-	AccessSupported  bool               `json:"accessSupported"`       // agent 支持官方节点的登录票据（不知道版本时为 false）
+	AccessSupported  bool               `json:"accessSupported"`       // agent 支持托管（1.4.0 起）；不知道版本时为 false
 }
 
 // 节点状态。
@@ -199,44 +198,19 @@ func (s *Service) view(n store.Node, withConfig bool) View {
 		v.Report, v.NetRxRate, v.NetTxRate = &r, l.rxRate, l.txRate
 	}
 	s.mu.Unlock()
-	if ci := clientInfo(n.FrpsConfig); ci != nil {
-		ci.Addr = n.PublicAddr
-		if ci.Addr == "" {
-			ci.Addr = n.LastIP
-		}
-		v.Client = ci
-	}
+	v.Client = clientInfo(n)
 	if b := s.cachedBuild(); b != nil && v.Info != nil && v.Info.AgentVersion != "" && v.Info.OS == "linux" &&
 		b.Has(v.Info.Arch) && newer(b.Version, v.Info.AgentVersion) {
 		v.UpgradeTo = b.Version
 	}
-	v.Official, v.Roles, v.Description = n.Official, parseRoles(n.Roles), n.Description
-	v.AccessSupported = hasFeature(v.Info, agentproto.FeatureTickets)
+	v.Roles, v.Description = parseRoles(n.Roles), n.Description
+	v.Official = openToUsers(v.Roles)
+	v.AccessSupported = v.Info != nil && hasFeature(v.Info, agentproto.FeatureSettings)
 	if withConfig {
-		c := n.FrpsConfig
-		v.FrpsConfig = &c
+		set := settingsOf(n)
+		v.Settings = &set
 	}
 	return v
-}
-
-// clientInfo 从 frps 配置里取出 bindPort 和 auth.token。解析失败时返回 nil。
-func clientInfo(cfg string) *ClientInfo {
-	if strings.TrimSpace(cfg) == "" {
-		return nil
-	}
-	var c struct {
-		BindPort int `toml:"bindPort"`
-		Auth     struct {
-			Token string `toml:"token"`
-		} `toml:"auth"`
-	}
-	if toml.Unmarshal([]byte(cfg), &c) != nil {
-		return nil
-	}
-	if c.BindPort == 0 {
-		c.BindPort = 7000
-	}
-	return &ClientInfo{Port: c.BindPort, Token: c.Auth.Token}
 }
 
 // ---- 管理操作 ----
@@ -288,24 +262,6 @@ func newEnrollCode() string {
 
 func normalizeEnrollCode(c string) string { return strings.ToUpper(strings.TrimSpace(c)) }
 
-// DefaultFrpsConfig 是新节点的初始 frps 配置。
-func DefaultFrpsConfig() string {
-	return `# frps 配置（TOML），说明见 https://gofrp.org/zh-cn/docs/reference/server-configures/
-bindPort = 7000
-auth.token = "` + randomB64(18) + `"
-
-# 允许客户端使用的远程端口
-allowPorts = [{ start = 10000, end = 60000 }]
-# 每个客户端最多占用的端口数，0 表示不限
-maxPortsPerClient = 0
-
-# 让客户端通过域名访问内网网站时取消注释（需要把域名解析到这台机器）：
-# vhostHTTPPort = 80
-# vhostHTTPSPort = 443
-# subDomainHost = "frp.example.com"
-`
-}
-
 // Created 是新建节点的结果：安装码只返回这一次。
 type Created struct {
 	Node       View      `json:"node"`
@@ -325,8 +281,10 @@ func (s *Service) Create(ctx context.Context, by Actor, name, mirror string) (Cr
 	now := s.now()
 	code := newEnrollCode()
 	exp := now.Add(enrollTTL)
-	n := store.Node{ID: model.NewID(), Name: name, DownloadMirror: mirror, FrpsConfig: DefaultFrpsConfig(), ConfigRev: 1,
-		CreatedAt: now.Unix(), UpdatedAt: now.Unix()}
+	set, _ := json.Marshal(frpsset.Defaults())
+	// 新节点默认只给管理员用，在"设置"里开放给普通用户
+	n := store.Node{ID: model.NewID(), Name: name, DownloadMirror: mirror, Settings: string(set), ConfigRev: 1,
+		NodeOfficial: store.NodeOfficial{Roles: "[]"}, CreatedAt: now.Unix(), UpdatedAt: now.Unix()}
 	err = s.st.Tx(ctx, func(tx *sql.Tx) error {
 		if err := store.InsertNode(ctx, tx, n, hashSecret("enroll", code), exp.Unix()); err != nil {
 			return err
@@ -398,53 +356,6 @@ type ApplyOutcome struct {
 	Rev    int64                   `json:"rev"`
 	Pushed bool                    `json:"pushed"` // 节点在线，已下发
 	Result *agentproto.ApplyResult `json:"result,omitempty"`
-}
-
-// SetConfig 保存期望配置；节点在线时立即下发并等待结果。
-func (s *Service) SetConfig(ctx context.Context, by Actor, id, cfg string) (ApplyOutcome, error) {
-	if len(cfg) > maxConfigSize {
-		return ApplyOutcome{}, badRequest("config", "配置太长")
-	}
-	if strings.TrimSpace(cfg) == "" {
-		return ApplyOutcome{}, badRequest("config", "配置不能为空")
-	}
-	var rev int64
-	err := s.st.Tx(ctx, func(tx *sql.Tx) error {
-		var err error
-		if rev, err = store.SetNodeConfig(ctx, tx, id, cfg, s.now().Unix()); err != nil {
-			return err
-		}
-		return s.audit(ctx, tx, by, store.AuditNodeConfig, id, map[string]any{"rev": rev})
-	})
-	if err != nil {
-		return ApplyOutcome{}, notFound(err)
-	}
-	out := ApplyOutcome{Rev: rev}
-	if !s.Online(id) {
-		return out, nil
-	}
-	res, err := s.push(ctx, id, rev, cfg)
-	if err != nil {
-		return out, err
-	}
-	out.Pushed, out.Result = true, &res
-	return out, nil
-}
-
-// push 下发配置并记录结果。
-func (s *Service) push(ctx context.Context, id string, rev int64, cfg string) (agentproto.ApplyResult, error) {
-	var res agentproto.ApplyResult
-	if err := s.Call(ctx, id, agentproto.MethodFrpsApply, agentproto.ApplyRequest{Rev: rev, Config: cfg}, &res, callTimeout); err != nil {
-		return res, err
-	}
-	applied := s.appliedRevOf(id)
-	if res.Applied {
-		applied = res.Rev
-	}
-	if err := store.SetNodeApplied(ctx, s.st.DB(), id, applied, res.Error); err != nil {
-		s.log.Error("nodes: set applied", "node", id, "err", err)
-	}
-	return res, nil
 }
 
 func (s *Service) appliedRevOf(id string) int64 {

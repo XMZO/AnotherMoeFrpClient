@@ -39,6 +39,7 @@ const (
 	AuditQuotaRoles     = "admin.quota_roles" // 角色限额
 	AuditUserNodes      = "admin.user_nodes"  // 单个用户的节点授权和限额覆盖
 	AuditUserNodeCred   = "admin.node_cred"   // 重置用户的节点凭证
+	AuditNodeSecret     = "admin.node_secret" // 轮换面板主密钥（节点票据和存储密钥）
 
 	AuditShareCreate    = "share.create"
 	AuditShareRepublish = "share.republish"

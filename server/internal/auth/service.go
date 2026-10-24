@@ -101,6 +101,7 @@ type ClientMeta struct {
 	IP         string
 	InstallID  string
 	DeviceName string
+	DeviceID   string // 设备指纹（X-Device-Id），记在会话上
 }
 
 // Principal 是通过认证的请求方。
@@ -428,6 +429,7 @@ func (s *Service) login(ctx context.Context, nickname, password string, meta Cli
 		UserID:     u.ID,
 		TokenHash:  tokenHash,
 		InstallID:  meta.InstallID,
+		DeviceID:   meta.DeviceID,
 		DeviceName: meta.DeviceName,
 		CreatedAt:  now.Unix(),
 		LastSeenAt: now.Unix(),

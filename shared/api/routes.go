@@ -53,10 +53,12 @@ const (
 	HeaderAuthorization = "Authorization"
 	HeaderClientVersion = "X-Client-Version"
 	HeaderInstallID     = "X-Install-Id"
-	HeaderRequestID     = "X-Request-Id"
-	HeaderIfNoneMatch   = "If-None-Match"
-	HeaderETag          = "ETag"
-	HeaderRetryAfter    = "Retry-After"
+	// HeaderDeviceID 是客户端的设备指纹（机器 GUID 加盐哈希）：登录时记在会话上，领官方节点票据时要对得上。
+	HeaderDeviceID    = "X-Device-Id"
+	HeaderRequestID   = "X-Request-Id"
+	HeaderIfNoneMatch = "If-None-Match"
+	HeaderETag        = "ETag"
+	HeaderRetryAfter  = "Retry-After"
 
 	// BearerPrefix 是 Authorization 头里令牌前面的部分。
 	BearerPrefix = "Bearer "

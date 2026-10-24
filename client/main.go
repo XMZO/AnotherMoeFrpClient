@@ -22,6 +22,7 @@ import (
 	"moefrp/client/internal/autostart"
 	"moefrp/client/internal/cloudsync"
 	"moefrp/client/internal/credstore"
+	"moefrp/client/internal/device"
 	"moefrp/client/internal/engine"
 	"moefrp/client/internal/services"
 	"moefrp/client/internal/store"
@@ -183,7 +184,7 @@ func main() {
 
 	// 官方节点每次登录都用一张新的登录票据，向面板领取，预取几张备用（docs/node-agent.md 第 12 节）
 	nodeTickets := tickets.New(api.NodeTickets)
-	eng := engine.New(sink, engine.Options{Tickets: nodeTickets})
+	eng := engine.New(sink, engine.Options{Tickets: nodeTickets, DeviceID: device.ID(settings.Get().InstallID)})
 	tunnelSvc, tunnelCtl := services.NewTunnelService(eng, sink, profiles, settings)
 	tunnelCtl.SetTicketPool(nodeTickets)
 	tunnelCtl.SetOfficial(profiles.Sync().Official) // 上次缓存的官方节点，离线也能用

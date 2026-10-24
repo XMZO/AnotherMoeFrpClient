@@ -12,8 +12,11 @@
 // 在线代理数取自 frps 自己的统计（按 user 字段），不靠插件计数：frps 注册代理失败时不会通知插件，
 // 自己计数会越算越多。被同一会话的新登录顶掉的 frpc 留下的代理不算。
 //
-// 表保存在 /etc/moefrp-agent/access.json，用过的票据和见过的已撤销会话保存在 access-state.json，
-// 面板离线、agent 重启后照样执行。
+// 表、用过的票据和见过的已撤销会话加密保存在本地存储（vault）里，面板离线、agent 重启后照样执行。
+// 旧版本留下的明文 access.json / access-state.json 在存储解锁后搬进去并删掉。
+//
+// 设备绑定：票据里带 DeviceTag（面板按客户端登录时的设备指纹算的），frpc 登录时 metadatas 里要带上设备指纹，
+// 算出来对得上才放行。旧面板签发的票据没有设备绑定，不检查。
 package access
 
 import (
@@ -35,6 +38,7 @@ import (
 	plugin "github.com/fatedier/frp/pkg/plugin/server"
 
 	"moefrp/agent/internal/agentcfg"
+	"moefrp/agent/internal/vault"
 	"moefrp/shared/agentproto"
 	"moefrp/shared/api"
 	"moefrp/shared/nodeticket"
@@ -54,8 +58,9 @@ const (
 
 // Store 是授权表和准入状态。
 type Store struct {
-	path      string
-	statePath string
+	path      string // 旧的明文授权表（迁移用）
+	statePath string // 旧的明文准入状态（迁移用）
+	vault     *vault.Vault
 	// Online 返回某个 frp user 当前在线的代理数，不算名字为 except 的那个（同名代理重新注册），
 	// 也不算 live 返回 false 的 frpc（按 run ID）留下的。默认读 frps 的内存统计，测试时替换。
 	Online func(user, except string, live func(runID string) bool) int
@@ -94,38 +99,88 @@ func onlineFromStats(user, except string, live func(string) bool) int {
 	return n
 }
 
-// Load 读取保存的表和状态；文件不存在时是"非官方节点"。
-func Load(path string) (*Store, error) {
+// 在本地存储里的文件名。
+const (
+	vaultTable = "access"
+	vaultState = "access-state"
+)
+
+// Load 读取保存的表和状态；都没有时是"非官方节点"。v 为 nil 时用明文文件（测试和旧版本）。
+func Load(path string, v *vault.Vault) (*Store, error) {
 	s := &Store{
-		path: path, statePath: strings.TrimSuffix(path, ".json") + "-state.json",
+		path: path, statePath: strings.TrimSuffix(path, ".json") + "-state.json", vault: v,
 		Online: onlineFromStats, Now: time.Now,
 		users: map[string]agentproto.AccessUser{}, revoked: map[string]int64{}, used: map[string]int64{},
 		active: map[string]string{}, runs: map[string]bool{},
 	}
-	if b, err := os.ReadFile(s.statePath); err == nil {
-		var st state
-		if json.Unmarshal(b, &st) == nil {
-			if st.Used != nil {
-				s.used = st.Used
+	return s, s.Reload()
+}
+
+// Reload 重新读取保存的表和状态（本地存储解锁后调用）。存储解锁时，旧的明文文件搬进去并删掉。
+func (s *Store) Reload() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tb, err := s.readLocked(vaultTable, s.path)
+	if err != nil {
+		return err
+	}
+	if st, err := s.readLocked(vaultState, s.statePath); err == nil && st != nil {
+		var x state
+		if json.Unmarshal(st, &x) == nil {
+			if x.Used != nil {
+				s.used = x.Used
 			}
-			if st.Revoked != nil {
-				s.revoked = st.Revoked
+			if x.Revoked != nil {
+				s.revoked = x.Revoked
 			}
 		}
 	}
-	b, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return s, nil
-	}
-	if err != nil {
-		return s, err
+	if tb == nil {
+		return nil
 	}
 	var t agentproto.AccessTable
-	if err := json.Unmarshal(b, &t); err != nil {
-		return s, fmt.Errorf("%s：%w", path, err)
+	if err := json.Unmarshal(tb, &t); err != nil {
+		return fmt.Errorf("授权表损坏：%w", err)
 	}
 	s.set(t)
-	return s, nil
+	return nil
+}
+
+// readLocked 读一份数据：优先本地存储；存储里没有时读旧的明文文件，存储已解锁的话顺便搬进去。
+// 都没有时返回 nil。
+func (s *Store) readLocked(name, legacy string) ([]byte, error) {
+	if s.vault != nil {
+		b, err := s.vault.Read(name)
+		if err == nil {
+			return b, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, vault.ErrLocked) {
+			return nil, err
+		}
+	}
+	b, err := os.ReadFile(legacy)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if s.vault != nil && s.vault.Unlocked() && s.vault.Write(name, b) == nil {
+		_ = os.Remove(legacy)
+	}
+	return b, nil
+}
+
+// writeLocked 保存一份数据：有本地存储时加密写进去，否则写明文文件。
+func (s *Store) writeLocked(name, legacy string, b []byte) error {
+	if s.vault != nil {
+		if err := s.vault.Write(name, b); err != nil {
+			return err
+		}
+		_ = os.Remove(legacy)
+		return nil
+	}
+	return agentcfg.WriteFileAtomic(legacy, b, 0o600)
 }
 
 func (s *Store) set(t agentproto.AccessTable) {
@@ -150,11 +205,11 @@ func (s *Store) Apply(t agentproto.AccessTable) (enabledChanged bool, err error)
 	if err != nil {
 		return false, err
 	}
-	if err := agentcfg.WriteFileAtomic(s.path, b, 0o600); err != nil {
-		return false, err
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.writeLocked(vaultTable, s.path, b); err != nil {
+		return false, err
+	}
 	enabledChanged = s.enabled != t.Enabled
 	s.set(t)
 	return enabledChanged, s.saveLocked()
@@ -177,7 +232,7 @@ func (s *Store) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	return agentcfg.WriteFileAtomic(s.statePath, b, 0o600)
+	return s.writeLocked(vaultState, s.statePath, b)
 }
 
 // Enabled 判断是不是官方节点。
@@ -319,6 +374,9 @@ func (s *Store) login(c *plugin.LoginContent) (string, any) {
 	}
 	if c.User != u.Nickname {
 		return fmt.Sprintf("frp 的 user 必须是你的昵称 %s", u.Nickname), nil
+	}
+	if claims.Device != "" && nodeticket.DeviceTag(s.key, c.Metas[api.MetaDevice]) != claims.Device {
+		return "登录票据和这台设备对不上（票据是发给另一台设备的）", nil
 	}
 	s.used[claims.Nonce] = claims.Expires
 	if err := s.saveLocked(); err != nil {

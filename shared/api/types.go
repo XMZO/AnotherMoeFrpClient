@@ -167,15 +167,15 @@ type LegacyErrorResponse struct {
 
 // ---- 官方节点 ----
 
-// OfficialNode 是面板下发的一个官方节点。登录用的票据不在这里，客户端每次连接前单独领取（RouteOfficialTickets）。
+// OfficialNode 是面板下发的一个官方节点。节点只认登录票据，没有 token；
+// 票据不在这里，客户端每次连接前单独领取（RouteOfficialTickets）。
 type OfficialNode struct {
 	ID          string      `json:"id"`
 	Name        string      `json:"name"`
 	Description string      `json:"description,omitempty"`
 	ServerAddr  string      `json:"serverAddr"`
 	ServerPort  int         `json:"serverPort"`
-	Token       string      `json:"token"` // frps 的 auth.token；真正的准入由登录票据决定
-	User        string      `json:"user"`  // frp 的 user，就是用户的昵称，代理名会加上这个前缀
+	User        string      `json:"user"` // frp 的 user，就是用户的昵称，代理名会加上这个前缀
 	Online      bool        `json:"online"`
 	Quota       quota.Quota `json:"quota"` // 当前用户在这个节点上的限额
 }
@@ -185,8 +185,11 @@ type OfficialNodesResponse struct {
 	Nodes []OfficialNode `json:"nodes"`
 }
 
-// MetaCredential 是 frpc metadatas 里放登录票据的键。
-const MetaCredential = "moefrp_cred"
+// MetaCredential 是 frpc metadatas 里放登录票据的键，MetaDevice 放设备指纹（和票据里的设备绑定对得上才能登录）。
+const (
+	MetaCredential = "moefrp_cred"
+	MetaDevice     = "moefrp_device"
+)
 
 // MaxTicketsPerRequest 是一次最多领取的票据张数。
 const MaxTicketsPerRequest = 5
@@ -212,7 +215,7 @@ type NodeTicketsResponse struct {
 func (o OfficialNode) ToNode() model.Node {
 	return model.Node{
 		ID: OfficialNodePrefix + o.ID, Remark: o.Name, ServerAddr: o.ServerAddr, ServerPort: o.ServerPort,
-		Token: o.Token, User: o.User,
+		User: o.User,
 	}
 }
 

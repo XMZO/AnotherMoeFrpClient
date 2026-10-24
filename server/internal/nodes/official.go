@@ -163,14 +163,15 @@ func (s *Service) loadAccess(ctx context.Context) (accessData, error) {
 	return d, nil
 }
 
+// allowed 判断用户能不能用这个节点：单独授权优先；没有单独授权时，管理员总能用，其他角色看节点开放给谁。
 func (d accessData) allowed(u store.AccessUser, n store.Node) bool {
-	if u.Status != model.StatusActive || !n.Official {
+	if u.Status != model.StatusActive {
 		return false
 	}
 	if g, ok := d.grants[[2]string{u.ID, n.ID}]; ok {
 		return g
 	}
-	return slices.Contains(parseRoles(n.Roles), u.Role)
+	return u.Role == model.RoleAdmin || slices.Contains(parseRoles(n.Roles), u.Role)
 }
 
 func (d accessData) quotaOf(u store.AccessUser) quota.Quota {
@@ -178,10 +179,8 @@ func (d accessData) quotaOf(u store.AccessUser) quota.Quota {
 }
 
 func (d accessData) table(n store.Node) agentproto.AccessTable {
-	t := agentproto.AccessTable{Enabled: n.Official, Users: []agentproto.AccessUser{}}
-	if !n.Official {
-		return t
-	}
+	// 节点都由面板托管：frps 始终挂准入插件，只认登录票据
+	t := agentproto.AccessTable{Enabled: true, Users: []agentproto.AccessUser{}}
 	t.NodeID = n.ID
 	t.TicketKey = base64.StdEncoding.EncodeToString(nodeticket.NodeKey(d.key, n.ID))
 	t.RevokedSessions = d.revoked
@@ -223,6 +222,10 @@ func (s *Service) SyncAllAccess(ctx context.Context, force bool) {
 	for _, id := range ids {
 		if err := s.syncAccess(ctx, id, force); err != nil {
 			s.log.Warn("sync node access failed", "node", id, "err", err)
+		}
+		// 顺便给在线节点续存储租约（隔 leaseRenew 续一次）
+		if err := s.pushLease(ctx, id, false); err != nil {
+			s.log.Warn("renew store lease failed", "node", id, "err", err)
 		}
 	}
 }
@@ -269,10 +272,10 @@ func (s *Service) syncAccess(ctx context.Context, id string, force bool) error {
 
 // ---- 管理 ----
 
-// SetOfficial 修改节点的官方节点设置。节点在线时立即推送（开关变化时节点上的 frps 会重启）。
-func (s *Service) SetOfficial(ctx context.Context, by Actor, id string, official bool, roles []string, description string) error {
+// SetOfficial 修改节点开放给哪些角色（管理员总能用）和给用户看的说明，立即推送新的授权表。
+func (s *Service) SetOfficial(ctx context.Context, by Actor, id string, roles []string, description string) error {
 	for _, r := range roles {
-		if !slices.Contains(allRoles, r) {
+		if !slices.Contains(allRoles, r) || r == model.RoleAdmin {
 			return badRequest("roles", fmt.Sprintf("不认识的角色 %q", r))
 		}
 	}
@@ -287,21 +290,13 @@ func (s *Service) SetOfficial(ctx context.Context, by Actor, id string, official
 	if err != nil {
 		return notFound(err)
 	}
-	if official {
-		v := s.view(n, false)
-		if v.Info != nil && v.Info.AgentVersion != "" && !hasFeature(v.Info, agentproto.FeatureTickets) {
-			return apierr.Newf(apierr.ValidationFailed, "节点上的 agent（%s）不支持官方节点的登录票据，请先升级 agent", v.Info.AgentVersion)
-		}
-		if clientInfo(n.FrpsConfig) == nil {
-			return apierr.Newf(apierr.ValidationFailed, "节点还没有可用的 frps 配置")
-		}
-	}
 	rb, _ := json.Marshal(roles)
+	official := openToUsers(roles)
 	err = s.st.Tx(ctx, func(tx *sql.Tx) error {
 		if err := store.SetNodeOfficial(ctx, tx, id, store.NodeOfficial{Official: official, Roles: string(rb), Description: description}, s.now().Unix()); err != nil {
 			return err
 		}
-		return s.audit(ctx, tx, by, store.AuditNodeOfficial, n.Name, map[string]any{"node": id, "official": official, "roles": roles})
+		return s.audit(ctx, tx, by, store.AuditNodeOfficial, n.Name, map[string]any{"node": id, "roles": roles})
 	})
 	if err != nil {
 		return notFound(err)
@@ -422,13 +417,12 @@ func (s *Service) ResetUserCredential(ctx context.Context, by Actor, nickname st
 
 // ---- 下发给客户端 ----
 
-// ticketsSupported 判断节点上的 agent 是否支持登录票据。还没上过线（不知道版本）的算支持，连上后再说。
-func (s *Service) ticketsSupported(n store.Node) bool {
-	v := s.view(n, false)
-	return v.Info == nil || v.Info.AgentVersion == "" || hasFeature(v.Info, agentproto.FeatureTickets)
+// managedNode 判断节点上的 agent 支持托管（1.4.0 起）。还没上过线（不知道版本）的算支持，连上后再说。
+func (s *Service) managedNode(n store.Node) bool {
+	return managed(s.view(n, false).Info)
 }
 
-// OfficialFor 返回用户能用的官方节点（不含登录票据，见 IssueTickets）。
+// OfficialFor 返回用户能用的节点（不含登录票据，见 IssueTickets；也没有 token，节点只认票据）。
 func (s *Service) OfficialFor(ctx context.Context, userID string) ([]api.OfficialNode, error) {
 	u, err := store.GetAccessUser(ctx, s.st.DB(), userID)
 	if err != nil {
@@ -444,29 +438,29 @@ func (s *Service) OfficialFor(ctx context.Context, userID string) ([]api.Officia
 	}
 	out := []api.OfficialNode{}
 	for _, n := range ns {
-		if !d.allowed(u, n) || !s.ticketsSupported(n) {
+		if !n.Enrolled || !d.allowed(u, n) || !s.managedNode(n) {
 			continue
 		}
-		ci := clientInfo(n.FrpsConfig)
-		addr := n.PublicAddr
-		if addr == "" {
-			addr = n.LastIP
-		}
-		if ci == nil || addr == "" {
-			continue // 还没有配置或者不知道地址，下发了也连不上
+		ci := clientInfo(n)
+		if ci.Addr == "" {
+			continue // 不知道地址，下发了也连不上
 		}
 		out = append(out, api.OfficialNode{
-			ID: n.ID, Name: n.Name, Description: n.Description, ServerAddr: addr, ServerPort: ci.Port, Token: ci.Token,
+			ID: n.ID, Name: n.Name, Description: n.Description, ServerAddr: ci.Addr, ServerPort: ci.Port,
 			User: u.Nickname, Online: s.Online(n.ID), Quota: d.quotaOf(u),
 		})
 	}
 	return out, nil
 }
 
-// IssueTickets 给用户的一个客户端会话签发 count 张某个官方节点的登录票据。
-func (s *Service) IssueTickets(ctx context.Context, userID, sessionID, nodeID string, count int) ([]api.NodeTicket, error) {
+// IssueTickets 给用户的一个客户端会话签发 count 张某个节点的登录票据。
+// deviceID 是这个会话登录时的设备指纹（调用方核对过请求带的和会话记下的一致），写进票据的设备绑定。
+func (s *Service) IssueTickets(ctx context.Context, userID, sessionID, deviceID, nodeID string, count int) ([]api.NodeTicket, error) {
 	if count < 1 || count > api.MaxTicketsPerRequest {
 		return nil, badRequest("count", fmt.Sprintf("一次可以领 1 到 %d 张", api.MaxTicketsPerRequest))
+	}
+	if deviceID == "" {
+		return nil, apierr.Newf(apierr.Forbidden, "客户端版本太旧，没有上报设备指纹，请升级客户端后重新登录")
 	}
 	u, err := store.GetAccessUser(ctx, s.st.DB(), userID)
 	if err != nil {
@@ -474,14 +468,14 @@ func (s *Service) IssueTickets(ctx context.Context, userID, sessionID, nodeID st
 	}
 	n, err := store.GetNode(ctx, s.st.DB(), nodeID)
 	if err != nil {
-		return nil, apierr.Newf(apierr.NotFound, "官方节点不存在")
+		return nil, apierr.Newf(apierr.NotFound, "节点不存在")
 	}
 	d, err := s.loadAccess(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if !d.allowed(u, n) {
-		return nil, apierr.Newf(apierr.NotFound, "官方节点不存在，或者你没有权限使用")
+		return nil, apierr.Newf(apierr.NotFound, "节点不存在，或者你没有权限使用")
 	}
 	key := nodeticket.NodeKey(d.key, n.ID)
 	now := s.now()
@@ -490,6 +484,7 @@ func (s *Service) IssueTickets(ctx context.Context, userID, sessionID, nodeID st
 	for range count {
 		out = append(out, api.NodeTicket{ExpiresAt: exp, Ticket: nodeticket.Sign(key, nodeticket.Claims{
 			User: u.ID, Session: sessionID, Node: n.ID, Gen: u.CredGen, Issued: now.Unix(), Expires: exp, Nonce: nodeticket.NewNonce(),
+			Device: nodeticket.DeviceTag(key, deviceID),
 		})})
 	}
 	return out, nil

@@ -791,47 +791,54 @@
       h('div', { class: 'stat-value' }, String(value)),
       h('div', { class: 'stat-sub' }, sub));
 
-    const normal = Math.max(0, s.users - s.admins);
-    const bar = (label, n, kind) => h('div', { class: 'bar-row' },
-      h('span', { class: 'label' }, label),
-      h('div', { class: 'bar' + (kind ? ' ' + kind : '') }, h('i')),
-      h('span', { class: 'num' }, String(n)));
-    const bars = h('div', { class: 'bars' },
-      bar('普通用户', normal), bar('管理员', s.admins, 'accent'), bar('已停用', s.disabledUsers, 'danger'));
-    // 宽度用 style 属性设置，CSP 允许（style-src 只限制样式表来源和 <style>，CSSOM 不受影响）
-    const counts = [normal, s.admins, s.disabledUsers];
-    bars.querySelectorAll('.bar > i').forEach((el, i) => {
-      el.style.width = s.users ? (counts[i] / s.users * 100).toFixed(1) + '%' : '0';
-    });
+    // 用户构成：一条分段比例条 + 图例（三类互不重叠：停用的算在"已停用"里）
+    const disabled = s.disabledUsers || 0;
+    const admins = s.admins || 0;
+    const parts = [['普通用户', Math.max(0, s.users - admins - disabled), ''], ['管理员', admins, 'accent'], ['已停用', disabled, 'danger']];
+    const segbar = h('div', { class: 'segbar', role: 'img', 'aria-label': parts.map(([l, n]) => l + ' ' + n).join('，') },
+      parts.map(([, n, kind]) => {
+        const el = h('i', { class: kind || null });
+        // 宽度用 style 属性设置，CSP 允许（style-src 只限制样式表来源和 <style>，CSSOM 不受影响）
+        el.style.flexGrow = String(n);
+        el.hidden = n === 0;
+        return el;
+      }));
+    const legend = h('div', { class: 'legend' }, parts.map(([label, n, kind]) =>
+      h('span', null, h('i', { class: 'swatch ' + (kind || '') }), label, h('b', null, String(n)))));
 
     const c = d.client || {};
     const link = c.downloadUrl && /^https?:\/\//i.test(c.downloadUrl)
-      ? h('a', { href: c.downloadUrl, target: '_blank', rel: 'noopener noreferrer' }, c.downloadUrl)
-      : h('span', { class: 'faint' }, '未设置');
-    const kv = (pairs) => h('dl', { class: 'kv' }, pairs.map(([k, v]) => [h('dt', null, k), h('dd', null, v)]));
-    const unset = (v, text = '未设置') => v || h('span', { class: 'faint' }, text);
+      ? h('a', { href: c.downloadUrl, target: '_blank', rel: 'noopener noreferrer', title: c.downloadUrl }, c.downloadUrl)
+      : null;
+    const none = (text) => h('span', { class: 'faint' }, text);
 
-    p.body.replaceChildren(
+    p.body.replaceChildren(h('div', { class: 'stack' },
       h('div', { class: 'stats' },
         stat('用户', 'users', s.users, '7 天内新注册 ' + s.registeredWeek),
         stat('已登录用户', 'activity', s.onlineUsers, '24 小时内活跃 ' + s.activeToday),
         stat('可用邀请码', 'ticket', s.invitesUnused, s.invitesUnused === 0 ? '用完了，生成一些吧' : '已使用 ' + s.invitesUsed, s.invitesUnused === 0),
         stat('云端配置', 'layers', s.profiles, '分享 ' + s.activeShares + ' · 订阅 ' + s.subscriptions)),
-      h('div', { class: 'grid-2' },
-        h('section', { class: 'card' },
-          h('div', { class: 'card-head' }, h('h2', null, '用户构成'), h('span', null, '共 ' + s.users + ' 人')),
-          h('div', { class: 'card-body' }, bars)),
-        h('section', { class: 'card' },
-          h('div', { class: 'card-head' }, h('h2', null, '客户端发布'), h('span', null, '在 config.toml 的 [client] 里修改')),
-          h('div', { class: 'card-body' }, kv([
-            ['服务端版本', h('code', null, d.serverVersion || 'dev')],
-            ['最新客户端', c.latestVersion ? h('code', null, c.latestVersion) : unset('')],
-            ['最低客户端', c.minVersion ? h('code', null, c.minVersion) : unset('', '不限制')],
-            ['下载地址', link],
-            ['单设备登录', d.singleSession ? '开启' : '关闭'],
-            ['图源', (c.imageSources || []).length + ' 个'],
-            ['公告', unset(c.announcement, '无')],
-          ])))));
+      h('section', { class: 'card' },
+        h('div', { class: 'card-head' }, h('h2', null, '用户构成'), h('span', null, '共 ' + s.users + ' 人')),
+        h('div', { class: 'card-body' }, segbar, legend)),
+      h('section', { class: 'card' },
+        h('div', { class: 'card-head' }, h('h2', null, '客户端发布'), h('span', null, '在 config.toml 的 [client] 里修改')),
+        h('div', { class: 'card-body' }, h('div', { class: 'tiles' },
+          infoTile('服务端版本', h('code', null, d.serverVersion || 'dev')),
+          infoTile('最新客户端', c.latestVersion ? h('code', null, c.latestVersion) : none('未设置')),
+          infoTile('最低客户端', c.minVersion ? h('code', null, c.minVersion) : none('不限制')),
+          infoTile('单设备登录', d.singleSession ? '开启' : '关闭'),
+          infoTile('图源', (c.imageSources || []).length + ' 个'),
+          infoTile('下载地址', link || none('未设置')),
+          infoTile('公告', c.announcement || none('无'), null, 'span-all'))))));
+  }
+
+  // infoTile 是指标格里的一格：小标题 + 值（单行省略），可选一行小字。
+  function infoTile(label, value, sub, cls) {
+    return h('div', { class: 'tile' + (cls ? ' ' + cls : '') },
+      h('div', { class: 'tile-label' }, label),
+      h('div', { class: 'tile-value', title: typeof value === 'string' ? value : null }, value == null || value === '' ? h('span', { class: 'faint' }, '—') : value),
+      sub ? h('div', { class: 'tile-sub', title: sub }, sub) : null);
   }
 
   // ---------- 邀请码 ----------
@@ -1875,8 +1882,8 @@
         n.status === 'online'
           ? tile('上线', n.connectedAt ? timeEl(n.connectedAt) : null, '添加于 ' + fmtDate(n.createdAt))
           : tile('最后在线', n.lastSeen ? timeEl(n.lastSeen) : null, '添加于 ' + fmtDate(n.createdAt)))));
-      parts.push(h('div', { class: 'stack' }, side));
-      return h('div', { class: 'node-grid' }, parts);
+      // 宽屏上也整行堆叠、内容横向铺开：并排的卡片高度对不齐，拉伸又会留白
+      return h('div', { class: 'stack' }, parts, side);
     }
 
     // 显示过的 token 记在 revealed 里，自动刷新重画时保持显示状态
@@ -2125,21 +2132,22 @@
         },
       });
 
-      return h('div', { class: 'node-grid' },
+      return h('div', { class: 'stack' },
         h('section', { class: 'card' },
           h('div', { class: 'card-head' }, h('h2', null, '节点设置'), h('div', { class: 'head-btns' }, save)),
           h('div', { class: 'card-body' },
-            h('div', { class: 'form-grid' },
+            h('div', { class: 'form-grid settings-grid' },
               field('名称', name), field('客户端连接地址', addr),
               h('div', { class: 'field span-all' }, h('span', { class: 'field-label' }, '下载代理（升级 agent、生成安装命令时用）'), mirror, mirrorList)),
             h('div', { class: 'official' },
               old ? h('div', { class: 'callout warn' }, icon('alert', 16), h('span', null, 'agent ' + n.info.agentVersion + ' 不支持官方节点，请先升级。')) : null,
-              h('label', { class: 'check setting-title' }, on, '官方节点（下发给用户）'),
-              h('div', { class: 'checks' }, h('span', { class: 'muted' }, '开放给'), roleBoxes),
+              h('div', { class: 'official-head' },
+                h('label', { class: 'check setting-title' }, on, '官方节点（下发给用户）'),
+                h('div', { class: 'checks' }, h('span', { class: 'muted' }, '开放给'), roleBoxes)),
               field('给用户看的说明', desc, '开启后只接受客户端用登录票据登录，frp 的 user 固定为昵称；限额在节点列表的"限额"里设置')))),
         h('section', { class: 'card' },
           h('div', { class: 'card-head' }, h('h2', null, '维护')),
-          h('div', { class: 'card-body' }, h('div', { class: 'ops three' },
+          h('div', { class: 'card-body' }, h('div', { class: 'ops' },
             op('重启 frps', '客户端会短暂断开', '/restart', 'frps 已重启', { icon: 'refresh' }),
             op('升级 agent', n.upgradeTo ? '可升级到 ' + n.upgradeTo : '已是最新版本', '/upgrade', '已开始升级，结果在"命令"页的历史里',
               { disabled: !online || !n.upgradeTo, icon: 'upgrade', confirm: { title: '升级 agent', ok: '升级', message: 'agent 会下载新版本并重启，frps 会断开几秒。升级失败会自动回滚。' } }),

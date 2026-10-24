@@ -931,6 +931,7 @@ th.sel, td.sel { width: 1%; padding-right: 0; }
 /* 用户 → 登录设备 */
 .dev-list { display: flex; flex-direction: column; gap: 10px; }
 .dev-card { padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.dev-card.focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent); }
 .dev-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
 .dev-head b { font-size: 14px; }
 .dev-kv { font-size: 12.5px; gap: 4px 14px; }

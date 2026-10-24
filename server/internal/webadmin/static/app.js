@@ -235,7 +235,7 @@
       return table(columns, items.map((x) => {
         const r = row(x);
         const tr = h('tr', { class: r.onclick ? 'clickable' : null }, cells(x));
-        if (r.onclick) listen(tr, 'click', (e) => { if (!e.target.closest('button, a')) r.onclick(e); });
+        if (r.onclick) listen(tr, 'click', (e) => { if (!e.target.closest('button, a, label, input')) r.onclick(e); });
         return tr;
       }));
     }
@@ -253,7 +253,7 @@
         r.trail ? h('div', { class: 'row-trail' }, r.trail) : null);
       if (r.onclick) {
         el.tabIndex = 0;
-        listen(el, 'click', (e) => { if (!e.target.closest('button')) r.onclick(e); });
+        listen(el, 'click', (e) => { if (!e.target.closest('button, label, input')) r.onclick(e); });
         listen(el, 'keydown', (e) => { if (e.key === 'Enter' && e.target === el) r.onclick(e); });
       }
       return el;
@@ -1286,6 +1286,8 @@
             title: [c.nickname, device(c)],
             meta: [tunnel(c), version(c), c.ip],
             extra: ops(c),
+            // 点一行看这台设备的详细信息（和"用户 → 登录设备"同一个窗口，这台排在最前面并高亮）
+            onclick: () => userDevicesDialog({ nickname: c.nickname }, c.sessionId),
           })),
         h('div', { class: 'card-foot' }, rows.length === list.length ? '在线 ' + list.length + ' 台' : '显示 ' + rows.length + ' / ' + list.length + ' 台'));
     }
@@ -1696,7 +1698,8 @@
 
   // userDevicesDialog 用户还有效的登录：每台设备的会话 ID、设备指纹（HWID）、系统和硬件、IP、在线和隧道状态，可以单独让它下线。
   // 设备信息是客户端连实时通道时上报的，离线后显示最近一次的。
-  async function userDevicesDialog(u) {
+  // focus 是要突出显示的会话（从"客户端"页点进来的那台）：排在最前面并高亮。
+  async function userDevicesDialog(u, focus) {
     const box = h('div', { class: 'dev-list' }, loadingBox());
     const d = openDialog({ title: u.nickname + ' 的登录设备', titleIcon: 'activity', wide: true, body: box,
       actions: [button('关闭', { onclick: () => d.close() })] });
@@ -1713,6 +1716,7 @@
         box.replaceChildren(stateBox('inbox', '没有有效的登录', '用户登录客户端或管理后台后会出现在这里'));
         return;
       }
+      if (focus) list.sort((a, b) => (b.sessionId === focus) - (a.sessionId === focus));
       box.replaceChildren(...list.map(card));
     };
     const copyable = (v) => (v ? h('span', { class: 'dev-copy' }, h('code', null, v), iconButton('copy', '复制', () => copyText(v))) : h('span', { class: 'faint' }, '—'));
@@ -1737,7 +1741,7 @@
           });
         },
       });
-      return h('section', { class: 'dev-card' },
+      return h('section', { class: 'dev-card' + (focus && x.sessionId === focus ? ' focus' : '') },
         h('div', { class: 'dev-head' },
           h('b', null, dv.hostname || x.deviceName || (x.kind === 'admin_web' ? '管理后台' : '未知设备')),
           badge(x.kind === 'admin_web' ? '管理后台' : '客户端', 'outline'),

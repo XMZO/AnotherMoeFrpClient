@@ -54,8 +54,19 @@ if (-not $SkipTests) {
     Run (Join-Path $client 'frontend') pnpm @('test')
 }
 
-Step "客户端：wails3 build VERSION=$Version"
-Run $client wails3 @('build', 'PACKAGE_MANAGER=pnpm', "VERSION=$Version")
+# 客户端内置的服务端地址不进仓库：从环境变量 MOEFRP_RELEASE_API_BASE 或 client\api-base.local（已被 git 忽略）读取
+$apiBase = $env:MOEFRP_RELEASE_API_BASE
+$apiBaseFile = Join-Path $client 'api-base.local'
+if (-not $apiBase -and (Test-Path $apiBaseFile)) { $apiBase = (Get-Content $apiBaseFile -Raw).Trim() }
+if (-not $apiBase) {
+    throw "没有设置客户端的服务端地址：在 client\api-base.local 里写一行 https://你的域名，或者设置环境变量 MOEFRP_RELEASE_API_BASE"
+}
+if ($apiBase -notmatch '^https://[A-Za-z0-9.-]+(:\d+)?$' -or $apiBase -match 'example\.com') {
+    throw "服务端地址应类似 https://frp.your-domain.com（不带路径和末尾的 /），收到：$apiBase"
+}
+
+Step "客户端：wails3 build VERSION=$Version（服务端地址已从本地配置注入）"
+Run $client wails3 @('build', 'PACKAGE_MANAGER=pnpm', "VERSION=$Version", "API_BASE=$apiBase")
 $exeName = "MoeFrp-$Version-windows-amd64.exe"
 Copy-Item (Join-Path $client 'bin\MoeFrp.exe') (Join-Path $dist $exeName)
 

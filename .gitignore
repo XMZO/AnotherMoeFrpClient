@@ -27,3 +27,6 @@ client/scripts/e2e/*-stderr.txt
 spike/*/build/
 spike/*.log
 spike/bin/
+
+# 客户端内置的服务端地址（发布脚本读取，不进仓库）
+client/api-base.local

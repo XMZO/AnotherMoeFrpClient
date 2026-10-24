@@ -44,7 +44,7 @@ type Client struct {
 	custom string
 }
 
-// New 创建客户端。base 是服务端根地址，例如 https://frplus.loli-con.cn。
+// New 创建客户端。base 是服务端根地址，例如 https://frp.example.com。
 func New(base, version, installID, proxyMode string) (*Client, error) {
 	u, err := url.Parse(strings.TrimRight(base, "/"))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {

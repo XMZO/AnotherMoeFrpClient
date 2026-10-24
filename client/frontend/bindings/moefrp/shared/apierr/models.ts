@@ -38,6 +38,22 @@ export enum Code {
      */
     MethodNotAllowed = "method_not_allowed",
     PayloadTooLarge = "payload_too_large",
+
+    /**
+     * 管理后台的节点管理用到的错误。
+     * 敏感操作前需要重新输入密码
+     */
+    ReauthRequired = "reauth_required",
+
+    /**
+     * 节点不在线，操作无法执行
+     */
+    NodeOffline = "node_offline",
+
+    /**
+     * 节点执行失败，原因在 message 里
+     */
+    NodeFailed = "node_failed",
 };
 
 /**

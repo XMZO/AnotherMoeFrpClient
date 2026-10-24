@@ -5,6 +5,8 @@ vars:
   BIN_DIR: "bin"
   # 版本号通过 -ldflags "-X main.version=..." 注入（PLAN 6.11）。发布时：wails3 build PACKAGE_MANAGER=pnpm VERSION=3.0.0
   VERSION: '{{.VERSION | default "3.0.0-dev"}}'
+  # 服务端地址：wails3 build API_BASE=https://...，不传时用代码里的占位值（只能连本地/测试服务端）
+  API_BASE: '{{.API_BASE | default ""}}'
   PACKAGE_MANAGER: '{{.PACKAGE_MANAGER | default "npm"}}'
   VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
   # Target OS for build/package/run. Defaults to the host OS, and is overridden

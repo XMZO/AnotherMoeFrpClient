@@ -36,9 +36,10 @@ var assets embed.FS
 // version 由构建时的 -ldflags "-X main.version=..." 注入（见 Taskfile 的 BUILD_FLAGS）。
 var version = "dev"
 
-// apiBase 是服务端地址，可以用 -ldflags "-X main.apiBase=..." 覆盖。
+// apiBase 是服务端地址。仓库里只放占位值，真实地址在构建时注入：
+// wails3 build API_BASE=https://...（发布脚本从 client/api-base.local 或环境变量 MOEFRP_RELEASE_API_BASE 读取）。
 // 端到端测试构建（-tags e2e）里还可以用 MOEFRP_API_BASE 指定。
-var apiBase = "https://frplus.loli-con.cn"
+var apiBase = "https://frp.example.com"
 
 const (
 	productName = "萌！FRP 高级客户端"

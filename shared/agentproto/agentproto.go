@@ -14,6 +14,8 @@ import (
 const (
 	// RouteWS 是 agent 的长连接，请求头 Authorization: Bearer <节点令牌>。
 	RouteWS = "/api/v1/agent/ws"
+	// RouteMyIP 回显请求的来源地址（{"ip":"..."}，不需要令牌）：agent 分别走 IPv4、IPv6 请求它，探测出口公网地址。
+	RouteMyIP = "/api/v1/agent/ip"
 	// RouteEnroll 用一次性安装码换取长期节点令牌。
 	RouteEnroll = "/api/v1/agent/enroll"
 	// RouteInstallScript 是安装脚本，内容里写好了面板地址。
@@ -121,7 +123,8 @@ type Hello struct {
 	// MachineID 是机器指纹（/etc/machine-id 加盐哈希，不是原值）：面板据此派生节点的存储密钥，
 	// 也用它发现 agent 的令牌被拷到了别的机器上（FeatureSettings 起）。
 	MachineID string `json:"machineId,omitempty"`
-	// PublicIPs 是网卡上的公网地址（IPv4、IPv6，不含内网、回环、链路本地），面板据此给用户显示访问地址。
+	// PublicIPs 是公网地址（IPv4、IPv6，不含内网、回环、链路本地），面板据此给用户显示访问地址。
+	// 1.4.5 起先放 agent 分别走 IPv4、IPv6 向外探测到的出口地址，再放网卡上的。
 	// 云服务器的公网 IPv4 常常是 NAT 出来的、不在网卡上，面板再加上它看到的连接来源地址（1.4.1 起）。
 	PublicIPs []string `json:"publicIps,omitempty"`
 	// Upgrade 是上一次升级的结果（升级后第一次连接时带上，之后为空）。
@@ -149,6 +152,9 @@ type Report struct {
 	// 不用收到上报的时间差：网络抖动时两次上报可能前后脚到达，会把速率放大几十倍。
 	At   int64      `json:"at,omitempty"`
 	Frps FrpsStatus `json:"frps"`
+	// PublicIPs 同 Hello.PublicIPs（1.4.5 起每次上报都带）：出口地址是连上面板之后才探测出来的，也可能变，
+	// 面板发现和 hello 里的不一样就更新。
+	PublicIPs []string `json:"publicIps,omitempty"`
 }
 
 // frps 状态。

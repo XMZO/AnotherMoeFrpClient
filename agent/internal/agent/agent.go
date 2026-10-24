@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -51,6 +52,47 @@ type Agent struct {
 	busy      atomic.Bool // 正在升级或卸载
 	pending   *selfupdate.State
 	confirmed atomic.Bool
+
+	probed atomic.Pointer[[]string] // 探测到的出口公网 IPv4、IPv6（见 sysinfo.ProbePublicIPs）
+}
+
+// probeInterval 是重新探测出口公网地址的间隔（动态 IP、换了线路）。
+const probeInterval = 30 * time.Minute
+
+// probeLoop 启动时探测一次出口公网地址，之后定时重测；结果随 hello 和每次上报带给面板。
+func (a *Agent) probeLoop(ctx context.Context) {
+	for {
+		v4, v6 := sysinfo.ProbePublicIPs(ctx, strings.TrimRight(a.cfg.Server, "/")+agentproto.RouteMyIP)
+		var ips []string
+		for _, ip := range []string{v4, v6} {
+			if ip != "" {
+				ips = append(ips, ip)
+			}
+		}
+		if old := a.probed.Load(); old == nil || !slices.Equal(*old, ips) {
+			a.log.Info("出口公网地址", "ipv4", v4, "ipv6", v6)
+		}
+		a.probed.Store(&ips)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(probeInterval):
+		}
+	}
+}
+
+// publicIPs 是给面板显示访问地址用的公网地址：先探测到的出口地址，再网卡上的。
+func (a *Agent) publicIPs() []string {
+	var out []string
+	if p := a.probed.Load(); p != nil {
+		out = append(out, *p...)
+	}
+	for _, ip := range sysinfo.PublicIPs() {
+		if !slices.Contains(out, ip) {
+			out = append(out, ip)
+		}
+	}
+	return out
 }
 
 // Run 是 `moefrp-agent run`：systemd 服务的入口。
@@ -115,6 +157,7 @@ func Run(ctx context.Context, version string) error {
 		log.Error("frps 启动失败", "err", err)
 	}
 	a.sampler.Sample() // 第一次采样只是为了下次能算出 CPU 占用率
+	go a.probeLoop(ctx)
 	// 每小时推高本地存储的时间高水位：之后把系统时间往回调就能被发现
 	go func() {
 		t := time.NewTicker(time.Hour)
@@ -162,7 +205,7 @@ func (a *Agent) hello() agentproto.Hello {
 		ExecEnabled: a.cfg.Exec, AppliedRev: a.frps.AppliedRev(),
 		Features:  []string{agentproto.FeatureAccess, agentproto.FeatureTickets, agentproto.FeatureSettings},
 		MachineID: a.machine,
-		PublicIPs: sysinfo.PublicIPs(),
+		PublicIPs: a.publicIPs(),
 	}
 	if a.pending != nil && !a.confirmed.Load() {
 		h.Upgrade = selfupdate.Result(a.pending, a.version)
@@ -183,7 +226,8 @@ func (a *Agent) report() agentproto.Report {
 		Uptime: u.Uptime, CPU: u.CPU, Load: u.Load,
 		MemTotal: u.MemTotal, MemUsed: u.MemUsed, DiskTotal: u.DiskTotal, DiskUsed: u.DiskUsed,
 		NetRx: u.NetRx, NetTx: u.NetTx, At: time.Now().UnixMilli(),
-		Frps: a.frps.Status(),
+		Frps:      a.frps.Status(),
+		PublicIPs: a.publicIPs(),
 	}
 }
 

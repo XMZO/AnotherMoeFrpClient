@@ -148,6 +148,12 @@ func SetNodeSeen(ctx context.Context, q Querier, id, info, ip string, now int64)
 	return err
 }
 
+// SetNodeInfo 只更新 hello 信息（agent 上报的公网地址变了时）。
+func SetNodeInfo(ctx context.Context, q Querier, id, info string) error {
+	_, err := q.ExecContext(ctx, `UPDATE nodes SET info = ? WHERE id = ?`, info, id)
+	return err
+}
+
 // TouchNode 只更新最后在线时间。
 func TouchNode(ctx context.Context, q Querier, id string, now int64) error {
 	_, err := q.ExecContext(ctx, `UPDATE nodes SET last_seen_at = ? WHERE id = ?`, now, id)

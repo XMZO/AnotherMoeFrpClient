@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -349,6 +350,12 @@ func (s *Service) recordReport(id string, c *agentConn, r agentproto.Report) {
 		}
 	}
 	l.report, l.at, l.conn = r, now, c
+	// 出口公网地址是 agent 连上之后才探测出来的（也可能变）：和 hello 里的不一样就更新节点信息，访问地址跟着变
+	var info []byte
+	if len(r.PublicIPs) > 0 && !slices.Equal(r.PublicIPs, c.hello.PublicIPs) {
+		c.hello.PublicIPs = slices.Clone(r.PublicIPs)
+		info, _ = json.Marshal(c.hello)
+	}
 	touch := now.Sub(l.touchedAt) > time.Minute
 	if touch {
 		l.touchedAt = now
@@ -358,5 +365,13 @@ func (s *Service) recordReport(id string, c *agentConn, r agentproto.Report) {
 		if err := store.TouchNode(context.Background(), s.st.DB(), id, now.Unix()); err != nil && !errors.Is(err, context.Canceled) {
 			s.log.Warn("touch node", "node", id, "err", err)
 		}
+	}
+	if info != nil {
+		if err := store.SetNodeInfo(context.Background(), s.st.DB(), id, string(info)); err != nil {
+			s.log.Warn("save node public ips", "node", id, "err", err)
+			return
+		}
+		s.log.Info("node public ips changed", "node", id, "ips", r.PublicIPs)
+		s.officialChanged() // 官方节点的访问地址可能变了，推给客户端
 	}
 }

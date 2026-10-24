@@ -80,6 +80,10 @@ func (s *Server) nodeRoutes(mux *http.ServeMux) {
 	// agent
 	mux.Handle("POST "+agentproto.RouteEnroll, chain(http.HandlerFunc(s.handleAgentEnroll), s.limit(s.limReset, byIP)))
 	mux.HandleFunc("GET "+agentproto.RouteWS, s.handleAgentWS)
+	// 回显来源地址：agent 探测出口公网地址用（和面板看到的连接地址一样，只是 agent 能指定走 IPv4 还是 IPv6）
+	mux.HandleFunc("GET "+agentproto.RouteMyIP, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"ip": infoFrom(r.Context()).IP})
+	})
 	mux.HandleFunc("GET "+agentproto.RouteInstallScript, s.handleInstallScript)
 	mux.HandleFunc("GET "+agentproto.RouteDownload+"{name}", s.handleAgentDownload)
 

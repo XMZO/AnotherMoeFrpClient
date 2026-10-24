@@ -59,6 +59,8 @@
     play: 'M6 4l14 8-14 8z',
     eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
     lock: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4',
+    chevron: 'M9 6l6 6-6 6',
+    power: 'M12 3v8M6.4 6.4a8 8 0 1 0 11.2 0',
   };
 
   function icon(name, size = 18, width = 1.8) {
@@ -84,14 +86,22 @@
     if (opts.kind) cls.push('btn-' + opts.kind);
     if (opts.small) cls.push('btn-sm');
     if (opts.block) cls.push('btn-block');
+    // 带图标的按钮在窄屏的页头里只显示图标，所以把文字放进 title
     return h('button', {
       class: cls.join(' '), type: opts.type || 'button', onclick: opts.onclick,
-      disabled: opts.disabled, title: opts.title,
-    }, opts.icon ? icon(opts.icon, 16) : null, label);
+      disabled: opts.disabled, title: opts.title || (opts.icon ? label : null),
+    }, opts.icon ? icon(opts.icon, 16) : null, h('span', { class: 'btn-label' }, label));
   }
 
-  function iconButton(name, label, onclick) {
-    return h('button', { class: 'icon-btn', type: 'button', title: label, 'aria-label': label, onclick }, icon(name, 16));
+  function iconButton(name, label, onclick, kind) {
+    return h('button', { class: 'icon-btn' + (kind ? ' ' + kind : ''), type: 'button', title: label, 'aria-label': label, onclick }, icon(name, 16));
+  }
+
+  // opButton 是带一行说明的操作按钮，放在 .ops 网格里
+  function opButton(label, sub, opts = {}) {
+    return h('button', {
+      class: 'btn op' + (opts.danger ? ' danger' : ''), type: 'button', onclick: opts.onclick, disabled: opts.disabled,
+    }, h('span', { class: 'op-title' }, opts.icon ? icon(opts.icon, 15) : null, label), h('small', null, sub));
   }
 
   function brand() {
@@ -152,9 +162,59 @@
   }
 
   function table(columns, rows) {
-    return h('div', { class: 'table-wrap' }, h('table', null,
+    return h('div', { class: 'scroll' }, h('table', null,
       h('thead', null, h('tr', null, columns.map((c) => h('th', { class: c.cls }, c.label)))),
       h('tbody', null, rows)));
+  }
+
+  // 宽屏显示表格，窄屏显示成一条两三行的列表（不会横向滚动）。宽度跨过断点时页面通过 onLayout 重画。
+  const wideMq = matchMedia('(min-width: 1100px)');
+  wideMq.addEventListener('change', () => { if (state.relayout) state.relayout(); });
+
+  // dataList：cells(x) 返回表格一行的 td；row(x) 返回窄屏的
+  // { lead, title, meta: [...], extra, trail, href, onclick }，title 里的字符串会单行省略。
+  function dataList(columns, items, cells, row) {
+    if (wideMq.matches) {
+      return table(columns, items.map((x) => {
+        const r = row(x);
+        const tr = h('tr', { class: r.onclick ? 'clickable' : null }, cells(x));
+        if (r.onclick) tr.addEventListener('click', (e) => { if (!e.target.closest('button, a')) r.onclick(e); });
+        return tr;
+      }));
+    }
+    return h('div', { class: 'scroll rows' }, items.map((x) => {
+      const r = row(x);
+      const meta = (r.meta || []).filter((m) => m != null && m !== false && m !== '');
+      const title = [r.title].flat(Infinity).filter((t) => t != null && t !== false).map((t) => (typeof t === 'string' ? h('span', { class: 't' }, t) : t));
+      const el = h(r.href ? 'a' : 'div', { class: 'row' + (r.href || r.onclick ? ' tappable' : ''), href: r.href },
+        r.lead ? h('div', { class: 'row-lead' }, r.lead) : null,
+        h('div', { class: 'row-main' },
+          h('div', { class: 'row-title' }, title),
+          // 项之间留空格作为换行点
+          meta.length ? h('div', { class: 'row-meta' }, meta.map((m, i) => [i ? ' ' : null, h('span', null, m)])) : null,
+          r.extra ? h('div', { class: 'row-extra' }, r.extra) : null),
+        r.trail ? h('div', { class: 'row-trail' }, r.trail) : null);
+      if (r.onclick) {
+        el.tabIndex = 0;
+        el.addEventListener('click', (e) => { if (!e.target.closest('button')) r.onclick(e); });
+        el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === el) r.onclick(e); });
+      }
+      return el;
+    }));
+  }
+
+  // listCard 是列表页的卡片：内容区滚动，页脚固定
+  function listCard() {
+    return h('div', { class: 'card list-card grow' });
+  }
+
+  // fillList 替换列表卡片的内容，保留列表的滚动位置（自动刷新时不跳回顶部）
+  function fillList(box, ...children) {
+    const old = box.querySelector('.scroll');
+    const top = old ? old.scrollTop : 0;
+    box.replaceChildren(...children);
+    const now = box.querySelector('.scroll');
+    if (now && top) now.scrollTop = top;
   }
 
   // ---------- 格式化 ----------
@@ -373,14 +433,14 @@
 
   // ---------- 状态与路由 ----------
 
-  const state = { me: null, page: null, gen: 0 };
+  const state = { me: null, page: null, gen: 0, relayout: null };
 
   const PAGES = [
     { id: 'overview', label: '概览', icon: 'grid', desc: '用户、邀请码和客户端发布情况', render: pageOverview },
     { id: 'nodes', label: '节点', icon: 'server', desc: '在面板上管理 frps 节点：配置、监控、升级、执行命令、卸载', render: pageNodes },
     { id: 'invites', label: '邀请码', icon: 'ticket', desc: '注册需要邀请码，每个码只能用一次', render: pageInvites },
     { id: 'users', label: '用户', icon: 'users', desc: '调整角色、停用账号、踢下线、生成密码重置码', render: pageUsers },
-    { id: 'audit', label: '审计日志', icon: 'list', desc: '登录、注册、分享和管理操作的记录', render: pageAudit },
+    { id: 'audit', label: '审计日志', short: '审计', icon: 'list', desc: '登录、注册、分享和管理操作的记录', render: pageAudit },
     { id: 'backup', label: '备份', icon: 'database', desc: '下载数据库快照', render: pageBackup },
   ];
 
@@ -486,24 +546,30 @@
 
   // ---------- 框架 ----------
 
-  let $nav, $title, $desc, $actions, $body;
+  let $nav, $back, $title, $desc, $actions, $body;
 
+  // 框架：宽屏左侧侧栏，中屏图标侧栏，窄屏底部标签栏（见 app.css）。页头固定，页面内容在 .page-body 里。
   function showShell() {
     const me = state.me;
-    $nav = h('nav', { class: 'nav', 'aria-label': '主导航' }, PAGES.map((p) => h('a', { href: '#/' + p.id }, icon(p.icon, 18), p.label)));
+    $nav = h('nav', { class: 'nav', 'aria-label': '主导航' }, PAGES.map((p) => h('a', { href: '#/' + p.id, title: p.label },
+      icon(p.icon, 19), h('span', { class: 'nav-label' }, p.label), h('span', { class: 'nav-short' }, p.short || p.label))));
     const out = iconButton('logout', '退出登录', () => logout(out));
     const sidebar = h('aside', { class: 'sidebar' },
       brand(), $nav,
       h('div', { class: 'sidebar-foot' },
-        h('div', { class: 'avatar', 'aria-hidden': 'true' }, Array.from(me.nickname)[0] || '?'),
+        h('div', { class: 'avatar', title: me.nickname, 'aria-hidden': 'true' }, Array.from(me.nickname)[0] || '?'),
         h('div', { class: 'who' }, h('div', { class: 'who-name', title: me.nickname }, me.nickname), h('div', { class: 'who-sub' }, '管理员 · ' + (me.version || 'dev'))),
         out));
+    // 窄屏没有侧栏，退出按钮放在页头
+    const mOut = iconButton('logout', '退出登录（' + me.nickname + '）', () => logout(mOut));
+    mOut.classList.add('m-only');
+    $back = h('a', { class: 'icon-btn head-back', 'aria-label': '返回', title: '返回', hidden: true }, icon('back', 18));
     $title = h('h1');
     $desc = h('p');
     $actions = h('div', { class: 'page-actions' });
-    $body = h('div');
-    const main = h('main', { class: 'main' }, h('div', { class: 'main-inner' },
-      h('header', { class: 'page-head' }, h('div', null, $title, $desc), $actions), $body));
+    $body = h('div', { class: 'page-body' });
+    const main = h('main', { class: 'main' },
+      h('header', { class: 'page-head' }, $back, h('div', { class: 'head-text' }, $title, $desc), $actions, mOut), $body);
     $app.replaceChildren(h('div', { class: 'layout' }, sidebar, main));
     renderPage();
   }
@@ -517,17 +583,29 @@
     }
     document.title = page.label + ' · MoeFrp 管理后台';
     $title.textContent = page.label;
+    $title.removeAttribute('title');
     $desc.textContent = page.desc;
+    $back.hidden = true;
     $actions.replaceChildren();
     $body.replaceChildren();
+    $body.scrollTop = 0;
+    state.relayout = null;
+    const alive = () => gen === state.gen && state.me !== null;
     page.render({
-      actions: $actions, body: $body, params,
-      alive: () => gen === state.gen && state.me !== null,
-      setHead: (title, desc) => {
+      actions: $actions, body: $body, params, alive,
+      // setHead 换标题（可以是元素）和副标题；back 是返回按钮的链接
+      setHead: (title, desc, back) => {
         $title.replaceChildren(title);
+        $title.title = typeof title === 'string' ? title : title.textContent;
         $desc.textContent = desc || '';
+        if (back) {
+          $back.href = back;
+          $back.hidden = false;
+        }
         document.title = (typeof title === 'string' ? title : page.label) + ' · MoeFrp 管理后台';
       },
+      // onLayout 登记宽窄屏切换时的重画函数（表格和列表互换）
+      onLayout: (fn) => { state.relayout = () => alive() && fn(); },
     });
   }
 
@@ -643,12 +721,12 @@
     let status = 'unused';
     let q = '';
     let list = [];
-    const box = h('div', { class: 'card' });
+    const box = listCard();
 
     p.actions.append(
       button('刷新', { icon: 'refresh', onclick: () => load() }),
       button('生成邀请码', { kind: 'primary', icon: 'plus', onclick: () => createInvitesDialog(() => load()) }));
-    p.body.append(
+    p.body.append(h('div', { class: 'fill' },
       h('div', { class: 'toolbar' },
         segmented([['unused', '未使用'], ['used', '已使用'], ['revoked', '已撤销'], ['all', '全部']], status, (v, set) => {
           status = v;
@@ -656,7 +734,8 @@
           load();
         }, { label: '按状态筛选' }),
         searchBox('搜索邀请码、备注、使用者', (v) => { q = v; draw(); })),
-      box);
+      box));
+    p.onLayout(() => { if (!box.querySelector('.state')) draw(); });
 
     async function load() {
       box.replaceChildren(loadingBox());
@@ -678,9 +757,9 @@
           : stateBox('inbox', status === 'unused' ? '没有可用的邀请码' : '这里还是空的', status === 'unused' ? '点右上角「生成邀请码」' : null));
         return;
       }
-      box.replaceChildren(
-        table([{ label: '邀请码' }, { label: '备注' }, { label: '状态' }, { label: '创建于' }, { label: '使用情况' }, { label: '', cls: 'actions' }],
-          rows.map((i) => {
+      fillList(box,
+        dataList([{ label: '邀请码' }, { label: '备注' }, { label: '状态' }, { label: '创建于' }, { label: '使用情况' }, { label: '', cls: 'actions' }], rows,
+          (i) => {
             const [label, kind] = INVITE_STATUS[i.status] || [i.status];
             let usage = h('span', { class: 'faint' }, '—');
             if (i.status === 'used') {
@@ -691,14 +770,28 @@
             const revoke = i.status === 'unused'
               ? button('撤销', { small: true, kind: 'danger-ghost', onclick: (e) => revokeInvite(i, e.currentTarget) })
               : null;
-            return h('tr', null,
+            return [
               h('td', null, h('span', { class: 'code-cell' }, h('code', null, i.code), iconButton('copy', '复制', () => copyText(i.code)))),
               h('td', null, i.note || h('span', { class: 'faint' }, '—')),
               h('td', null, badge(label, kind)),
               h('td', null, timeEl(i.createdAt)),
               h('td', null, usage),
-              h('td', { class: 'actions' }, revoke));
-          })),
+              h('td', { class: 'actions' }, revoke)];
+          },
+          (i) => {
+            const [label, kind] = INVITE_STATUS[i.status] || [i.status];
+            return {
+              title: [h('code', { class: 't' }, i.code), badge(label, kind)],
+              meta: [
+                i.note,
+                i.status === 'used' ? [(i.usedBy || '（用户已删除）') + ' 使用于 ', timeEl(i.usedAt)] : null,
+                i.status === 'revoked' ? ['撤销于 ', timeEl(i.revokedAt)] : null,
+                ['创建于 ', timeEl(i.createdAt)],
+              ],
+              trail: [iconButton('copy', '复制', () => copyText(i.code)),
+                i.status === 'unused' ? iconButton('x', '撤销', (e) => revokeInvite(i, e.currentTarget), 'danger') : null],
+            };
+          }),
         h('div', { class: 'card-foot' }, q ? '匹配 ' + rows.length + ' / ' + list.length + ' 个' : '共 ' + list.length + ' 个'));
     }
 
@@ -728,10 +821,10 @@
     let q = '';
     let list = [];
     let me = '';
-    const box = h('div', { class: 'card' });
+    const box = listCard();
 
     p.actions.append(button('刷新', { icon: 'refresh', onclick: () => load() }));
-    p.body.append(
+    p.body.append(h('div', { class: 'fill' },
       h('div', { class: 'toolbar' },
         segmented([['all', '全部'], ['admin', '管理员'], ['vip', 'VIP'], ['user', '普通用户'], ['disabled', '已停用']], filter, (v, set) => {
           filter = v;
@@ -739,7 +832,8 @@
           draw();
         }, { label: '按角色筛选' }),
         searchBox('搜索昵称', (v) => { q = v; draw(); })),
-      box);
+      box));
+    p.onLayout(() => { if (list.length) draw(); });
 
     async function load() {
       if (!list.length) box.replaceChildren(loadingBox());
@@ -763,24 +857,33 @@
         box.replaceChildren(stateBox(list.length ? 'search' : 'inbox', list.length ? '没有匹配的用户' : '还没有用户', list.length ? null : '生成邀请码发给别人注册'));
         return;
       }
-      box.replaceChildren(
-        table([{ label: '用户' }, { label: '角色' }, { label: '状态' }, { label: '客户端' }, { label: '最近活跃' }, { label: '云端数据' }, { label: '注册于' }, { label: '', cls: 'actions' }],
-          rows.map((u) => {
-            const [roleLabel, roleKind] = ROLES[u.role] || [u.role];
-            const isMe = u.nickname === me;
-            return h('tr', null,
-              h('td', null, h('div', { class: 'user-cell' },
-                h('div', { class: 'avatar', 'aria-hidden': 'true' }, Array.from(u.nickname)[0] || '?'),
-                u.nickname, isMe ? badge('你', 'outline') : null)),
-              h('td', null, badge(roleLabel, roleKind)),
-              h('td', null, u.status === 'disabled' ? badge('已停用', 'danger') : badge('正常', 'ok')),
-              h('td', { class: 'nowrap' }, u.activeSessions > 0
-                ? [h('span', { class: 'dot ok' }), u.activeSessions + ' 个会话']
-                : h('span', { class: 'faint' }, '未登录')),
-              h('td', null, timeEl(u.lastSeen)),
-              h('td', { class: 'nowrap muted' }, '配置 ' + u.profiles + ' · 分享 ' + u.shares + ' · 订阅 ' + u.subscriptions),
-              h('td', { class: 'nowrap' }, h('time', { datetime: u.createdAt, title: fmtTime(u.createdAt) }, fmtDate(u.createdAt))),
-              h('td', { class: 'actions' }, button('管理', { small: true, onclick: () => manageUser(u, isMe, load) })));
+      const avatar = (u) => h('div', { class: 'avatar', 'aria-hidden': 'true' }, Array.from(u.nickname)[0] || '?');
+      const roleBadges = (u) => {
+        const [roleLabel, roleKind] = ROLES[u.role] || [u.role];
+        return [badge(roleLabel, roleKind), u.status === 'disabled' ? badge('已停用', 'danger') : null];
+      };
+      fillList(box,
+        dataList([{ label: '用户' }, { label: '角色' }, { label: '客户端' }, { label: '最近活跃' }, { label: '云端数据' }, { label: '注册于' }, { label: '', cls: 'actions' }], rows,
+          (u) => [
+            h('td', null, h('div', { class: 'user-cell' }, avatar(u), u.nickname, u.nickname === me ? badge('你', 'outline') : null)),
+            h('td', { class: 'nowrap' }, roleBadges(u)),
+            h('td', { class: 'nowrap' }, u.activeSessions > 0
+              ? [h('span', { class: 'dot ok' }), u.activeSessions + ' 个会话']
+              : h('span', { class: 'faint' }, '未登录')),
+            h('td', null, timeEl(u.lastSeen)),
+            h('td', { class: 'nowrap muted' }, '配置 ' + u.profiles + ' · 分享 ' + u.shares + ' · 订阅 ' + u.subscriptions),
+            h('td', { class: 'nowrap' }, h('time', { datetime: u.createdAt, title: fmtTime(u.createdAt) }, fmtDate(u.createdAt))),
+            h('td', { class: 'actions' }, button('管理', { small: true, onclick: () => manageUser(u, u.nickname === me, load) }))],
+          (u) => ({
+            lead: avatar(u),
+            title: [u.nickname, u.nickname === me ? badge('你', 'outline') : null, roleBadges(u)],
+            meta: [
+              u.activeSessions > 0 ? [h('span', { class: 'dot ok' }), u.activeSessions + ' 个会话'] : '未登录',
+              u.lastSeen ? ['活跃 ', timeEl(u.lastSeen)] : null,
+              '配置 ' + u.profiles + ' · 分享 ' + u.shares + ' · 订阅 ' + u.subscriptions,
+            ],
+            trail: icon('chevron', 16),
+            onclick: () => manageUser(u, u.nickname === me, load),
           })),
         h('div', { class: 'card-foot' }, rows.length === list.length ? '共 ' + list.length + ' 人' : '显示 ' + rows.length + ' / ' + list.length + ' 人'));
     }
@@ -791,9 +894,6 @@
   function manageUser(u, isMe, reload) {
     const nick = encodeURIComponent(u.nickname);
     let changed = false;
-
-    const setting = (title, desc, control) => h('div', { class: 'setting' },
-      h('div', { class: 'setting-text' }, h('div', { class: 'setting-title' }, title), h('div', { class: 'setting-desc' }, desc)), control);
 
     // 角色
     const roleSeg = segmented([['user', '普通用户'], ['vip', 'VIP'], ['admin', '管理员']], u.role, async (v, set) => {
@@ -813,11 +913,11 @@
     }, { label: '角色', disabled: isMe });
 
     // 停用 / 启用
-    const statusBtn = h('div');
+    const statusBtn = h('div', { class: 'contents' });
     const drawStatus = () => {
       const disabled = u.status === 'disabled';
-      statusBtn.replaceChildren(button(disabled ? '启用账号' : '停用账号', {
-        small: true, kind: disabled ? null : 'danger-ghost', disabled: isMe,
+      statusBtn.replaceChildren(opButton(disabled ? '启用账号' : '停用账号', disabled ? '恢复登录' : '所有登录立即失效，数据保留', {
+        icon: 'power', danger: !disabled, disabled: isMe,
         onclick: (e) => toggleDisabled(e.currentTarget),
       }));
     };
@@ -841,8 +941,8 @@
     }
     drawStatus();
 
-    const kickBtn = button('踢下线', {
-      small: true,
+    const kickBtn = opButton('踢下线', '注销所有客户端登录', {
+      icon: 'logout',
       onclick: async (e) => {
         const btn = e.currentTarget;
         await busy(btn, async () => {
@@ -858,8 +958,8 @@
     });
 
     const secretBox = h('div');
-    const resetBtn = button('生成重置码', {
-      small: true, icon: 'key',
+    const resetBtn = opButton('密码重置码', '用户忘记密码时生成', {
+      icon: 'key',
       onclick: async (e) => {
         await busy(e.currentTarget, async () => {
           try {
@@ -881,12 +981,10 @@
       body: [
         h('div', { class: 'chips manage-head' }, badge(roleLabel, roleKind), u.status === 'disabled' ? badge('已停用', 'danger') : badge('正常', 'ok'), h('span', { class: 'cell-sub' }, '注册于 ' + fmtDate(u.createdAt))),
         isMe ? h('div', { class: 'callout info', role: 'note' }, icon('info', 16), '这是你自己的账号。为了防止把自己锁在外面，角色和停用不能在这里改。') : null,
-        h('div', null,
-          setting('角色', 'VIP 可以使用更多功能，管理员可以登录这个后台', roleSeg),
-          setting('账号状态', u.status === 'disabled' ? '账号已停用，不能登录' : '停用后不能登录，数据保留', statusBtn),
-          setting('踢下线', '注销 ' + u.nickname + ' 在桌面客户端上的所有登录，不影响账号本身', kickBtn),
-          setting('密码重置', '用户忘记密码时，生成一次性重置码发给对方', resetBtn),
-          setting('节点权限', '能用哪些官方节点、限额是否和角色不同、重置节点凭证', button('设置', { small: true, icon: 'server', onclick: () => userNodesDialog(u) }))),
+        h('div', { class: 'role-row' }, h('span', { class: 'field-label' }, '角色'), roleSeg),
+        h('div', { class: 'ops' },
+          statusBtn, kickBtn, resetBtn,
+          opButton('节点权限', '官方节点、限额、节点凭证', { icon: 'server', onclick: () => userNodesDialog(u) })),
         secretBox,
       ],
       onClose: () => { if (changed) reload(); },
@@ -925,23 +1023,27 @@
 
   async function pageAudit(p) {
     let prefix = '';
-    const box = h('div', { class: 'card' });
+    let entries = null;
+    const box = listCard();
     p.actions.append(button('刷新', { icon: 'refresh', onclick: () => load() }));
-    p.body.append(
+    p.body.append(h('div', { class: 'fill' },
       h('div', { class: 'toolbar' },
         segmented([['', '全部'], ['admin.', '管理操作'], ['auth.', '账号'], ['share.', '分享']], prefix, (v, set) => {
           prefix = v;
           set(v);
           load();
         }, { label: '按类型筛选' })),
-      box);
+      box));
+    p.onLayout(() => { if (entries) draw(entries); });
 
     async function load() {
       box.replaceChildren(loadingBox());
+      entries = null;
       try {
         const res = await api('GET', '/audit?limit=200&action=' + encodeURIComponent(prefix));
         if (!p.alive()) return;
-        draw(res.entries || []);
+        entries = res.entries || [];
+        draw(entries);
       } catch (e) {
         if (p.alive()) box.replaceChildren(errorBox(e, load));
       }
@@ -963,18 +1065,24 @@
         box.replaceChildren(stateBox('inbox', '没有记录', null));
         return;
       }
-      box.replaceChildren(
-        table([{ label: '时间' }, { label: '事件' }, { label: '操作者' }, { label: '对象' }, { label: 'IP' }, { label: '详情' }],
-          list.map((e) => {
-            let [label, kind] = ACTIONS[e.action] || [e.action, null];
-            if (e.action === 'auth.login' && e.detail && e.detail.kind === 'admin_web') [label, kind] = ['登录后台', 'accent'];
-            return h('tr', null,
-              h('td', { class: 'nowrap' }, h('time', { datetime: e.at, title: relTime(e.at) }, fmtTime(e.at))),
-              h('td', { class: 'nowrap' }, badge(label, kind)),
-              h('td', null, e.actor || h('span', { class: 'faint' }, '—')),
-              h('td', { class: 'nowrap' }, e.target || h('span', { class: 'faint' }, '—')),
-              h('td', { class: 'nowrap' }, e.ip ? h('code', null, e.ip) : h('span', { class: 'faint' }, '—')),
-              h('td', null, detail(e.detail)));
+      const event = (e) => {
+        if (e.action === 'auth.login' && e.detail && e.detail.kind === 'admin_web') return badge('登录后台', 'accent');
+        const [label, kind] = ACTIONS[e.action] || [e.action, null];
+        return badge(label, kind);
+      };
+      fillList(box,
+        dataList([{ label: '时间' }, { label: '事件' }, { label: '操作者' }, { label: '对象' }, { label: 'IP' }, { label: '详情' }], list,
+          (e) => [
+            h('td', { class: 'nowrap' }, h('time', { datetime: e.at, title: relTime(e.at) }, fmtTime(e.at))),
+            h('td', { class: 'nowrap' }, event(e)),
+            h('td', null, e.actor || h('span', { class: 'faint' }, '—')),
+            h('td', { class: 'nowrap' }, e.target || h('span', { class: 'faint' }, '—')),
+            h('td', { class: 'nowrap' }, e.ip ? h('code', null, e.ip) : h('span', { class: 'faint' }, '—')),
+            h('td', null, detail(e.detail))],
+          (e) => ({
+            title: [event(e), [e.actor, e.target && e.target !== e.actor ? e.target : null].filter(Boolean).join(' → ') || null],
+            meta: [h('time', { datetime: e.at, title: fmtTime(e.at) }, fmtTime(e.at)), e.ip],
+            extra: Object.keys(e.detail || {}).length ? detail(e.detail) : null,
           })),
         h('div', { class: 'card-foot' }, list.length >= 200 ? '显示最近 200 条' : '共 ' + list.length + ' 条'));
     }
@@ -1011,17 +1119,18 @@
           h('p', null, '生成一份当前数据库的完整快照（SQLite 文件），服务不用停。'),
           h('div', { class: 'callout warn' }, icon('alert', 16), h('span', null, '备份里有所有用户的密码哈希、节点地址和 token，请像对待密码一样保管，不要发到群里。')),
           dl)),
-      h('section', { class: 'card' },
-        h('div', { class: 'card-head' }, h('h2', null, '怎么恢复')),
-        h('div', { class: 'card-body' }, h('ol', { class: 'steps' },
-          h('li', null, '停止服务：', h('code', null, 'docker compose stop moefrp')),
-          h('li', null, '用备份文件替换数据目录里的数据库文件（Docker 部署是 compose 同目录下的 ', h('code', null, 'data/moefrp.db'), '）'),
-          h('li', null, '启动服务：', h('code', null, 'docker compose start moefrp'))))),
-      h('section', { class: 'card' },
-        h('div', { class: 'card-head' }, h('h2', null, '自动备份')),
-        h('div', { class: 'card-body muted' },
-          '服务端带 ', h('code', null, '--auto-migrate'), ' 启动且需要升级数据库结构时，会先在数据库旁边自动保存一份 ',
-          h('code', null, '*.pre-migrate-时间.db'), '。日常备份建议定期在这里下载，或者备份整个数据卷。'))));
+      h('div', { class: 'grid-2' },
+        h('section', { class: 'card' },
+          h('div', { class: 'card-head' }, h('h2', null, '怎么恢复')),
+          h('div', { class: 'card-body' }, h('ol', { class: 'steps' },
+            h('li', null, '停止服务：', h('code', null, 'docker compose stop moefrp')),
+            h('li', null, '用备份文件替换 compose 同目录下的 ', h('code', null, 'data/moefrp.db')),
+            h('li', null, '启动服务：', h('code', null, 'docker compose start moefrp'))))),
+        h('section', { class: 'card' },
+          h('div', { class: 'card-head' }, h('h2', null, '自动备份')),
+          h('div', { class: 'card-body muted' },
+            '升级数据库结构前，服务端会在数据库旁边自动保存一份 ', h('code', null, '*.pre-migrate-时间.db'),
+            '。日常备份请定期在这里下载，或者备份整个 ', h('code', null, 'data'), ' 目录。')))));
   }
 
   // ---------- 官方节点：限额和用户权限 ----------
@@ -1035,24 +1144,30 @@
       q.types && q.types.length ? q.types.join('/') : '类型不限'].join(' · ');
   }
 
-  // quotaFields 返回编辑一份限额的输入框和读取函数。compact 时不显示每个字段的说明（并排显示三个角色时用）。
-  function quotaFields(q, compact) {
-    const max = input({ type: 'number', min: 0, max: 10000, value: String(q.maxProxies || 0) });
-    const ports = input({ value: q.ports || '', placeholder: '不限，例如 10000-20000,30000' });
+  // quotaInputs 是一份限额的输入框和读取函数
+  function quotaInputs(q) {
+    const max = input({ type: 'number', min: 0, max: 10000, value: String(q.maxProxies || 0), inputmode: 'numeric', 'aria-label': '最多同时在线的代理' });
+    const ports = input({ value: q.ports || '', placeholder: '不限', 'aria-label': '远程端口范围' });
     const boxes = PROXY_TYPES.map((t) => {
-      const cb = h('input', { type: 'checkbox', value: t });
+      const cb = h('input', { type: 'checkbox', value: t, 'aria-label': t });
       cb.checked = !q.types || q.types.length === 0 || q.types.includes(t);
-      return h('label', { class: 'check' }, cb, t);
+      return cb;
     });
     const read = () => {
-      const types = boxes.map((l) => l.querySelector('input')).filter((c) => c.checked).map((c) => c.value);
+      const types = boxes.filter((c) => c.checked).map((c) => c.value);
       return { maxProxies: Number(max.value) || 0, ports: ports.value.trim(), types: types.length === PROXY_TYPES.length ? [] : types };
     };
+    return { max, ports, boxes, read };
+  }
+
+  // quotaFields 是单个用户的限额表单
+  function quotaFields(q) {
+    const f = quotaInputs(q);
+    f.ports.placeholder = '不限，例如 10000-20000,30000';
     const el = h('div', { class: 'quota-fields' },
-      field('最多同时在线的代理', max, compact ? null : '0 表示不限'),
-      field('远程端口范围', ports, compact ? null : 'tcp / udp 代理的远程端口必须在范围内；留空不限（以节点 frps 的 allowPorts 为准）'),
-      field('允许的代理类型', h('div', { class: 'checks' }, boxes)));
-    return { el, read };
+      h('div', { class: 'form-grid' }, field('最多同时在线的代理', f.max, '0 表示不限'), field('远程端口范围', f.ports, '留空不限')),
+      field('允许的代理类型', h('div', { class: 'checks' }, f.boxes.map((cb) => h('label', { class: 'check' }, cb, cb.value)))));
+    return { el, read: f.read };
   }
 
   async function quotasDialog() {
@@ -1063,19 +1178,27 @@
       fail(e);
       return;
     }
-    const editors = ROLE_OPTIONS.map(([v, label]) => [v, label, quotaFields(roles[v] || {}, true)]);
+    // 矩阵：列是角色，行是限额项，手机上也能一屏放下
+    const editors = ROLE_OPTIONS.map(([v, label]) => [v, label, quotaInputs(roles[v] || {})]);
+    const matrix = h('table', { class: 'qm' },
+      h('thead', null, h('tr', null, h('th'), editors.map(([, label]) => h('th', { scope: 'col' }, label)))),
+      h('tbody', null,
+        h('tr', null, h('th', { scope: 'row' }, '最多代理'), editors.map(([, , f]) => h('td', null, f.max))),
+        h('tr', null, h('th', { scope: 'row' }, '远程端口'), editors.map(([, , f]) => h('td', null, f.ports))),
+        PROXY_TYPES.map((t, i) => h('tr', { class: i === 0 ? 'sep' : null }, h('th', { scope: 'row' }, h('code', null, t)),
+          editors.map(([, , f]) => h('td', null, h('label', { class: 'check' }, f.boxes[i])))))));
     const err = h('div', { class: 'form-error', role: 'alert' });
     const submit = button('保存', { kind: 'primary', type: 'submit' });
     const d = openDialog({
       title: '官方节点限额',
       titleIcon: 'layers',
-      xwide: true,
-      body: [h('p', { class: 'dialog-text' }, '按角色设置用户在每个官方节点上能用的资源，由节点上的 agent 强制执行。个别用户可以在"用户 → 管理 → 节点权限"里单独调整。'),
-        h('div', { class: 'quota-grid' }, editors.map(([, label, f]) => h('section', { class: 'quota-role' }, h('h3', null, label), f.el))),
+      wide: true,
+      body: [h('p', { class: 'dialog-text' }, '每个角色在每个官方节点上能用的资源，由节点上的 agent 执行。个别用户在"用户 → 节点权限"里单独调整。'),
+        matrix,
         h('ul', { class: 'hints' },
-          h('li', null, '代理数：同一时间在一个节点上在线的代理，0 表示不限。'),
-          h('li', null, '远程端口：tcp / udp 代理的远程端口必须在范围内，例如 10000-20000,30000；留空不限（以节点 frps 的 allowPorts 为准）。'),
-          h('li', null, '代理类型：不勾选的类型会被节点拒绝。')),
+          h('li', null, '最多代理：同时在线的代理数，0 不限。'),
+          h('li', null, '远程端口：tcp / udp 的远程端口范围，如 10000-20000,30000；留空不限。'),
+          h('li', null, '不勾选的代理类型会被节点拒绝。')),
         err],
       actions: [button('取消', { onclick: () => d.close() }), submit],
       onSubmit: () => busy(submit, async () => {
@@ -1116,7 +1239,7 @@
     const selects = official.map((x) => {
       const roleOK = (x.roles || []).includes(data.role);
       const sel = h('select', { class: 'input select' },
-        h('option', { value: '' }, '按角色（' + (roleOK ? '可用' : '不可用') + '）'),
+        h('option', { value: '' }, '按角色：' + (roleOK ? '可用' : '不可用')),
         h('option', { value: 'allow' }, '允许'), h('option', { value: 'deny' }, '禁止'));
       sel.value = x.grant === true ? 'allow' : x.grant === false ? 'deny' : '';
       return [x, sel];
@@ -1237,15 +1360,18 @@
     return h('div', { class: 'meter-row' }, h('span', { class: 'meter-label' }, label), meter(used, total), h('span', { class: 'meter-text' }, text));
   }
 
-  function copyBox(text, label = '已复制') {
-    return h('div', { class: 'copybox' }, h('code', null, text), button('复制', { small: true, icon: 'copy', onclick: () => copyText(text, label) }));
+  // copyBox 显示一段可复制的文字；labeled 时复制按钮带文字（安装命令这种主要操作）
+  function copyBox(text, label = '已复制', labeled = false) {
+    return h('div', { class: 'copybox' }, h('code', null, text), labeled
+      ? button('复制', { small: true, icon: 'copy', onclick: () => copyText(text, label) })
+      : iconButton('copy', '复制', () => copyText(text, label)));
   }
 
   function installBlock(res) {
     const parts = [];
     if (res.installCommand) {
       parts.push(h('p', { class: 'dialog-text' }, '在节点上以 root 执行下面的命令（Debian / Ubuntu / 红帽系等 systemd 系统，amd64 或 arm64）：'));
-      parts.push(copyBox(res.installCommand, '安装命令已复制'));
+      parts.push(copyBox(res.installCommand, '安装命令已复制', true));
     } else {
       parts.push(h('p', { class: 'dialog-text' }, '无法确定面板地址，请在服务端配置 public_url。安装码：'), copyBox(res.enrollCode));
     }
@@ -1264,7 +1390,7 @@
     return [el, h('datalist', { id: listId }, (suggestions || []).map((m) => h('option', { value: m })))];
   }
 
-  const MIRROR_HINT = '节点连不上 GitHub（国内机器常见）时填一个 GitHub 下载代理，下载地址变成"代理 + GitHub 地址"。以后升级也用它，可以在节点的"设置"里改。校验和由面板从 GitHub 获取，代理改不了文件内容。';
+  const MIRROR_HINT = '节点连不上 GitHub 时填，下载地址变成"代理 + GitHub 地址"，以后升级也用它。校验和由面板核对，代理改不了文件。';
 
   function createNodeDialog(onDone, data) {
     const name = input({ maxlength: 40, placeholder: '例如：东京 1', required: true });
@@ -1307,7 +1433,7 @@
 
   async function pageNodes(p) {
     if (p.params[0]) return pageNode(p, p.params[0]);
-    const box = h('div', { class: 'card' });
+    const box = listCard();
     const notice = h('div');
     let data = null;
     p.actions.append(
@@ -1315,8 +1441,9 @@
       button('限额', { icon: 'layers', onclick: () => quotasDialog() }),
       button('执行命令', { icon: 'terminal', onclick: () => data && execDialog(data.nodes) }),
       button('添加节点', { kind: 'primary', icon: 'plus', onclick: () => createNodeDialog(() => load(), data) }));
-    p.body.append(notice, box);
+    p.body.append(h('div', { class: 'fill' }, notice, box));
     box.append(loadingBox());
+    p.onLayout(() => { if (data) draw(); });
 
     async function load(quiet) {
       try {
@@ -1340,15 +1467,16 @@
           button('添加节点', { kind: 'primary', icon: 'plus', onclick: () => createNodeDialog(() => load(), data) })));
         return;
       }
-      box.replaceChildren(
-        table([{ label: '节点' }, { label: '状态' }, { label: 'frps' }, { label: '资源' }, { label: '网络' }, { label: 'agent' }, { label: '', cls: 'actions' }],
-          list.map((n) => {
+      const pct = (used, total) => (total > 0 ? Math.round((used / total) * 100) : 0) + '%';
+      fillList(box,
+        dataList([{ label: '节点' }, { label: '状态' }, { label: 'frps' }, { label: '资源' }, { label: '网络' }, { label: 'agent' }, { label: '', cls: 'actions' }], list,
+          (n) => {
             const r = n.report;
             const info = n.info || {};
             const fs = r && r.frps;
             const [fl, fk] = fs ? (FRPS_STATE[fs.state] || [fs.state]) : [null];
             const href = '#/nodes/' + encodeURIComponent(n.id);
-            return h('tr', null,
+            return [
               h('td', null, h('a', { class: 'node-link', href }, n.name), n.official ? [' ', badge('官方', 'accent')] : null,
                 h('div', { class: 'cell-sub' }, [info.hostname, n.client && n.client.addr].filter(Boolean).join(' · ') || '—')),
               h('td', null, nodeStatusBadge(n),
@@ -1360,9 +1488,29 @@
               h('td', { class: 'nowrap' }, r ? h('div', { class: 'cell-sub' }, '↓ ' + fmtRate(n.netRxRate), h('br'), '↑ ' + fmtRate(n.netTxRate)) : h('span', { class: 'faint' }, '—')),
               h('td', { class: 'nowrap' }, info.agentVersion ? h('code', null, info.agentVersion) : h('span', { class: 'faint' }, '—'),
                 n.upgradeTo ? h('div', null, badge('可升级', 'info')) : null),
-              h('td', { class: 'actions' }, h('a', { class: 'btn btn-sm', href }, '管理')));
-          })),
-        h('div', { class: 'card-foot' }, '共 ' + list.length + ' 个节点，' + list.filter((n) => n.status === 'online').length + ' 个在线' + agentText + ' · 每 10 秒自动刷新'));
+              h('td', { class: 'actions' }, h('a', { class: 'btn btn-sm', href }, '管理'))];
+          },
+          (n) => {
+            const r = n.report;
+            const info = n.info || {};
+            const fs = r && r.frps;
+            const [fl] = fs ? (FRPS_STATE[fs.state] || [fs.state]) : [null];
+            return {
+              href: '#/nodes/' + encodeURIComponent(n.id),
+              title: [n.name, n.official ? badge('官方', 'accent') : null],
+              trail: [nodeStatusBadge(n), icon('chevron', 16)],
+              meta: [
+                fs ? 'frps ' + fl + (fs.state === 'running' ? ' :' + fs.bindPort + ' · ' + fs.clients + ' 个客户端' : '') : null,
+                r ? '↓ ' + fmtRate(n.netRxRate) + ' ↑ ' + fmtRate(n.netTxRate) : null,
+                info.agentVersion ? 'agent ' + info.agentVersion + (n.upgradeTo ? '（可升级）' : '') : null,
+                n.status !== 'online' && n.lastSeen ? ['最后在线 ', timeEl(n.lastSeen)] : null,
+                n.status === 'pending' ? '还没有安装 agent' : null,
+              ],
+              extra: r ? h('div', { class: 'row-meters' },
+                meterCell('CPU', r.cpu, 100, r.cpu.toFixed(0) + '%'), meterCell('内存', r.memUsed, r.memTotal, pct(r.memUsed, r.memTotal))) : null,
+            };
+          }),
+        h('div', { class: 'card-foot' }, '共 ' + list.length + ' 个节点，' + list.filter((n) => n.status === 'online').length + ' 个在线' + agentText + ' · 每 10 秒刷新'));
     }
 
     await load();
@@ -1454,14 +1602,17 @@
   async function pageNode(p, id) {
     let n = null;
     let tab = 'overview';
-    const tabs = segmented([['overview', '概况'], ['config', 'frps 配置'], ['proxies', '代理'], ['logs', '日志'], ['exec', '命令'], ['settings', '设置']], tab, (v, set) => {
+    const tabs = segmented([['overview', '概况'], ['config', '配置'], ['proxies', '代理'], ['logs', '日志'], ['exec', '命令'], ['settings', '设置']], tab, (v, set) => {
       tab = v;
       set(v);
       drawTab();
     }, { label: '节点页面' });
-    const content = h('div');
+    // 标签栏固定，下面的内容区占满剩余高度：列表、日志、编辑器在里面自己滚动
+    const content = h('div', { class: 'tab-body grow' });
     p.actions.append(button('刷新', { icon: 'refresh', onclick: () => load() }));
-    p.body.append(h('a', { class: 'back', href: '#/nodes' }, icon('back', 16), '全部节点'), loadingBox());
+    p.setHead('节点', '', '#/nodes');
+    p.body.append(loadingBox());
+    p.onLayout(() => { if (n && (tab === 'proxies' || tab === 'exec')) drawTab(); });
 
     async function load(quiet) {
       try {
@@ -1469,15 +1620,18 @@
         if (!p.alive()) return;
         const first = !n;
         n = v;
-        p.setHead(h('span', { class: 'title-row' }, n.name, nodeStatusBadge(n)), [n.info && n.info.hostname, n.client && n.client.addr].filter(Boolean).join(' · '));
+        p.setHead(h('span', { class: 'title-row' }, h('span', { class: 't' }, n.name), nodeStatusBadge(n)),
+          [n.info && n.info.hostname, n.client && n.client.addr].filter(Boolean).join(' · '), '#/nodes');
         if (first) {
-          p.body.replaceChildren(h('a', { class: 'back', href: '#/nodes' }, icon('back', 16), '全部节点'), h('div', { class: 'toolbar' }, tabs), content);
+          p.body.replaceChildren(h('div', { class: 'fill' }, h('div', { class: 'toolbar' }, tabs), content));
           drawTab();
         } else if (tab === 'overview') {
+          const top = content.scrollTop;
           drawTab();
+          content.scrollTop = top;
         }
       } catch (e) {
-        if (!quiet && p.alive()) p.body.replaceChildren(h('a', { class: 'back', href: '#/nodes' }, icon('back', 16), '全部节点'), errorBox(e, () => load()));
+        if (!quiet && p.alive()) p.body.replaceChildren(errorBox(e, () => load()));
       }
     }
 
@@ -1486,61 +1640,79 @@
       content.replaceChildren(fn());
     }
 
-    const offlineBox = () => stateBox('server', '节点不在线', n.status === 'pending' ? '还没有安装 agent。' : '节点上线后才能查看。');
+    const offlineBox = () => h('div', { class: 'card grow list-card' },
+      stateBox('server', '节点不在线', n.status === 'pending' ? '还没有安装 agent。' : '节点上线后才能查看。'));
+
+    const section = (title, sub, body, cls) => h('section', { class: 'card' + (cls ? ' ' + cls : '') },
+      h('div', { class: 'card-head' }, h('h2', null, title), sub ? h('span', null, sub) : null), h('div', { class: 'card-body' }, body));
+    const none = () => h('span', { class: 'faint' }, '—');
+    const tile = (label, value, sub, cls) => h('div', { class: 'tile' + (cls ? ' ' + cls : '') },
+      h('div', { class: 'tile-label' }, label),
+      h('div', { class: 'tile-value', title: typeof value === 'string' ? value : null }, value == null || value === '' ? none() : value),
+      sub ? h('div', { class: 'tile-sub', title: sub }, sub) : null);
+    const meterTile = (label, used, total, sub) => h('div', { class: 'tile' },
+      h('div', { class: 'tile-label' }, label, h('b', null, (total > 0 ? Math.round((used / total) * 100) : 0) + '%')),
+      meter(used, total), sub ? h('div', { class: 'tile-sub', title: sub }, sub) : null);
 
     function tabOverview() {
       const info = n.info || {};
       const r = n.report;
-      const kv = (pairs) => h('dl', { class: 'kv' }, pairs.filter(Boolean).map(([k, v]) => [h('dt', null, k), h('dd', null, v == null || v === '' ? h('span', { class: 'faint' }, '—') : v)]));
-      const cards = [];
+      const fs = r && r.frps;
+      const parts = [];
       if (n.status === 'pending') {
-        cards.push(h('section', { class: 'card span-2' }, h('div', { class: 'card-head' }, h('h2', null, '安装 agent')),
-          h('div', { class: 'card-body' }, h('p', { class: 'muted' }, '这个节点还没有安装。添加节点时给出的安装命令 24 小时内有效；找不到或过期了就重新生成。'),
-            h('div', { class: 'gap' }), button('重新生成安装命令', { kind: 'primary', onclick: (e) => resetToken(e.currentTarget, false) }))));
+        parts.push(h('div', { class: 'callout warn span-all' }, icon('alert', 16),
+          h('span', null, '还没有安装 agent。添加节点时给出的安装命令 24 小时内有效，找不到或过期了就重新生成。'),
+          button('重新生成安装命令', { small: true, kind: 'primary', onclick: (e) => resetToken(e.currentTarget, false) })));
       }
       if (n.pendingUninstall) {
-        cards.push(h('div', { class: 'callout warn span-2' }, icon('alert', 16), h('span', null, '已标记卸载：节点下次上线时会自动卸载并从面板删除。'),
+        parts.push(h('div', { class: 'callout warn span-all' }, icon('alert', 16), h('span', null, '已标记卸载：节点下次上线时会自动卸载并从面板删除。'),
           button('取消卸载', { small: true, onclick: async () => { await api('POST', '/nodes/' + encodeURIComponent(id) + '/cancel-uninstall').catch(fail); load(); } })));
       }
+
+      // 左边一张"运行状态"卡（资源 + frps），右边连接信息和系统
+      const res = r ? h('div', { class: 'tiles' },
+        meterTile('CPU', r.cpu, 100),
+        meterTile('内存', r.memUsed, r.memTotal, fmtBytes(r.memUsed) + ' / ' + fmtBytes(r.memTotal)),
+        meterTile('磁盘', r.diskUsed, r.diskTotal, fmtBytes(r.diskUsed) + ' / ' + fmtBytes(r.diskTotal)),
+        tile('下载', fmtRate(n.netRxRate)),
+        tile('上传', fmtRate(n.netTxRate)),
+        tile('负载', r.load.map((x) => x.toFixed(2)).join(' '))) : h('p', { class: 'muted' }, '节点在线后显示资源占用');
+
+      const [fl, fk] = fs ? (FRPS_STATE[fs.state] || [fs.state]) : [null];
+      const synced = n.configRev === n.appliedRev;
+      const alerts = [
+        fs && fs.error ? h('div', { class: 'callout danger' }, icon('alert', 16), h('span', null, fs.error)) : null,
+        n.applyError ? h('div', { class: 'callout danger' }, icon('alert', 16), h('span', null, '上次下发失败：' + n.applyError)) : null,
+      ].filter(Boolean);
+      if (n.status !== 'pending') parts.push(section('运行状态', [r ? '已运行 ' + fmtUptime(r.uptime) : null, info.frpVersion ? 'frp v' + info.frpVersion : null].filter(Boolean).join(' · '), [
+        res,
+        h('div', { class: 'tiles tiles-sep' },
+          tile('frps', fs ? badge(fl, fk) : null),
+          tile('监听端口', fs && fs.bindPort ? String(fs.bindPort) : null),
+          h('div', { class: 'tile', title: '面板 v' + n.configRev + ' / 节点 v' + n.appliedRev }, h('div', { class: 'tile-label' }, '配置'),
+            h('div', { class: 'tile-value' }, synced ? badge('已同步 v' + n.configRev, 'ok') : badge('未同步', 'warn'))),
+          tile('客户端/代理/连接', fs ? fs.clients + ' / ' + fs.proxies + ' / ' + fs.conns : null),
+          tile('今日流量', fs ? '↓ ' + fmtBytes(fs.trafficIn) + '  ↑ ' + fmtBytes(fs.trafficOut) : null, null, 'span-2')),
+        alerts.length ? h('div', { class: 'alerts' }, alerts) : null]));
+
+      const side = [];
       if (n.client) {
-        cards.push(h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', null, '客户端连接信息'), h('span', null, '在 MoeFrp 客户端的"节点"里填这些')),
-          h('div', { class: 'card-body' }, kv([
-            ['地址', n.client.addr ? copyBox(n.client.addr) : h('span', { class: 'faint' }, '节点上线后显示，或在"设置"里填域名')],
-            ['端口', String(n.client.port)],
-            ['token', n.client.token ? secretBox(n.client.token) : h('span', { class: 'faint' }, '未设置（任何人都能连）')],
-          ]))));
+        side.push(section('连接信息', '客户端"节点"里填这些', h('dl', { class: 'conn' },
+          h('dt', null, '地址'), h('dd', null, n.client.addr ? copyBox(n.client.addr + ':' + n.client.port) : h('span', { class: 'faint' }, '节点上线后显示，或在"设置"里填域名')),
+          h('dt', null, 'token'), h('dd', null, n.client.token ? secretBox(n.client.token) : h('span', { class: 'faint' }, '未设置（任何人都能连）')))));
       }
-      const fs = r && r.frps;
-      const [fl, fk] = fs ? (FRPS_STATE[fs.state] || [fs.state]) : ['—'];
-      const sync = n.configRev === n.appliedRev ? badge('已同步', 'ok') : badge('未同步（面板 v' + n.configRev + ' / 节点 v' + n.appliedRev + '）', 'warn');
-      cards.push(h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', null, 'frps')),
-        h('div', { class: 'card-body' }, kv([
-          ['状态', fs ? badge(fl, fk) : null],
-          fs && fs.error ? ['错误', h('span', { class: 'text-danger' }, fs.error)] : null,
-          ['配置', sync],
-          n.applyError ? ['上次下发', h('span', { class: 'text-danger' }, n.applyError)] : null,
-          ['监听端口', fs && fs.bindPort ? String(fs.bindPort) : null],
-          ['客户端 / 代理 / 连接', fs ? fs.clients + ' / ' + fs.proxies + ' / ' + fs.conns : null],
-          ['今日流量', fs ? '↓ ' + fmtBytes(fs.trafficIn) + ' · ↑ ' + fmtBytes(fs.trafficOut) : null],
-          ['frp 版本', info.frpVersion ? h('code', null, info.frpVersion) : null],
-        ]))));
-      cards.push(h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', null, '资源')),
-        h('div', { class: 'card-body' }, r ? [
-          meterCell('CPU', r.cpu, 100, r.cpu.toFixed(1) + '%'),
-          meterCell('内存', r.memUsed, r.memTotal, fmtBytes(r.memUsed) + ' / ' + fmtBytes(r.memTotal)),
-          meterCell('磁盘', r.diskUsed, r.diskTotal, fmtBytes(r.diskUsed) + ' / ' + fmtBytes(r.diskTotal)),
-          h('div', { class: 'gap' }),
-          kv([['负载', r.load.map((x) => x.toFixed(2)).join(' / ')], ['网络', '↓ ' + fmtRate(n.netRxRate) + ' · ↑ ' + fmtRate(n.netTxRate)], ['运行时间', fmtUptime(r.uptime)]]),
-        ] : h('p', { class: 'muted' }, '节点在线后显示'))));
-      cards.push(h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', null, '系统')),
-        h('div', { class: 'card-body' }, kv([
-          ['系统', info.distro], ['内核', info.kernel], ['架构', info.arch ? info.os + '/' + info.arch : null], ['主机名', info.hostname],
-          ['IP', n.lastIp], ['agent', info.agentVersion ? [h('code', null, info.agentVersion), n.upgradeTo ? [' ', badge('可升级到 ' + n.upgradeTo, 'info')] : null] : null],
-          ['远程命令', info.agentVersion ? (info.execEnabled ? '允许' : '已关闭（--no-exec）') : null],
-          ['下载代理', n.downloadMirror ? h('code', null, n.downloadMirror) : '直连 GitHub'],
-          ['上线时间', n.connectedAt ? timeEl(n.connectedAt) : null], ['最后在线', n.lastSeen ? timeEl(n.lastSeen) : null], ['添加于', fmtTime(n.createdAt)],
-        ]))));
-      return h('div', { class: 'grid-2' }, cards);
+
+      if (n.status !== 'pending') side.push(section('系统', null, h('div', { class: 'tiles' },
+        tile('系统', info.distro, info.arch ? info.os + '/' + info.arch : null),
+        tile('内核', info.kernel),
+        tile('IP', n.lastIp),
+        tile('agent', info.agentVersion ? [info.agentVersion, n.upgradeTo ? [' ', badge('可升级', 'info')] : null] : null, n.upgradeTo ? '最新 ' + n.upgradeTo : null),
+        tile('远程命令', info.agentVersion ? (info.execEnabled ? '允许' : '已关闭') : null),
+        n.status === 'online'
+          ? tile('上线', n.connectedAt ? timeEl(n.connectedAt) : null, '添加于 ' + fmtDate(n.createdAt))
+          : tile('最后在线', n.lastSeen ? timeEl(n.lastSeen) : null, '添加于 ' + fmtDate(n.createdAt)))));
+      parts.push(h('div', { class: 'stack' }, side));
+      return h('div', { class: 'node-grid' }, parts);
     }
 
     function secretBox(text) {
@@ -1548,44 +1720,45 @@
       let shown = false;
       return h('div', { class: 'copybox' }, code,
         iconButton('eye', '显示', () => { shown = !shown; code.textContent = shown ? text : '••••••••••••'; }),
-        button('复制', { small: true, icon: 'copy', onclick: () => copyText(text, 'token 已复制') }));
+        iconButton('copy', '复制', () => copyText(text, 'token 已复制')));
     }
 
     function tabConfig() {
-      const ta = h('textarea', { class: 'input mono textarea code-editor', rows: 22, spellcheck: 'false', wrap: 'off' });
+      const ta = h('textarea', { class: 'input mono textarea code-editor', spellcheck: 'false', wrap: 'off', 'aria-label': 'frps 配置' });
       ta.value = n.frpsConfig || '';
-      const result = h('div');
+      const result = h('div', { hidden: true });
+      const show = (el) => { result.replaceChildren(el); result.hidden = false; };
       const save = button(n.status === 'online' ? '保存并应用' : '保存', {
-        kind: 'primary',
+        kind: 'primary', small: true,
         onclick: () => busy(save, async () => {
           try {
             const res = await api('PUT', '/nodes/' + encodeURIComponent(id) + '/config', { config: ta.value });
             const r = res.result;
             if (!res.pushed) {
-              result.replaceChildren(h('div', { class: 'callout info' }, icon('info', 16), h('span', null, '已保存（v' + res.rev + '）。节点不在线，上线后自动下发。')));
+              show(h('div', { class: 'callout info' }, icon('info', 16), h('span', null, '已保存（v' + res.rev + '）。节点不在线，上线后自动下发。')));
             } else if (r.applied) {
-              result.replaceChildren(h('div', { class: 'callout ok' }, icon('check', 16), h('span', null, '已生效（v' + res.rev + '），frps 已用新配置重启。' + (r.warning ? ' 提示：' + r.warning : ''))));
+              show(h('div', { class: 'callout ok' }, icon('check', 16), h('span', null, '已生效（v' + res.rev + '），frps 已用新配置重启。' + (r.warning ? ' 提示：' + r.warning : ''))));
               toast('frps 配置已生效');
             } else {
-              result.replaceChildren(h('div', { class: 'callout danger' }, icon('alert', 16),
+              show(h('div', { class: 'callout danger' }, icon('alert', 16),
                 h('span', null, r.error + (r.rolledBack ? '。frps 已恢复为之前的配置继续运行。' : ''))));
             }
-            const v = await api('GET', '/nodes/' + encodeURIComponent(id));
-            n = v;
+            n = await api('GET', '/nodes/' + encodeURIComponent(id));
           } catch (e) {
             fail(e);
           }
         }),
       });
-      return h('div', { class: 'card' }, h('div', { class: 'card-body' },
-        h('p', { class: 'muted' }, 'frps 原生 TOML 配置。保存后 agent 先校验，再重启 frps；新配置启动失败（例如端口被占用）会自动恢复旧配置。不支持 webServer（dashboard），状态在面板上看。'),
-        h('div', { class: 'gap' }), ta, h('div', { class: 'gap' }), result,
-        h('div', { class: 'row-end' }, button('还原', { onclick: () => { ta.value = n.frpsConfig || ''; result.replaceChildren(); } }), save)));
+      return h('div', { class: 'card grow fill-card' },
+        h('div', { class: 'card-head' }, h('h2', null, 'frps.toml'),
+          h('div', { class: 'head-btns' }, button('还原', { small: true, onclick: () => { ta.value = n.frpsConfig || ''; result.hidden = true; } }), save)),
+        h('div', { class: 'card-body' }, ta, result,
+          h('p', { class: 'cell-sub' }, 'frps 原生 TOML。保存后 agent 先校验再重启 frps，启动失败（如端口被占用）自动恢复旧配置。不支持 webServer，状态在面板上看。')));
     }
 
     function tabProxies() {
       if (n.status !== 'online') return offlineBox();
-      const box = h('div', { class: 'card' }, loadingBox());
+      const box = h('div', { class: 'card list-card grow' }, loadingBox());
       (async () => {
         try {
           const res = await api('GET', '/nodes/' + encodeURIComponent(id) + '/proxies');
@@ -1594,11 +1767,17 @@
             box.replaceChildren(stateBox('inbox', '还没有代理', '客户端连上这个节点并开启代理后显示在这里。'));
             return;
           }
-          box.replaceChildren(table([{ label: '名称' }, { label: '类型' }, { label: '用户' }, { label: '状态' }, { label: '连接' }, { label: '今日流量' }, { label: '上线时间' }],
-            list.map((x) => h('tr', null, h('td', null, h('code', null, x.name)), h('td', null, x.type), h('td', null, x.user || h('span', { class: 'faint' }, '—')),
+          const traffic = (x) => '↓ ' + fmtBytes(x.trafficIn) + ' · ↑ ' + fmtBytes(x.trafficOut);
+          box.replaceChildren(dataList([{ label: '名称' }, { label: '类型' }, { label: '用户' }, { label: '状态' }, { label: '连接' }, { label: '今日流量' }, { label: '上线时间' }], list,
+            (x) => [h('td', null, h('code', null, x.name)), h('td', null, x.type), h('td', null, x.user || h('span', { class: 'faint' }, '—')),
               h('td', null, x.online ? badge('在线', 'ok') : badge('离线')), h('td', null, String(x.conns)),
-              h('td', { class: 'nowrap' }, '↓ ' + fmtBytes(x.trafficIn) + ' · ↑ ' + fmtBytes(x.trafficOut)),
-              h('td', { class: 'nowrap cell-sub' }, x.lastStart || '—')))),
+              h('td', { class: 'nowrap' }, traffic(x)),
+              h('td', { class: 'nowrap cell-sub' }, x.lastStart || '—')],
+            (x) => ({
+              title: h('code', { class: 't' }, x.name),
+              trail: x.online ? badge('在线', 'ok') : badge('离线'),
+              meta: [x.type, x.user, x.conns + ' 个连接', traffic(x)],
+            })),
           h('div', { class: 'card-foot' }, '在线 ' + list.filter((x) => x.online).length + ' / 共 ' + list.length + ' 个（包括最近下线的）'));
         } catch (e) {
           box.replaceChildren(errorBox(e));
@@ -1609,7 +1788,7 @@
 
     function tabLogs() {
       if (n.status !== 'online') return offlineBox();
-      const pre = h('pre', { class: 'term term-tall' }, '加载中…');
+      const pre = h('pre', { class: 'term' }, '加载中…');
       const load = async () => {
         try {
           const res = await api('GET', '/nodes/' + encodeURIComponent(id) + '/logs?lines=500');
@@ -1620,40 +1799,52 @@
         }
       };
       load();
-      return h('div', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', null, '最近 500 行'), button('刷新', { small: true, icon: 'refresh', onclick: load })),
-        h('div', { class: 'card-body' }, pre, h('p', { class: 'cell-sub' }, '完整日志在节点上：journalctl -u moefrp-agent')));
+      return h('div', { class: 'card grow fill-card' },
+        h('div', { class: 'card-head' }, h('h2', null, '最近 500 行'), h('span', null, '完整日志：journalctl -u moefrp-agent'),
+          h('div', { class: 'head-btns' }, button('刷新', { small: true, icon: 'refresh', onclick: load }))),
+        h('div', { class: 'card-body' }, pre));
     }
 
     function tabExec() {
-      const hist = h('div');
+      const disabled = n.info && n.info.execEnabled === false;
+      const box = h('div', { class: 'card list-card grow' });
       const loadHist = async () => {
         try {
           const res = await api('GET', '/nodes/' + encodeURIComponent(id) + '/tasks');
           const list = res.tasks || [];
-          hist.replaceChildren(list.length ? table([{ label: '时间' }, { label: '类型' }, { label: '内容' }, { label: '结果' }, { label: '', cls: 'actions' }],
-            list.map((t) => h('tr', null, h('td', { class: 'nowrap' }, timeEl(t.createdAt)), h('td', null, t.kind === 'exec' ? '命令' : '升级'),
-              h('td', null, h('code', { class: 'clip' }, t.command)),
-              h('td', { class: 'nowrap' }, t.status === 'running' ? badge('运行中', 'info') : t.status === 'done' ? badge('成功', 'ok') : badge('失败', 'danger')),
-              h('td', { class: 'actions' }, button('查看', { small: true, onclick: async () => {
-                try {
-                  const full = await api('GET', '/tasks/' + encodeURIComponent(t.id));
-                  openDialog({ title: t.kind === 'exec' ? '命令结果' : '升级结果', wide: true, body: [h('pre', { class: 'term' }, '$ ' + full.command), taskResult(full, n)] });
-                } catch (e) {
-                  fail(e);
-                }
-              } }))))) : stateBox('inbox', '还没有执行过命令', null));
+          const st = (t) => (t.status === 'running' ? badge('运行中', 'info') : t.status === 'done' ? badge('成功', 'ok') : badge('失败', 'danger'));
+          const open = (t) => async () => {
+            try {
+              const full = await api('GET', '/tasks/' + encodeURIComponent(t.id));
+              openDialog({ title: t.kind === 'exec' ? '命令结果' : '升级结果', wide: true, body: [h('pre', { class: 'term' }, '$ ' + full.command), taskResult(full, n)] });
+            } catch (e) {
+              fail(e);
+            }
+          };
+          fillList(box, head, list.length
+            ? dataList([{ label: '时间' }, { label: '类型' }, { label: '内容' }, { label: '结果' }, { label: '', cls: 'actions' }], list,
+              (t) => [h('td', { class: 'nowrap' }, timeEl(t.createdAt)), h('td', { class: 'nowrap' }, t.kind === 'exec' ? '命令' : '升级'),
+                h('td', null, h('code', { class: 'clip' }, t.command)), h('td', { class: 'nowrap' }, st(t)),
+                h('td', { class: 'actions' }, button('查看', { small: true, onclick: open(t) }))],
+              (t) => ({
+                title: h('code', { class: 't' }, t.command),
+                meta: [t.kind === 'exec' ? '命令' : '升级', timeEl(t.createdAt)],
+                trail: [st(t), icon('chevron', 16)],
+                onclick: open(t),
+              }))
+            : stateBox('inbox', '还没有执行过命令', null));
         } catch (e) {
-          hist.replaceChildren(errorBox(e));
+          fillList(box, head, errorBox(e));
         }
       };
+      const head = h('div', { class: 'card-head' }, h('h2', null, '历史'),
+        h('span', null, disabled ? '安装时加了 --no-exec，已关闭远程命令' : '以 root 执行，需要确认密码，写入审计日志'),
+        h('div', { class: 'head-btns' },
+          iconButton('refresh', '刷新', loadHist),
+          button('执行命令', { kind: 'primary', small: true, icon: 'terminal', disabled: disabled || n.status !== 'online', onclick: () => execDialog([n], n.id) })));
+      box.append(head, loadingBox());
       loadHist();
-      const disabled = n.info && n.info.execEnabled === false;
-      return h('div', null,
-        h('div', { class: 'card mb' }, h('div', { class: 'card-body row-between' },
-          h('div', null, h('div', { class: 'setting-title' }, '以 root 执行命令'),
-            h('div', { class: 'setting-desc' }, disabled ? '这台节点安装时加了 --no-exec，已关闭远程命令。' : '需要重新输入密码确认身份，命令全文写入审计日志。')),
-          button('执行命令', { kind: 'primary', icon: 'terminal', disabled: disabled || n.status !== 'online', onclick: () => execDialog([n], n.id) }))),
-        h('div', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', null, '历史'), button('刷新', { small: true, icon: 'refresh', onclick: loadHist })), hist));
+      return box;
     }
 
     async function resetToken(btn, confirmFirst) {
@@ -1671,8 +1862,11 @@
       });
     }
 
-    // officialCard 是"官方节点"设置：是否下发给用户、开放给哪些角色、给用户看的说明。
-    function officialCard() {
+    // 设置：基本信息和官方节点是一张表单、一个保存按钮；维护操作是一组带说明的按钮
+    function tabSettings() {
+      const name = input({ value: n.name, maxlength: 40 });
+      const addr = input({ value: n.publicAddr, placeholder: n.lastIp || 'frp.example.com', maxlength: 253 });
+      const [mirror, mirrorList] = mirrorInput(n.downloadMirror, []);
       const on = h('input', { type: 'checkbox' });
       on.checked = !!n.official;
       const roleBoxes = ROLE_OPTIONS.map(([v, label]) => {
@@ -1682,55 +1876,28 @@
       });
       const desc = input({ value: n.description || '', maxlength: 200, placeholder: '例如：东京机房，晚高峰稳定（可选）' });
       const old = n.info && n.info.agentVersion && !n.accessSupported;
+      const roles = () => roleBoxes.map((l) => l.querySelector('input')).filter((c) => c.checked).map((c) => c.value);
       const save = button('保存', {
-        kind: 'primary',
+        kind: 'primary', small: true,
         onclick: () => busy(save, async () => {
-          if (on.checked && !n.official && !(await confirmDialog({ title: '设为官方节点', ok: '开启',
+          const official = { official: on.checked, roles: roles(), description: desc.value };
+          const officialChanged = official.official !== !!n.official || official.description !== (n.description || '') ||
+            official.roles.join() !== ROLE_OPTIONS.map(([v]) => v).filter((v) => (n.roles || []).includes(v)).join();
+          if (official.official && !n.official && !(await confirmDialog({ title: '设为官方节点', ok: '开启',
             message: '开启后，这个节点只接受 MoeFrp 用户用自己的节点凭证登录：直接用 token 连接的 frpc 会被拒绝。节点上的 frps 会重启一次。' }))) return;
           try {
-            await api('PUT', '/nodes/' + encodeURIComponent(id) + '/official', {
-              official: on.checked, roles: roleBoxes.map((l) => l.querySelector('input')).filter((c) => c.checked).map((c) => c.value),
-              description: desc.value,
-            });
-            toast(on.checked ? '已设为官方节点，正在推送到节点' : '已保存');
-            load(true);
-          } catch (e) {
-            fail(e);
-          }
-        }),
-      });
-      return h('section', { class: 'card mb' }, h('div', { class: 'card-head' }, h('h2', null, '官方节点'),
-        h('span', null, '下发给用户，用户在客户端里直接选')), h('div', { class: 'card-body' },
-        old ? h('div', { class: 'callout warn mb' }, icon('alert', 16), h('span', null, '节点上的 agent（' + n.info.agentVersion + '）不支持官方节点，请先在"维护"里升级。')) : null,
-        h('label', { class: 'check' }, on, '下发给用户（官方节点）'),
-        h('div', { class: 'gap' }),
-        field('开放给', h('div', { class: 'checks' }, roleBoxes), '这些角色的用户能用；个别用户可以在"用户 → 管理 → 节点权限"里单独允许或禁止'),
-        h('div', { class: 'gap' }),
-        field('说明', desc, '显示在客户端的节点列表里'),
-        h('p', { class: 'cell-sub' }, '用户用自己的节点凭证登录，frp 的 user 固定为昵称（代理名带昵称前缀，不会互相冲突）；限额在节点页的"限额"里按角色设置。'),
-        h('div', { class: 'row-end' }, save)));
-    }
-
-    function tabSettings() {
-      const name = input({ value: n.name, maxlength: 40 });
-      const addr = input({ value: n.publicAddr, placeholder: n.lastIp || 'frp.example.com', maxlength: 253 });
-      const [mirror, mirrorList] = mirrorInput(n.downloadMirror, []);
-      const save = button('保存', {
-        kind: 'primary',
-        onclick: () => busy(save, async () => {
-          try {
             await api('PATCH', '/nodes/' + encodeURIComponent(id), { name: name.value, publicAddr: addr.value, downloadMirror: mirror.value });
-            toast('已保存');
+            if (officialChanged) await api('PUT', '/nodes/' + encodeURIComponent(id) + '/official', official);
+            toast(officialChanged && official.official ? '已保存，正在推送到节点' : '已保存');
             load(true);
           } catch (e) {
             fail(e);
           }
         }),
       });
-      const setting = (title, desc, control) => h('div', { class: 'setting' },
-        h('div', { class: 'setting-text' }, h('div', { class: 'setting-title' }, title), h('div', { class: 'setting-desc' }, desc)), control);
+
       const online = n.status === 'online';
-      const op = (label, path, msg, opts = {}) => button(label, Object.assign({ small: true, disabled: !online }, opts, {
+      const op = (label, sub, path, msg, opts = {}) => opButton(label, sub, Object.assign({ disabled: !online }, opts, {
         onclick: async (e) => {
           const b = e.currentTarget;
           if (opts.confirm && !(await confirmDialog(opts.confirm))) return;
@@ -1745,8 +1912,8 @@
           });
         },
       }));
-      const uninstall = button('卸载', {
-        small: true, kind: 'danger-ghost',
+      const uninstall = opButton('卸载', '删除节点上的全部文件', {
+        icon: 'trash', danger: true,
         onclick: async (e) => {
           const b = e.currentTarget;
           if (!(await confirmDialog({ title: '卸载节点', danger: true, ok: '卸载',
@@ -1768,8 +1935,8 @@
           });
         },
       });
-      const del = button('删除', {
-        small: true, kind: 'danger-ghost',
+      const del = opButton('只从面板删除', '不卸载节点上的程序', {
+        icon: 'x', danger: true,
         onclick: async (e) => {
           const b = e.currentTarget;
           if (!(await confirmDialog({ title: '只从面板删除', danger: true, ok: '删除',
@@ -1785,24 +1952,27 @@
           });
         },
       });
-      return h('div', null,
-        h('section', { class: 'card mb' }, h('div', { class: 'card-head' }, h('h2', null, '基本信息')),
-          h('div', { class: 'card-body' }, h('div', { class: 'form-grid' },
-            field('名称', name), field('客户端连接地址', addr, '填域名或 IP；留空时用节点上报的 IP')),
-            h('div', { class: 'gap' }),
-            field('下载代理', h('div', null, mirror, mirrorList), '升级 agent 和重新生成安装命令时下载用的地址前缀，留空直连 GitHub。' +
-              '面板改用本地目录提供 agent 时不需要。'),
-            h('div', { class: 'row-end' }, save))),
-        officialCard(),
-        h('section', { class: 'card mb' }, h('div', { class: 'card-head' }, h('h2', null, '维护')), h('div', { class: 'card-body' },
-          setting('重启 frps', '用当前配置重启，客户端会短暂断开', op('重启', '/restart', 'frps 已重启')),
-          setting('升级 agent', n.upgradeTo ? '当前 ' + n.info.agentVersion + '，可升级到 ' + n.upgradeTo + '。升级失败会自动回滚。' : '已是最新版本',
-            op('升级', '/upgrade', '已开始升级，完成后在"命令"页的历史里查看结果', { disabled: !online || !n.upgradeTo, icon: 'upgrade',
-              confirm: { title: '升级 agent', ok: '升级', message: 'agent 会下载新版本并重启，frps 会断开几秒。' } })),
-          setting('重置令牌', '令牌泄露或机器重装时使用，需要在节点上重新安装', button('重置', { small: true, onclick: (e) => resetToken(e.currentTarget, true) })))),
-        h('section', { class: 'card danger-zone' }, h('div', { class: 'card-head' }, h('h2', null, '危险操作')), h('div', { class: 'card-body' },
-          setting('卸载', '停止 frps，删除节点上 agent 的所有文件，并从面板移除', uninstall),
-          setting('只从面板删除', '不卸载节点上的程序', del))));
+
+      return h('div', { class: 'node-grid' },
+        h('section', { class: 'card' },
+          h('div', { class: 'card-head' }, h('h2', null, '节点设置'), h('div', { class: 'head-btns' }, save)),
+          h('div', { class: 'card-body' },
+            h('div', { class: 'form-grid' },
+              field('名称', name), field('客户端连接地址', addr),
+              h('div', { class: 'field span-all' }, h('span', { class: 'field-label' }, '下载代理（升级 agent、生成安装命令时用）'), mirror, mirrorList)),
+            h('div', { class: 'official' },
+              old ? h('div', { class: 'callout warn' }, icon('alert', 16), h('span', null, 'agent ' + n.info.agentVersion + ' 不支持官方节点，请先升级。')) : null,
+              h('label', { class: 'check setting-title' }, on, '官方节点（下发给用户）'),
+              h('div', { class: 'checks' }, h('span', { class: 'muted' }, '开放给'), roleBoxes),
+              field('给用户看的说明', desc, '开启后只接受用户凭证登录，frp 的 user 固定为昵称；限额在节点列表的"限额"里设置')))),
+        h('section', { class: 'card' },
+          h('div', { class: 'card-head' }, h('h2', null, '维护')),
+          h('div', { class: 'card-body' }, h('div', { class: 'ops three' },
+            op('重启 frps', '客户端会短暂断开', '/restart', 'frps 已重启', { icon: 'refresh' }),
+            op('升级 agent', n.upgradeTo ? '可升级到 ' + n.upgradeTo : '已是最新版本', '/upgrade', '已开始升级，结果在"命令"页的历史里',
+              { disabled: !online || !n.upgradeTo, icon: 'upgrade', confirm: { title: '升级 agent', ok: '升级', message: 'agent 会下载新版本并重启，frps 会断开几秒。升级失败会自动回滚。' } }),
+            opButton('重置令牌', '泄露或重装时用', { icon: 'key', onclick: (e) => resetToken(e.currentTarget, true) }),
+            uninstall, del))));
     }
 
     await load();

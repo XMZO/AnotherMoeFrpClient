@@ -57,7 +57,7 @@ async function applyCustom() {
 </script>
 
 <template>
-  <div class="page dotted-bg">
+  <div class="page dotted-bg settings-page">
     <div class="inner">
       <div class="pg-head">
         <div>
@@ -68,7 +68,9 @@ async function applyCustom() {
       <div v-if="s" class="set-grid">
         <section class="card">
           <div class="card-h"><span class="tile-ic"><Icon name="sun" size="s" /></span>外观</div>
-          <div class="set-cols look">
+          <div class="set-cols">
+          <div class="set-row">
+          <div class="set-txt"><b>主题</b><small>“跟随系统”随 Windows 切换</small></div>
           <div class="tiles" role="radiogroup" aria-label="主题" data-testid="settings-theme">
             <button
               v-for="t in themes"
@@ -86,6 +88,7 @@ async function applyCustom() {
               </span>
               {{ t.label }}
             </button>
+          </div>
           </div>
           <div class="set-row">
             <div class="set-txt"><b>图片面板</b><small>侧栏里每分钟换一张图；关闭后不会发出任何图片请求</small></div>
@@ -125,57 +128,50 @@ async function applyCustom() {
         </section>
 
         <section class="card" style="animation-delay: 0.1s">
-          <div class="card-h"><span class="tile-ic"><Icon name="globe" size="s" /></span>网络代理</div>
-          <div class="set-cols">
-          <div class="set-row col">
-          <p class="set-note">
-            <b>应用自己的请求</b>登录、云同步、检查更新和图片面板。“跟随系统”读取 Windows“Internet 选项”里的手动代理（不支持自动配置脚本）。
-          </p>
-          <div class="net-row">
-            <Options
-              :model-value="netMode"
-              :options="[
-                { value: 'system', label: '跟随系统' },
-                { value: 'none', label: '不使用代理' },
-                { value: 'custom', label: '自定义', testid: 'settings-proxy-custom' },
-              ]"
-              label="网络代理"
-              data-testid="settings-network-proxy"
-              @pick="onProxyMode"
-            />
-            <Transition name="collapse">
-              <form v-if="customSelected" class="inp-group" @submit.prevent="applyCustom">
-                <label for="proxy-url" class="sr-only">代理地址</label>
-                <input id="proxy-url" v-model="proxyUrl" class="inp mono" placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080" data-testid="settings-proxy-url" />
-                <button type="submit" class="btn pri sm" style="height: 40px" data-testid="settings-proxy-apply">应用</button>
-              </form>
-            </Transition>
-          </div>
-          </div>
-          <div class="set-row col">
-            <div class="set-txt">
-              <b>frp 隧道连接</b>
-              <small>连接节点时走不走上面的代理。节点设置里单独填了代理的，总是用节点自己的。改了之后重新启动隧道生效</small>
+          <div class="card-h"><span class="tile-ic"><Icon name="globe" size="s" /></span>网络与日志</div>
+          <div class="set-cols three">
+            <div class="set-row col">
+              <div class="set-txt"><b>应用的网络代理</b><small>登录、同步、检查更新、图片面板走它。“跟随系统”读 Internet 选项里的手动代理</small></div>
+              <div class="net-row">
+                <Options
+                  :model-value="netMode"
+                  :options="[
+                    { value: 'system', label: '跟随系统' },
+                    { value: 'none', label: '不使用' },
+                    { value: 'custom', label: '自定义', testid: 'settings-proxy-custom' },
+                  ]"
+                  label="网络代理"
+                  data-testid="settings-network-proxy"
+                  @pick="onProxyMode"
+                />
+                <Transition name="collapse">
+                  <form v-if="customSelected" class="inp-group" @submit.prevent="applyCustom">
+                    <label for="proxy-url" class="sr-only">代理地址</label>
+                    <input id="proxy-url" v-model="proxyUrl" class="inp mono" placeholder="http://127.0.0.1:7890 或 socks5://…" data-testid="settings-proxy-url" />
+                    <button type="submit" class="btn pri sm" style="height: 40px" data-testid="settings-proxy-apply">应用</button>
+                  </form>
+                </Transition>
+              </div>
             </div>
-            <Options
-              :model-value="s.frpProxy === 'app' ? 'app' : 'direct'"
-              :options="[
-                { value: 'direct', label: '直连' },
-                { value: 'app', label: '跟随网络代理', testid: 'settings-frp-proxy-app' },
-              ]"
-              label="frp 隧道连接"
-              data-testid="settings-frp-proxy"
-              @pick="(v: string) => set({ frpProxy: v })"
-            />
-          </div>
-          </div>
-        </section>
-
-        <section class="card" style="animation-delay: 0.15s">
-          <div class="card-h"><span class="tile-ic"><Icon name="terminal" size="s" /></span>日志</div>
-          <div class="set-row first">
-            <div class="set-txt"><b>frp 日志级别</b><small>排查问题时调到 debug，平时 info 就够了</small></div>
-            <Options :model-value="s.logLevel" :options="levels" mono label="frp 日志级别" @pick="(v: string) => set({ logLevel: v })" />
+            <div class="set-row col">
+              <div class="set-txt"><b>frp 隧道连接</b><small>连节点时走不走上面的代理（节点自己填了代理的用节点的），重新启动隧道生效</small></div>
+              <Options
+                :model-value="s.frpProxy === 'app' ? 'app' : 'direct'"
+                :options="[
+                  { value: 'direct', label: '直连' },
+                  { value: 'app', label: '跟随网络代理', testid: 'settings-frp-proxy-app' },
+                ]"
+                label="frp 隧道连接"
+                data-testid="settings-frp-proxy"
+                @pick="(v: string) => set({ frpProxy: v })"
+              />
+            </div>
+            <div class="set-row col">
+              <div class="set-txt"><b>frp 日志级别</b><small>排查问题时调到 debug，平时 info 就够了</small></div>
+              <select class="inp mono log-sel" :value="s.logLevel" aria-label="frp 日志级别" data-testid="settings-log-level" @change="(e: Event) => set({ logLevel: (e.target as HTMLSelectElement).value })">
+                <option v-for="l in levels" :key="l.value" :value="l.value">{{ l.label }}</option>
+              </select>
+            </div>
           </div>
         </section>
       </div>
@@ -196,15 +192,15 @@ async function applyCustom() {
 .set-cols {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 36px;
+  column-gap: 28px;
   align-items: start;
 }
 .set-row {
   display: flex;
   align-items: center;
-  gap: 10px 14px;
-  min-height: 64px;
-  padding: 12px 0;
+  gap: 6px 14px;
+  min-height: 52px;
+  padding: 9px 0;
   border-top: 1.5px dashed var(--line-2);
 }
 /* 卡片标题下面的第一项、两列各自的第一项不要分隔线 */
@@ -231,11 +227,26 @@ async function applyCustom() {
 .set-row.dim .set-txt {
   opacity: 0.55;
 }
-.set-cols.look {
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
-  align-items: center;
+/* 设置页一屏放下：标题区和卡片里的留白收紧 */
+.settings-page {
+  padding-top: 16px;
+  padding-bottom: 16px;
 }
-.set-cols.look > .set-row {
+.settings-page .pg-head {
+  margin-bottom: 12px;
+}
+.set-grid > .card .card-h {
+  padding: 10px 0 2px;
+}
+.log-sel {
+  width: 140px;
+  height: 36px;
+}
+/* 网络与日志：三列 */
+.set-cols.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.set-cols.three > .set-row:nth-child(3) {
   border-top: 0;
 }
 .set-note {
@@ -263,8 +274,15 @@ async function applyCustom() {
 }
 /* 窄了退成一列 */
 @container (max-width: 700px) {
-  .set-cols,
-  .set-cols.look {
+  .set-cols.three {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .set-cols.three > .set-row:nth-child(n + 2) {
+    border-top: 1.5px dashed var(--line-2);
+  }
+}
+@container (max-width: 640px) {
+  .set-cols {
     grid-template-columns: minmax(0, 1fr);
   }
   .set-cols > .set-row:nth-child(2) {
@@ -273,19 +291,19 @@ async function applyCustom() {
 }
 .tiles {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  padding: 4px 0;
+  flex-shrink: 0;
+  grid-template-columns: repeat(3, 78px);
+  gap: 8px;
 }
 .tile {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 8px 8px 10px;
-  border-radius: 16px;
+  gap: 4px;
+  padding: 4px 4px 5px;
+  border-radius: 12px;
   border: 2px solid var(--line-2);
-  font-size: 12.5px;
+  font-size: 11.5px;
   font-weight: 800;
   color: var(--text-2);
   transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s var(--ease-spring);
@@ -303,7 +321,7 @@ async function applyCustom() {
   display: block;
   width: 100%;
   aspect-ratio: 16 / 10;
-  border-radius: 10px;
+  border-radius: 7px;
   overflow: hidden;
   border: 1px solid rgba(120, 100, 180, 0.25);
 }
@@ -326,13 +344,13 @@ async function applyCustom() {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 8px 7px;
+  gap: 3px;
+  padding: 5px 4px;
 }
 .mc i {
   display: block;
-  height: 6px;
-  border-radius: 4px;
+  height: 4px;
+  border-radius: 3px;
 }
 .m-half.l .mr {
   background: #eeeaf9;

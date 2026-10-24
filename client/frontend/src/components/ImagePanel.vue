@@ -202,15 +202,17 @@ function wheel(e: WheelEvent) {
   opacity: 0;
 }
 .viewer-stage {
-  display: grid;
-  place-items: center;
+  position: relative;
   height: min(62vh, 560px);
   overflow: hidden;
   border-radius: 16px;
   background: var(--fill);
 }
-/* 铺满舞台再按比例缩进去：横图竖图都完整显示（max-height 的百分比在网格里算不出来，会被裁掉） */
+/* 绝对定位铺满舞台，再按比例缩进去：横图竖图都完整显示。
+   不能用网格 / 百分比高度：网格的行按图片自己的高度算，height:100% 等于原图高度，会被裁掉 */
 .viewer-stage img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;

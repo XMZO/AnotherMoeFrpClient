@@ -145,6 +145,12 @@ export interface StartupInfo {
     "localDir": string;
 
     /**
+     * 显示用的短写法（%APPDATA%\MoeFrp 这样），完整路径用来悬停和复制
+     */
+    "dataDirShort": string;
+    "localDirShort": string;
+
+    /**
      * 启动时发现的问题，例如缓存解不开被重置
      */
     "warnings": string[] | null;

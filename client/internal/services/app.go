@@ -30,7 +30,10 @@ type StartupInfo struct {
 	Version  VersionInfo `json:"version"`
 	DataDir  string      `json:"dataDir"`
 	LocalDir string      `json:"localDir"`
-	Warnings []string    `json:"warnings"` // 启动时发现的问题，例如缓存解不开被重置
+	// 显示用的短写法（%APPDATA%\MoeFrp 这样），完整路径用来悬停和复制
+	DataDirShort  string   `json:"dataDirShort"`
+	LocalDirShort string   `json:"localDirShort"`
+	Warnings      []string `json:"warnings"` // 启动时发现的问题，例如缓存解不开被重置
 }
 
 // AppService：版本、检查更新、开源许可、打开链接、退出等。
@@ -102,7 +105,8 @@ func (s *AppService) Startup() StartupInfo {
 	if w == nil {
 		w = []string{}
 	}
-	return StartupInfo{Version: s.Version(), DataDir: s.paths.Roaming, LocalDir: s.paths.Local, Warnings: w}
+	return StartupInfo{Version: s.Version(), DataDir: s.paths.Roaming, LocalDir: s.paths.Local,
+		DataDirShort: shortPath(s.paths.Roaming), LocalDirShort: shortPath(s.paths.Local), Warnings: w}
 }
 
 // Ready 由前端挂载完成后调用一次，返回从进程创建到现在的毫秒数（记录启动耗时）。

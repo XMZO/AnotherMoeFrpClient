@@ -97,12 +97,12 @@ async function copy(text: string) {
             <div class="about-cols">
             <div class="kv-row">
               <small>设置和配置缓存</small>
-              <span class="mono" :title="info.dataDir">{{ info.dataDir }}</span>
+              <span class="mono" :title="info.dataDir">{{ info.dataDirShort || info.dataDir }}</span>
               <button type="button" class="icon-btn sm" title="复制路径" aria-label="复制设置和配置缓存的路径" @click="copy(info.dataDir)"><Icon name="copy" size="s" /></button>
             </div>
             <div class="kv-row">
               <small>WebView2 数据和日志</small>
-              <span class="mono" :title="info.localDir">{{ info.localDir }}</span>
+              <span class="mono" :title="info.localDir">{{ info.localDirShort || info.localDir }}</span>
               <button type="button" class="icon-btn sm" title="复制路径" aria-label="复制 WebView2 数据和日志的路径" @click="copy(info.localDir)"><Icon name="copy" size="s" /></button>
             </div>
             </div>
@@ -288,7 +288,7 @@ async function copy(text: string) {
 }
 .kv-row {
   display: grid;
-  grid-template-columns: 132px minmax(0, 1fr) auto;
+  grid-template-columns: max-content minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 10px 0;
@@ -299,11 +299,10 @@ async function copy(text: string) {
   font-weight: 800;
   color: var(--text-3);
 }
+/* 路径用 %APPDATA% 这样的短写法，一般一行放得下；真放不下（自定义了数据目录）就折行显示全，不截断 */
 .kv-row span {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .lic {
   display: flex;

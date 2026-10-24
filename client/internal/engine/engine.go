@@ -346,6 +346,10 @@ func (e *Engine) launchLocked(prep *Prepared) error {
 		ConfigSourceAggregator: source.NewAggregator(cs),
 		UnsafeFeatures:         prep.Unsafe,
 	}
+	official := strings.HasPrefix(prep.Node.ID, api.OfficialNodePrefix)
+	if official {
+		e.sink.HideNode(prep.Node)
+	}
 	if id, ok := strings.CutPrefix(prep.Node.ID, api.OfficialNodePrefix); ok && e.opts.Tickets != nil {
 		so.ConnectorCreator = ticketConnector(e.opts.Tickets, id, e.opts.DeviceID)
 	}
@@ -386,9 +390,12 @@ func (e *Engine) launchLocked(prep *Prepared) error {
 	e.notifyProxiesLocked()
 	e.mu.Unlock()
 
+	addr := prep.Node.ServerAddr + ":" + fmt.Sprint(prep.Node.ServerPort)
+	if official {
+		addr = "MoeFrp 托管节点"
+	}
 	e.sink.Appendf("info", "[%s] start profile %q via node %s (%s), %d proxies, %d visitors",
-		r.tag, prep.Profile.Name, nodeLabel(prep.Node), prep.Node.ServerAddr+":"+fmt.Sprint(prep.Node.ServerPort),
-		countEnabledProxies(prep.Profile), countEnabledVisitors(prep.Profile))
+		r.tag, prep.Profile.Name, nodeLabel(prep.Node), addr, countEnabledProxies(prep.Profile), countEnabledVisitors(prep.Profile))
 	go e.runLoop(r, ctx)
 	go e.pollLoop(r)
 	return nil
@@ -609,7 +616,7 @@ func (e *Engine) runLoop(r *run, ctx context.Context) {
 
 // explainLoginFailure 把首次登录失败的 frp 原文转换成错误码（PLAN 6.3.4，坑 8）。
 func (e *Engine) explainLoginFailure(node model.Node, err error) *apierr.Error {
-	msg := err.Error()
+	msg := e.sink.Conceal(err.Error())
 	if m := reLoginFailed.FindStringSubmatch(msg); m != nil {
 		msg = m[1]
 	}
@@ -619,7 +626,7 @@ func (e *Engine) explainLoginFailure(node model.Node, err error) *apierr.Error {
 	if ae := ticketFailure(msg); ae != nil {
 		return ae
 	}
-	return classifyFailure(node, msg, Probe(context.Background(), node, e.opts.ProbeTimeout))
+	return classifyFailure(node, msg, e.sink.ConcealPing(Probe(context.Background(), node, e.opts.ProbeTimeout)))
 }
 
 // classifyFailure 根据 TCP 探测结果解释登录或重连失败。
@@ -688,7 +695,7 @@ func (e *Engine) onLog(l LogLine) {
 
 // probeReconnect 在重连失败时探测节点，给出更具体的原因。
 func (e *Engine) probeReconnect(r *run, node model.Node, msg string) {
-	pr := Probe(context.Background(), node, e.opts.ProbeTimeout)
+	pr := e.sink.ConcealPing(Probe(context.Background(), node, e.opts.ProbeTimeout))
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	r.probing = false

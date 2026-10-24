@@ -36,6 +36,8 @@ type LogSink struct {
 	subMu sync.RWMutex
 	subs  map[int]func(LogLine)
 	subID int
+
+	hide concealer // 官方节点的地址换成节点名，见 conceal.go
 }
 
 func NewLogSink(max int) *LogSink {
@@ -79,6 +81,7 @@ func (s *LogSink) Appendf(level, format string, args ...any) {
 }
 
 func (s *LogSink) storeLocked(text, level string) LogLine {
+	text = s.hide.apply(text)
 	s.seq++
 	line := LogLine{Seq: s.seq, Level: level, Text: text}
 	s.lines[s.next] = line

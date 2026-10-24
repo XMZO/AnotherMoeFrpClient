@@ -179,7 +179,9 @@ func (c *TunnelControl) SetOfficial(list []api.OfficialNode) {
 	nodes := make([]model.Node, 0, len(list))
 	ids := make([]string, 0, len(list))
 	for _, o := range list {
-		nodes = append(nodes, o.ToNode())
+		n := o.ToNode()
+		t.sink.HideNode(n) // 日志、错误、测速结果里不出现官方节点的地址
+		nodes = append(nodes, n)
 		ids = append(ids, o.ID)
 	}
 	t.mu.Lock()
@@ -276,7 +278,11 @@ func (t *TunnelService) PingNodes(profileID string) ([]engine.PingResult, error)
 		}
 		t.mu.Unlock()
 	}
-	return engine.PingNodes(context.Background(), nodes, engine.DefaultProbeTimeout), nil
+	res := engine.PingNodes(context.Background(), nodes, engine.DefaultProbeTimeout)
+	for i := range res {
+		res[i] = t.sink.ConcealPing(res[i]) // 官方节点不暴露地址
+	}
+	return res, nil
 }
 
 // PingNode 测一个还没保存的节点（编辑节点时的"测试连接"）。

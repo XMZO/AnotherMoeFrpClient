@@ -514,10 +514,19 @@ func main() {
 		diag("app.Run error: %v", err)
 		log.Printf("app.Run: %v", err)
 		stopEngine("run error")
-		os.Exit(1)
+		exitProcess(1)
 	}
 	stopEngine("run returned")
 	diag("app.Run returned")
+	exitProcess(0)
+}
+
+// exitProcess 结束进程：清理都做完以后直接 TerminateProcess，不走 ExitProcess（main 返回、os.Exit 走的都是它）。
+// ExitProcess 会让 WebView2 等 DLL 在退出时注销窗口类、回调 Go 写的窗口过程，而 Go 运行时这时已经在退出，
+// 会报 "exitsyscall: syscall frame is no longer valid" 崩溃，主线程卡在退出里，窗口"未响应"。
+func exitProcess(code int) {
+	_ = windows.TerminateProcess(windows.CurrentProcess(), uint32(code))
+	os.Exit(code) // TerminateProcess 失败时兜底
 }
 
 // setupTray：显示主界面、当前状态、启动/停止上次的配置、退出（PLAN 6.8）。

@@ -11,7 +11,7 @@ import { Events, VnetService } from '../api'
 import { useAccountStore } from '../stores/account'
 import { describeError, toAppError } from '../errors'
 import mascot from '../assets/mascot.png'
-import { joinVoice, leaveVoice, setDeaf, setInput, setMic, setOutput, voice } from '../voice'
+import { joinVoice, leaveVoice, peerVolume, setDeaf, setInput, setMic, setOutput, setPeerVolume, setVolume, voice } from '../voice'
 
 // 联机房间：和朋友组成虚拟局域网（客户端 internal/vnet，面板 shared/api/vnet.go，docs/vnet.md）。
 // 进页面先把关：没登录 → 登录 / 游客加入 / 返回；没有管理员权限 → 以管理员身份重启（装驱动）/ 返回；
@@ -252,6 +252,19 @@ watch(
 const inputOptions = computed(() => [{ value: '', label: '跟随系统默认' }, ...voice.inputs.map((d) => ({ value: d.id, label: d.label }))])
 const outputOptions = computed(() => [{ value: '', label: '跟随系统默认' }, ...voice.outputs.map((d) => ({ value: d.id, label: d.label }))])
 
+// 单独调某个人的音量：点成员前面的麦克风图标，弹出一个小滑块（挂在 body 上，不被成员列表的滚动框裁掉）
+const volPop = ref<{ slot: number; x: number; y: number } | null>(null)
+function openVol(ev: MouseEvent, slot: number) {
+  const r = (ev.currentTarget as HTMLElement).getBoundingClientRect()
+  volPop.value = volPop.value?.slot === slot ? null : { slot, x: Math.max(8, Math.min(r.left - 8, window.innerWidth - 236)), y: r.bottom + 6 }
+}
+function closeVol(ev: MouseEvent) {
+  if (volPop.value && !(ev.target as HTMLElement).closest('.vol-pop, .rl-pv')) volPop.value = null
+}
+onMounted(() => document.addEventListener('mousedown', closeVol))
+onBeforeUnmount(() => document.removeEventListener('mousedown', closeVol))
+const volName = computed(() => state.value.peers.find((p) => p.slot === volPop.value?.slot)?.nickname ?? '')
+
 // 语音：房主禁言 / 解除禁言某个座位
 const isMuted = (slot: number) => (state.value.settings.muted ?? []).includes(slot)
 const voiceCount = computed(() => Object.keys(voice.members).length + 1)
@@ -416,6 +429,10 @@ const login = () => account.openAuth('login')
             <span class="rl-vic" :class="{ talk: voice.speaking[voice.self] }"><Icon name="headset" size="s" /></span>
             <label class="rl-dev" title="麦克风"><Icon name="mic" size="xs" /><Select :model-value="voice.inputId" :options="inputOptions" @change="setInput" /></label>
             <label class="rl-dev" title="扬声器"><Icon name="headset" size="xs" /><Select :model-value="voice.outputId" :options="outputOptions" @change="setOutput" /></label>
+            <label class="rl-vol" :title="`总音量 ${voice.volume}%`">
+              <input type="range" min="0" max="100" step="5" :value="voice.volume" aria-label="总音量" @input="setVolume(Number(($event.target as HTMLInputElement).value))" />
+              <span class="mono">{{ voice.volume }}%</span>
+            </label>
             <template v-if="!voice.joined">
               <span class="rl-vt">{{ voice.noVoice ? '房主关闭了语音' : '语音 · 自动降噪' }}</span>
               <button type="button" class="btn pri sm" :disabled="voice.noVoice || voice.joining" data-testid="voice-join" @click="startVoice">
@@ -439,14 +456,16 @@ const login = () => account.openAuth('login')
           </div>
           <div class="rl-peers">
             <div v-for="p in state.peers" :key="p.slot" class="rl-peer">
-              <Icon
+              <button
                 v-if="voice.joined && voice.members[p.slot]"
-                :name="voice.members[p.slot].mic && !isMuted(p.slot) ? 'mic' : 'micOff'"
-                size="xs"
+                type="button"
                 class="rl-pv"
-                :class="{ talk: voice.speaking[p.slot] }"
-                :title="isMuted(p.slot) ? '被禁言' : '在语音里'"
-              />
+                :class="{ talk: voice.speaking[p.slot], low: peerVolume(p.slot) < 100 }"
+                :title="`${isMuted(p.slot) ? '被禁言' : '在语音里'} · 音量 ${peerVolume(p.slot)}%（点击调节）`"
+                @click="openVol($event, p.slot)"
+              >
+                <Icon :name="voice.members[p.slot].mic && !isMuted(p.slot) ? 'mic' : 'micOff'" size="xs" />
+              </button>
               <b :title="p.nickname">{{ p.nickname }}</b>
               <button type="button" class="mono copyable peerip" title="复制" @click="copy(p.ip, p.nickname + ' 的虚拟 IP')">{{ p.ip }}<Icon name="copy" size="xs" /></button>
               <span v-if="p.mode !== 'offline'" class="rl-rtt mono" :class="rttClass(p.rtt)" title="到他的延迟（往返）">{{ p.rtt ? p.rtt + ' ms' : '— ms' }}</span>
@@ -523,6 +542,17 @@ const login = () => account.openAuth('login')
         <button type="button" class="btn pri sm" :disabled="busy === 'modal'" data-testid="room-submit" @click="submitModal">{{ modal.mode === 'create' ? '创建' : '加入' }}</button>
       </template>
     </Modal>
+
+    <Teleport to="body">
+      <div v-if="volPop" class="vol-pop" :style="{ left: volPop.x + 'px', top: volPop.y + 'px' }" role="dialog" :aria-label="`${volName} 的音量`">
+        <div class="vol-pop-h">
+          <b :title="volName">{{ volName }}</b>
+          <span class="mono">{{ peerVolume(volPop.slot) }}%</span>
+        </div>
+        <input type="range" min="0" max="100" step="5" :value="peerVolume(volPop.slot)" aria-label="音量" @input="setPeerVolume(volPop.slot, Number(($event.target as HTMLInputElement).value))" />
+        <button type="button" class="vol-pop-reset" @click="setPeerVolume(volPop.slot, 100)">恢复 100%</button>
+      </div>
+    </Teleport>
 
     <Modal v-model:show="setDlg.show" title="房间设置" icon="settings" :width="440">
       <div class="fld" style="margin-bottom: 12px">
@@ -732,8 +762,76 @@ const login = () => account.openAuth('login')
 }
 .rl-pv {
   flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   color: var(--ok-text);
+}
+.rl-pv:hover {
+  background: var(--ok-soft);
+}
+.rl-pv.low {
+  color: var(--warn-text);
+}
+.rl-vol {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-3);
+}
+.rl-vol input,
+.vol-pop input {
+  width: 90px;
+  accent-color: var(--pri);
+}
+.rl-vol span {
+  width: 3.2em;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.vol-pop {
+  position: fixed;
+  z-index: 1200;
+  width: 220px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--raised);
+  border: 1.5px solid var(--line-2);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.vol-pop input {
+  width: 100%;
+}
+.vol-pop-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.vol-pop-h b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vol-pop-h span {
+  font-weight: 700;
+  color: var(--text-3);
+}
+.vol-pop-reset {
+  align-self: flex-end;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+.vol-pop-reset:hover {
+  color: var(--pri-text);
 }
 .rc-kick.on {
   color: var(--bad-text);
@@ -742,7 +840,7 @@ const login = () => account.openAuth('login')
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 200px;
+  width: 180px;
   min-width: 0;
   color: var(--text-3);
 }

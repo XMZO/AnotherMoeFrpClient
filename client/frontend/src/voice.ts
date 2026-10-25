@@ -50,7 +50,17 @@ export const voice = reactive({
   outputs: [] as { id: string; label: string }[],
   inputId: load('moefrp.voice.in'),
   outputId: load('moefrp.voice.out'),
+  // 音量（0–100）：总音量，和每个人单独的音量（按 房间:座位号 记在本机）
+  volume: num(load('moefrp.voice.vol'), 100),
+  peerVol: {} as Record<number, number>,
 })
+
+function num(v: string, def: number): number {
+  const n = Number(v)
+  return v !== '' && Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : def
+}
+const peerVolKey = (slot: number) => `moefrp.voice.vol.${room}:${slot}`
+export const peerVolume = (slot: number) => voice.peerVol[slot] ?? num(load(peerVolKey(slot)), 100)
 
 function load(k: string): string {
   try {
@@ -108,7 +118,23 @@ function applyLocal() {
 }
 function applyRemote(slot: number) {
   const p = peers.get(slot)
-  if (p?.audio) p.audio.muted = voice.deaf || voice.muted.includes(slot)
+  if (!p?.audio) return
+  p.audio.muted = voice.deaf || voice.muted.includes(slot)
+  p.audio.volume = (voice.volume / 100) * (peerVolume(slot) / 100)
+}
+
+// 总音量
+export function setVolume(v: number) {
+  voice.volume = num(String(v), 100)
+  store('moefrp.voice.vol', String(voice.volume))
+  for (const s of peers.keys()) applyRemote(s)
+}
+
+// 单独调某个人的音量
+export function setPeerVolume(slot: number, v: number) {
+  voice.peerVol[slot] = num(String(v), 100)
+  store(peerVolKey(slot), String(voice.peerVol[slot]))
+  applyRemote(slot)
 }
 
 // 只留虚拟网（10.241.0.x）和 mDNS（.local）的候选地址
@@ -366,6 +392,7 @@ function onState(st: VnetLite) {
   if (st.room !== room) {
     leaveVoice()
     room = st.room
+    voice.peerVol = {} // 换了房间：座位号对应的人不一样了
   }
   voice.self = st.self
   const was = { noVoice: voice.noVoice, muted: voice.muted.join() }

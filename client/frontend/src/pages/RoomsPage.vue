@@ -308,6 +308,11 @@ const login = () => account.openAuth('login')
               <small>我的虚拟 IP</small>
               <button type="button" class="mono copyable" title="复制" @click="copy(state.ip, '虚拟 IP')">{{ state.ip }}<Icon name="copy" size="xs" /></button>
             </div>
+            <div v-if="active" class="rl-ip">
+              <small>邀请码（发给朋友）</small>
+              <button type="button" class="mono copyable code" title="复制邀请码" @click="copy(fmtCode(active.code), '邀请码')">{{ fmtCode(active.code) }}<Icon name="copy" size="xs" /></button>
+            </div>
+            <button v-if="isOwner(active)" type="button" class="btn soft sm" @click="openSettings(active!)"><Icon name="settings" size="s" />房间设置</button>
             <button type="button" class="btn ghost sm" :disabled="busy === 'disc'" @click="disconnect"><Icon name="stop" size="s" />断开</button>
           </div>
           <div class="rl-relay">
@@ -337,7 +342,12 @@ const login = () => account.openAuth('login')
                 <b>{{ r.name }}</b>
                 <small>房主 {{ r.ownerName }} · {{ r.members.filter((m) => m.online).length }}/{{ r.members.length }} 人在线{{ r.allowGuests ? ' · 允许游客' : '' }}</small>
               </div>
-              <button type="button" class="mono copyable code" title="复制邀请码" @click="copy(fmtCode(r.code), '邀请码')">{{ fmtCode(r.code) }}<Icon name="copy" size="xs" /></button>
+              <div class="rc-acts">
+                <button type="button" class="mono copyable code" title="复制邀请码，发给朋友" @click="copy(fmtCode(r.code), '邀请码')">
+                  <Icon name="link" size="xs" />{{ fmtCode(r.code) }}<Icon name="copy" size="xs" />
+                </button>
+                <button v-if="isOwner(r)" type="button" class="btn soft xs" title="允许游客、默认中继" @click="openSettings(r)"><Icon name="settings" size="xs" />设置</button>
+              </div>
             </div>
             <div class="rc-members">
               <span v-for="m in r.members" :key="m.userId" class="rc-m" :class="{ on: m.online }" :title="m.ip">
@@ -352,7 +362,6 @@ const login = () => account.openAuth('login')
               <button v-else type="button" class="btn pri xs" :disabled="busy === 'go-' + r.id" :data-testid="`room-go-${r.name}`" @click="enter(r)">
                 <Icon :name="busy === 'go-' + r.id ? 'refresh' : 'play'" size="xs" :class="{ spin: busy === 'go-' + r.id }" />进入
               </button>
-              <button v-if="isOwner(r)" type="button" class="btn quiet xs" @click="openSettings(r)"><Icon name="settings" size="xs" />设置</button>
               <span class="grow" />
               <button type="button" class="btn quiet xs danger" :disabled="busy === 'leave-' + r.id" @click="leave(r)">{{ isOwner(r) ? '解散' : '离开' }}</button>
             </div>
@@ -543,6 +552,12 @@ const login = () => account.openAuth('login')
   font-size: 12px;
   color: var(--text-3);
   font-weight: 600;
+}
+.rc-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
 }
 .copyable.code {
   padding: 3px 8px;

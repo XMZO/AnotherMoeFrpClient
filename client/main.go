@@ -305,7 +305,7 @@ func main() {
 	}
 	var newWindow func(visible bool) *application.WebviewWindow
 	stopEngine := func(why string) {
-		vnetSvc.Disconnect() // 关掉虚拟网卡
+		vnetSvc.Shutdown() // 关掉虚拟网卡，清掉 wintun 的回调（否则退出时可能卡死）
 		stopOnce.Do(func() {
 			t0 := time.Now()
 			err := eng.Shutdown(quitGrace, quitWait)

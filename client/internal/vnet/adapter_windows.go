@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 	"golang.zx2c4.com/wintun"
 	"golang.zx2c4.com/wireguard/tun"
 
@@ -51,11 +52,19 @@ func run(name string, args ...string) error {
 	return nil
 }
 
-// DriverInstalled 判断 Wintun 驱动装好了没有（装好后系统里有在运行的驱动版本）。
+// DriverInstalled 判断 Wintun 驱动装好了没有：看注册表里有没有 wintun 驱动服务。
+// 不用 wintun.RunningVersion：那会加载 wintun.dll（只是打开联机页也加载），没必要。
 func DriverInstalled() bool {
-	_, err := wintun.RunningVersion()
-	return err == nil
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Services\wintun`, registry.QUERY_VALUE)
+	if err != nil {
+		return false
+	}
+	_ = k.Close()
+	return true
 }
+
+// Shutdown 在程序退出前调用：清掉 wintun 的日志回调（见 wintun.DisableLogger）。
+func Shutdown() { wintun.DisableLogger() }
 
 // InstallDriver 装 Wintun 驱动：建一块虚拟网卡再关掉（第一次建网卡时驱动自动装好）。要管理员权限。
 func InstallDriver() error {

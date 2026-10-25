@@ -14,3 +14,6 @@ func DriverInstalled() bool { return false }
 
 // InstallDriver：只支持 Windows。
 func InstallDriver() error { return errors.New("联机房间只支持 Windows") }
+
+// Shutdown：只支持 Windows。
+func Shutdown() {}

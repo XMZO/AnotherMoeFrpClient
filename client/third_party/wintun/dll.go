@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"unsafe"
 
 	"golang.zx2c4.com/wireguard/windows/driver/memmod"
@@ -103,3 +104,14 @@ func (p *lazyProc) nameToAddr() (uintptr, error) {
 
 // Version 返回内置 wintun.dll 的版本（从内存加载拿不到版本资源，写死）。
 func Version() string { return "0.14.1 (embedded)" }
+
+// DisableLogger 清掉 wintun 的日志回调（MoeFrp 加的）。程序退出前调用：ExitProcess 过程中 wintun 再回调进 Go
+// 会让 Go 运行时崩溃（主线程卡在退出里，窗口"未响应"）。没加载过 wintun.dll 时什么都不做。
+func DisableLogger() {
+	if atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&modwintun.module))) == nil {
+		return
+	}
+	if p := modwintun.NewProc("WintunSetLogger"); p.Find() == nil {
+		syscall.SyscallN(p.Addr(), 0)
+	}
+}

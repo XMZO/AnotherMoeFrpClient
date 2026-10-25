@@ -256,6 +256,13 @@ func (s *VnetService) Connect(roomID string) error {
 	return nil
 }
 
+// Shutdown 在程序退出时调用：断开虚拟网，清掉 wintun 的回调。
+func (s *VnetService) Shutdown() {
+	s.Disconnect()
+	s.dropGuest("")
+	vnet.Shutdown()
+}
+
 // Disconnect 离开虚拟局域网（不退出房间）。
 func (s *VnetService) Disconnect() {
 	room := s.eng.Room()

@@ -146,6 +146,13 @@ export function SetRelay(pref: string): $CancellablePromise<void> {
 }
 
 /**
+ * Shutdown 在程序退出时调用：断开虚拟网，清掉 wintun 的回调。
+ */
+export function Shutdown(): $CancellablePromise<void> {
+    return $Call.ByID(2178993983);
+}
+
+/**
  * State 返回当前联机状态。
  */
 export function State(): $CancellablePromise<$models.VnetState> {

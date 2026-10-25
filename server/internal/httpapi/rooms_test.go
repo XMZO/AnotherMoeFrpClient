@@ -22,14 +22,16 @@ type vnetConn struct {
 	pkts chan []byte
 }
 
-func (n *nodeEnv) dialVnet(token string) *vnetConn {
+func (n *nodeEnv) dialVnet(token string) *vnetConn { return n.dialVnetAt(api.RouteClientLive, token) }
+
+func (n *nodeEnv) dialVnetAt(route, token string) *vnetConn {
 	n.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	h := http.Header{}
 	h.Set(api.HeaderAuthorization, api.BearerPrefix+token)
 	h.Set(api.HeaderClientVersion, "3.1.0")
-	ws, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(n.http.URL, "http")+api.RouteClientLive, &websocket.DialOptions{HTTPHeader: h})
+	ws, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(n.http.URL, "http")+route, &websocket.DialOptions{HTTPHeader: h})
 	if err != nil {
 		n.t.Fatal(err)
 	}
@@ -145,6 +147,42 @@ func TestRooms(t *testing.T) {
 	n.do(req{method: "POST", path: strings.Replace(api.RouteRoomKick, "{id}", room.ID, 1), token: ta, body: api.KickRoomRequest{UserID: rs.Rooms[0].Members[1].UserID}}).expect(http.StatusNoContent)
 	b.expect(api.VnetClosed, nil)
 	a.expect(api.VnetPeers, func(m api.LiveVnetBody) bool { return len(m.Peers) == 1 })
+
+	// 游客：房主没打开时进不来；打开后用邀请码 + 昵称进来，走游客的实时通道进虚拟网
+	n.do(req{method: "POST", path: api.RouteRoomGuest, body: api.GuestJoinRequest{Code: room.Code, Nickname: "路人"}}).apiErr(apierr.Forbidden)
+	n.do(req{method: "PATCH", path: strings.Replace(api.RouteRoom, "{id}", room.ID, 1), token: tb, body: api.RoomSettings{AllowGuests: true}}).apiErr(apierr.Forbidden)
+	n.do(req{method: "PATCH", path: strings.Replace(api.RouteRoom, "{id}", room.ID, 1), token: ta, body: api.RoomSettings{AllowGuests: true}}).expect(http.StatusNoContent)
+	var gj api.GuestJoinResponse
+	n.do(req{method: "POST", path: api.RouteRoomGuest, body: api.GuestJoinRequest{Code: room.Code, Nickname: "路人"}}).expect(http.StatusOK).decode(&gj)
+	if gj.Token == "" || !gj.Room.AllowGuests {
+		t.Fatalf("游客：%+v", gj)
+	}
+	g := n.dialVnetAt(api.RouteRoomGuestLive, gj.Token)
+	g.send(api.LiveVnetBody{Op: api.VnetJoin, Room: room.ID, Key: "kg"})
+	var gslot int
+	m := g.expect(api.VnetPeers, func(m api.LiveVnetBody) bool { return m.Self > 0 })
+	gslot = m.Self
+	a.expect(api.VnetPeers, func(m api.LiveVnetBody) bool {
+		for _, p := range m.Peers {
+			if p.Slot == gslot && p.Key == "kg" && strings.Contains(p.Nickname, "游客") {
+				return true
+			}
+		}
+		return false
+	})
+	// 房主踢游客：游客收到 closed，令牌作废
+	n.do(req{method: "POST", path: strings.Replace(api.RouteRoomKick, "{id}", room.ID, 1), token: ta, body: api.KickRoomRequest{UserID: api.GuestPrefix + "x"}}).apiErr(apierr.NotFound)
+	var gr api.Room
+	n.do(req{method: "GET", path: api.RouteRoomGuest, token: gj.Token}).expect(http.StatusOK).decode(&gr)
+	var guestID string
+	for _, mm := range gr.Members {
+		if mm.Slot == gslot {
+			guestID = mm.UserID
+		}
+	}
+	n.do(req{method: "POST", path: strings.Replace(api.RouteRoomKick, "{id}", room.ID, 1), token: ta, body: api.KickRoomRequest{UserID: guestID}}).expect(http.StatusNoContent)
+	g.expect(api.VnetClosed, nil)
+	n.do(req{method: "GET", path: api.RouteRoomGuest, token: gj.Token}).apiErr(apierr.Unauthorized)
 
 	// 房主离开等于解散
 	n.do(req{method: "POST", path: strings.Replace(api.RouteRoomLeave, "{id}", room.ID, 1), token: ta}).expect(http.StatusNoContent)

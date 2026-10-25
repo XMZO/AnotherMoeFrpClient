@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+	"golang.zx2c4.com/wintun"
+	"golang.zx2c4.com/wireguard/tun"
 
 	"moefrp/shared/api"
 )
@@ -47,4 +49,19 @@ func run(name string, args ...string) error {
 		return fmt.Errorf("%s %s: %v %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// DriverInstalled 判断 Wintun 驱动装好了没有（装好后系统里有在运行的驱动版本）。
+func DriverInstalled() bool {
+	_, err := wintun.RunningVersion()
+	return err == nil
+}
+
+// InstallDriver 装 Wintun 驱动：建一块虚拟网卡再关掉（第一次建网卡时驱动自动装好）。要管理员权限。
+func InstallDriver() error {
+	t, err := tun.CreateTUN(AdapterName, mtu)
+	if err != nil {
+		return fmt.Errorf("安装虚拟网卡驱动失败：%w", err)
+	}
+	return t.Close()
 }

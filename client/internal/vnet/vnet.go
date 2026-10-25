@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,7 +34,8 @@ import (
 // Transport 是到面板的实时通道：发打洞信息、中继数据包。
 type Transport interface {
 	Signal(room string, to int, data string) error
-	Relay(to int, payload []byte) error
+	Relay(to int, payload []byte) error       // 经面板中继
+	SetRelay(room string, relay string) error // 告诉面板我的收件中继（节点 ID，空表示面板）
 }
 
 // 连接方式。
@@ -75,6 +77,7 @@ type Engine struct {
 	peers map[int]*peer
 	done  chan struct{}
 	sigq  chan outSignal
+	rs    relayState
 }
 
 type peer struct {
@@ -82,6 +85,7 @@ type peer struct {
 	nickname string
 	ip       string
 	key      string // base64 公钥，空表示不在线
+	relay    string // 他的收件中继（节点 ID），空表示面板
 	ice      *iceSession
 	direct   *directConn
 }
@@ -148,6 +152,7 @@ func (e *Engine) closeLocked() {
 		}
 	}
 	e.peers = map[int]*peer{}
+	e.closeRelaysLocked()
 	if e.done != nil {
 		close(e.done)
 		e.done, e.sigq = nil, nil
@@ -181,13 +186,15 @@ func (e *Engine) PublicKey() string {
 	return e.pub
 }
 
-// SetPeers 按面板推来的成员列表更新：自己的座位（第一次时配上虚拟 IP）、WireGuard peers、打洞。
-func (e *Engine) SetPeers(self int, list []api.VnetPeer) error {
+// SetPeers 按面板推来的成员列表更新：自己的座位（第一次时配上虚拟 IP）、WireGuard peers、打洞、中继。
+func (e *Engine) SetPeers(msg api.LiveVnetBody) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.dev == nil {
 		return nil
 	}
+	self, list := msg.Self, msg.Peers
+	defer e.updateRelaysLocked(msg)
 	if e.self != self {
 		e.self = self
 		if err := configureAdapter(AdapterName, api.VnetIP(self)); err != nil {
@@ -207,7 +214,7 @@ func (e *Engine) SetPeers(self int, list []api.VnetPeer) error {
 			p = &peer{slot: x.Slot}
 			e.peers[x.Slot] = p
 		}
-		p.nickname, p.ip = x.Nickname, x.IP
+		p.nickname, p.ip, p.relay = x.Nickname, x.IP, x.Relay
 		if p.key == x.Key {
 			continue
 		}
@@ -250,10 +257,26 @@ func (e *Engine) SetPeers(self int, list []api.VnetPeer) error {
 	return nil
 }
 
-// State 返回成员和连接方式（包括自己）。
-func (e *Engine) State() (room string, self int, peers []PeerState) {
+// Snapshot 是界面上的状态。
+type Snapshot struct {
+	Room     string           `json:"room"`
+	Self     int              `json:"self"`
+	Peers    []PeerState      `json:"peers"`
+	Relays   []RelayView      `json:"relays"`   // 能用的中继节点（按延迟）
+	Home     string           `json:"home"`     // 我的收件中继（节点 ID，空表示面板）
+	Pref     string           `json:"pref"`     // 我的选择：auto / panel / 节点 ID
+	Settings api.RoomSettings `json:"settings"` // 房间设置（默认中继、是否锁定）
+}
+
+// State 返回成员、连接方式和中继（不含自己）。
+func (e *Engine) State() Snapshot {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	pref := e.rs.pref
+	if pref == "" {
+		pref = RelayAuto
+	}
+	st := Snapshot{Room: e.room, Self: e.self, Peers: []PeerState{}, Relays: e.relayViewsLocked(), Home: e.rs.home, Pref: pref, Settings: e.rs.settings}
 	for _, p := range e.peers {
 		mode := ModeOffline
 		switch {
@@ -265,9 +288,10 @@ func (e *Engine) State() (room string, self int, peers []PeerState) {
 		default:
 			mode = ModeRelay
 		}
-		peers = append(peers, PeerState{Slot: p.slot, Nickname: p.nickname, IP: p.ip, Mode: mode})
+		st.Peers = append(st.Peers, PeerState{Slot: p.slot, Nickname: p.nickname, IP: p.ip, Mode: mode})
 	}
-	return e.room, e.self, peers
+	slices.SortFunc(st.Peers, func(a, b PeerState) int { return a.Slot - b.Slot })
+	return st
 }
 
 // OnPacket 收到面板中继过来的数据包。
@@ -280,12 +304,13 @@ func (e *Engine) OnPacket(from int, payload []byte) {
 	}
 }
 
-// send 把 WireGuard 的数据包送给座位号为 slot 的成员：打通了就直连，否则中继。
+// send 把 WireGuard 的数据包送给座位号为 slot 的成员：打通了就直连，否则送到他的收件中继，再不行走面板。
 func (e *Engine) send(slot int, pkt []byte) error {
 	e.mu.Lock()
 	var d *directConn
+	relay := ""
 	if p := e.peers[slot]; p != nil {
-		d = p.direct
+		d, relay = p.direct, p.relay
 	}
 	e.mu.Unlock()
 	if d != nil {
@@ -298,6 +323,9 @@ func (e *Engine) send(slot int, pkt []byte) error {
 			go e.onChange()
 		}
 		e.mu.Unlock()
+	}
+	if relay != "" && e.relaySend(relay, slot, pkt) {
+		return nil
 	}
 	return e.tr.Relay(slot, pkt)
 }

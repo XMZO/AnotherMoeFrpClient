@@ -11,3 +11,17 @@ export interface PeerState {
     "self": boolean;
     "mode": string;
 }
+
+/**
+ * RelayView 是界面上的一个中继选项。
+ */
+export interface RelayView {
+    "id": string;
+    "name": string;
+    "region"?: string;
+
+    /**
+     * 毫秒，-1 表示连不上，0 表示还没测
+     */
+    "latency": number;
+}

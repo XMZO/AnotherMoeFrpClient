@@ -173,6 +173,17 @@ func ServerConfig(s frpsset.Settings) (*v1.ServerConfig, string, error) {
 
 // Boot 用保存的配置启动 frps：先找本地存储里的结构化配置，没有（或存储锁着）时用旧的 frps.toml。
 // 已经在运行或没有配置时什么都不做。存储稍后解锁时可以再调用一次。
+// CurrentSettings 返回正在用的结构化配置（还是旧 TOML 配置或没有配置时为 nil）。
+func (m *Manager) CurrentSettings() *frpsset.Settings {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.settings == nil {
+		return nil
+	}
+	s := *m.settings
+	return &s
+}
+
 func (m *Manager) Boot() error {
 	m.mu.Lock()
 	running := m.svc != nil

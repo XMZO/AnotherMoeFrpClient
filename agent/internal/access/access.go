@@ -292,6 +292,13 @@ func (s *Store) Enabled() bool {
 	return s.enabled
 }
 
+// TicketKey 返回节点票据密钥（联机中继校验票据用），还没收到准入表时为空。
+func (s *Store) TicketKey() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.key
+}
+
 // Users 返回表里的用户数。
 func (s *Store) Users() int {
 	s.mu.Lock()

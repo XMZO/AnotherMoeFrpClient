@@ -30,6 +30,7 @@ import (
 	"moefrp/agent/internal/selfupdate"
 	"moefrp/agent/internal/sysinfo"
 	"moefrp/agent/internal/vault"
+	"moefrp/agent/internal/vnetrelay"
 	"moefrp/shared/agentproto"
 )
 
@@ -54,6 +55,7 @@ type Agent struct {
 	confirmed atomic.Bool
 
 	probed atomic.Pointer[[]string] // 探测到的出口公网 IPv4、IPv6（见 sysinfo.ProbePublicIPs）
+	relay  *vnetrelay.Server        // 联机房间的中继，端口跟着 frps 配置的 VnetRelayPort
 }
 
 // probeInterval 是重新探测出口公网地址的间隔（动态 IP、换了线路）。
@@ -157,6 +159,10 @@ func Run(ctx context.Context, version string) error {
 		log.Error("frps 启动失败", "err", err)
 	}
 	a.sampler.Sample() // 第一次采样只是为了下次能算出 CPU 占用率
+	a.relay = &vnetrelay.Server{NodeID: cfg.NodeID, Key: acc.TicketKey, Log: log}
+	if s := a.frps.CurrentSettings(); s != nil {
+		a.relay.SetPort(s.VnetRelayPort)
+	}
 	go a.probeLoop(ctx)
 	// 每小时推高本地存储的时间高水位：之后把系统时间往回调就能被发现
 	go func() {
@@ -203,7 +209,7 @@ func (a *Agent) hello() agentproto.Hello {
 		OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Distro: a.static.Distro, Kernel: a.static.Kernel, Hostname: a.static.Hostname, BootTime: a.static.BootTime,
 		ExecEnabled: a.cfg.Exec, AppliedRev: a.frps.AppliedRev(),
-		Features:  []string{agentproto.FeatureAccess, agentproto.FeatureTickets, agentproto.FeatureSettings},
+		Features:  []string{agentproto.FeatureAccess, agentproto.FeatureTickets, agentproto.FeatureSettings, agentproto.FeatureVnetRelay},
 		MachineID: a.machine,
 		PublicIPs: a.publicIPs(),
 	}
@@ -245,6 +251,9 @@ func (a *Agent) handle(ctx context.Context, method string, data json.RawMessage)
 		var res agentproto.ApplyResult
 		if req.Settings != nil {
 			res = a.frps.ApplySettings(req.Rev, *req.Settings)
+			if res.Applied && a.relay != nil {
+				a.relay.SetPort(req.Settings.VnetRelayPort)
+			}
 		} else {
 			res = a.frps.Apply(req.Rev, req.Config) // 旧面板下发的 TOML
 		}

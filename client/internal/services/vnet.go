@@ -29,12 +29,12 @@ type VnetLive interface {
 
 // VnetState 是界面上的联机状态。
 type VnetState struct {
-	Admin bool             `json:"admin"`           // 有管理员权限（没有就不能进房间，界面提示重启为管理员）
-	Room  string           `json:"room"`            // 正在哪个房间（空表示没在）
-	Self  int              `json:"self"`            // 自己的座位号（0 表示还没收到面板的成员列表）
-	IP    string           `json:"ip"`              // 自己的虚拟 IP
-	Peers []vnet.PeerState `json:"peers"`           // 其他成员和连接方式
-	Error string           `json:"error,omitempty"` // 最近一次出错
+	vnet.Snapshot
+	Admin  bool   `json:"admin"`           // 有管理员权限（没有就不能进房间，界面提示重启为管理员）
+	Driver bool   `json:"driver"`          // 虚拟网卡驱动已经装好
+	IP     string `json:"ip"`              // 自己的虚拟 IP
+	Guest  string `json:"guest,omitempty"` // 以游客身份在哪个房间（没登录时）
+	Error  string `json:"error,omitempty"` // 最近一次出错
 }
 
 // VnetService 绑定给前端：联机房间（虚拟局域网）。
@@ -42,11 +42,13 @@ type VnetService struct {
 	api *apiclient.Client
 	eng *vnet.Engine
 
-	mu   sync.Mutex
-	live VnetLive
-	emit Emitter
-	err  string
-	quit func()
+	mu    sync.Mutex
+	live  VnetLive // 登录用户的实时通道
+	emit  Emitter
+	err   string
+	quit  func()
+	guest *guestLive // 游客模式（没登录，用游客令牌）
+	drvOK bool       // 这次运行里装过驱动或建过网卡
 }
 
 // NewVnetService：live 在 main 里建好实时通道后用 SetLive 注入。
@@ -71,6 +73,14 @@ func (t vnetTransport) Signal(room string, to int, data string) error {
 	return l.SendVnet(api.LiveVnetBody{Op: api.VnetSignal, Room: room, To: to, Data: data})
 }
 
+func (t vnetTransport) SetRelay(room, relay string) error {
+	l := t.s.liveConn()
+	if l == nil {
+		return nil // 连上后重新进房间时会再告诉面板
+	}
+	return l.SendVnet(api.LiveVnetBody{Op: api.VnetRelayOp, Room: room, Relay: relay})
+}
+
 func (t vnetTransport) Relay(to int, payload []byte) error {
 	l := t.s.liveConn()
 	if l == nil {
@@ -83,15 +93,102 @@ func (t vnetTransport) Relay(to int, payload []byte) error {
 func (s *VnetService) liveConn() VnetLive {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.guest != nil {
+		return s.guest
+	}
 	return s.live
 }
 
-// Rooms 返回我加入的房间（含成员和谁在线）。
+// Rooms 返回我加入的房间（含成员和谁在线）；游客模式下是游客所在的那一个。
 func (s *VnetService) Rooms() ([]api.Room, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), apiclient.DefaultTimeout)
 	defer cancel()
+	if g := s.guestConn(); g != nil {
+		r, err := s.api.GuestRoom(ctx, g.token)
+		if err != nil {
+			if apierr.CodeOf(err) == apierr.Unauthorized {
+				s.dropGuest("游客身份已失效（离开了房间、被移出或房间已解散）")
+			}
+			return []api.Room{}, apperr.Normalize(err)
+		}
+		return []api.Room{r}, nil
+	}
 	r, err := s.api.Rooms(ctx)
 	return r, apperr.Normalize(err)
+}
+
+// RoomRelays 返回能用的中继节点（房主选默认中继用）。
+func (s *VnetService) RoomRelays() ([]api.VnetRelay, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), apiclient.DefaultTimeout)
+	defer cancel()
+	r, err := s.api.RoomRelays(ctx)
+	return r, apperr.Normalize(err)
+}
+
+// OpenRoomsOnStart：这次是"以管理员身份重启"起来的（带 --open=rooms），界面直接打开联机页。
+func (s *VnetService) OpenRoomsOnStart() bool {
+	for _, a := range os.Args[1:] {
+		if a == "--open=rooms" {
+			return true
+		}
+	}
+	return false
+}
+
+// UpdateRoom 房主改房间设置（允许游客、默认中继、锁定中继）。
+func (s *VnetService) UpdateRoom(id string, st api.RoomSettings) error {
+	ctx, cancel := context.WithTimeout(context.Background(), apiclient.DefaultTimeout)
+	defer cancel()
+	return apperr.Normalize(s.api.UpdateRoom(ctx, id, st))
+}
+
+// SetRelay 选我的收件中继：auto（自动）、panel（面板）或节点 ID。房主锁定时不生效。
+func (s *VnetService) SetRelay(pref string) {
+	s.eng.SetRelayPref(pref)
+	s.changed()
+}
+
+// GuestJoin 没登录时用邀请码 + 昵称以游客身份进房间（房主允许时），之后用 Connect 进虚拟网。
+func (s *VnetService) GuestJoin(code, nickname string) (api.Room, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), apiclient.DefaultTimeout)
+	defer cancel()
+	res, err := s.api.GuestJoin(ctx, code, nickname)
+	if err != nil {
+		return api.Room{}, apperr.Normalize(err)
+	}
+	s.dropGuest("")
+	g := newGuestLive(s, res.Token, res.Room.ID)
+	s.mu.Lock()
+	s.guest = g
+	s.mu.Unlock()
+	go g.run()
+	s.changed()
+	return res.Room, nil
+}
+
+func (s *VnetService) guestConn() *guestLive {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.guest
+}
+
+// dropGuest 退出游客模式（断开虚拟网和游客通道）。why 不为空时记成错误显示。
+func (s *VnetService) dropGuest(why string) {
+	s.mu.Lock()
+	g := s.guest
+	s.guest = nil
+	s.mu.Unlock()
+	if g == nil {
+		return
+	}
+	if s.eng.Room() == g.room {
+		s.eng.Stop()
+	}
+	g.close()
+	if why != "" {
+		s.setErr(why)
+	}
+	s.changed()
 }
 
 // CreateRoom 新建房间（自己是房主）。
@@ -109,8 +206,18 @@ func (s *VnetService) JoinRoom(code string) error {
 	return apperr.Normalize(s.api.JoinRoom(ctx, code))
 }
 
-// LeaveRoom 离开房间（房主离开等于解散）；正在这个房间里的话先断开。
+// LeaveRoom 离开房间（房主离开等于解散）；正在这个房间里的话先断开。游客离开后游客身份作废。
 func (s *VnetService) LeaveRoom(id string) error {
+	if g := s.guestConn(); g != nil && g.room == id {
+		ctx, cancel := context.WithTimeout(context.Background(), apiclient.DefaultTimeout)
+		defer cancel()
+		err := s.api.GuestLeave(ctx, g.token)
+		s.dropGuest("")
+		if apierr.CodeOf(err) == apierr.Unauthorized {
+			err = nil
+		}
+		return apperr.Normalize(err)
+	}
 	if s.eng.Room() == id {
 		s.Disconnect()
 	}
@@ -164,18 +271,34 @@ func (s *VnetService) Disconnect() {
 
 // State 返回当前联机状态。
 func (s *VnetService) State() VnetState {
-	room, self, peers := s.eng.State()
-	st := VnetState{Admin: vnet.IsAdmin(), Room: room, Self: self, Peers: peers}
-	if st.Peers == nil {
-		st.Peers = []vnet.PeerState{}
-	}
-	if self > 0 {
-		st.IP = api.VnetIP(self)
+	st := VnetState{Snapshot: s.eng.State(), Admin: vnet.IsAdmin()}
+	st.Driver = st.Room != "" || vnet.DriverInstalled()
+	if st.Self > 0 {
+		st.IP = api.VnetIP(st.Self)
 	}
 	s.mu.Lock()
 	st.Error = s.err
+	st.Driver = st.Driver || s.drvOK
+	if s.guest != nil {
+		st.Guest = s.guest.room
+	}
 	s.mu.Unlock()
 	return st
+}
+
+// InstallDriver 装虚拟网卡驱动（建一块网卡再关掉；要管理员权限）。进联机页时没装就调用。
+func (s *VnetService) InstallDriver() error {
+	if !vnet.IsAdmin() {
+		return apperr.New(codeNeedAdmin, "need administrator")
+	}
+	if err := vnet.InstallDriver(); err != nil {
+		return apperr.Normalize(err)
+	}
+	s.mu.Lock()
+	s.drvOK = true
+	s.mu.Unlock()
+	s.changed()
+	return nil
 }
 
 // RestartAsAdmin 以管理员身份重新启动程序（弹 UAC），成功后退出当前这个。
@@ -186,7 +309,7 @@ func (s *VnetService) RestartAsAdmin() error {
 	}
 	verb, _ := windows.UTF16PtrFromString("runas")
 	file, _ := windows.UTF16PtrFromString(exe)
-	args, _ := windows.UTF16PtrFromString("--elevated-from=" + strconv.Itoa(os.Getpid()))
+	args, _ := windows.UTF16PtrFromString("--elevated-from=" + strconv.Itoa(os.Getpid()) + " --open=rooms")
 	if err := windows.ShellExecute(0, verb, file, args, nil, windows.SW_SHOWNORMAL); err != nil {
 		return apperr.Wrap(apperr.InvalidArg, err) // 多半是在 UAC 里点了"否"
 	}
@@ -208,7 +331,7 @@ func (s *VnetService) OnLive(b api.LiveVnetBody) {
 	}
 	switch b.Op {
 	case api.VnetPeers:
-		if err := s.eng.SetPeers(b.Self, b.Peers); err != nil {
+		if err := s.eng.SetPeers(b); err != nil {
 			s.setErr(err.Error())
 		}
 		s.changed()
@@ -216,6 +339,10 @@ func (s *VnetService) OnLive(b api.LiveVnetBody) {
 		s.eng.OnSignal(b.From, b.Data)
 	case api.VnetClosed:
 		s.eng.Stop()
+		if g := s.guestConn(); g != nil && g.room == b.Room {
+			s.dropGuest(b.Reason) // 游客被移出或房间解散：游客身份也作废了
+			return
+		}
 		s.setErr(b.Reason)
 		s.changed()
 	}
@@ -224,7 +351,7 @@ func (s *VnetService) OnLive(b api.LiveVnetBody) {
 // OnPacket 收到面板中继过来的数据包。
 func (s *VnetService) OnPacket(from int, payload []byte) { s.eng.OnPacket(from, payload) }
 
-// OnLiveOnline：实时通道重新连上时，正在房间里的话重新进（面板那边的状态在断开时清掉了）。
+// OnLiveOnline：实时通道重新连上时，正在房间里的话重新进（面板那边的状态在断开时清掉了），收件中继也再报一次。
 func (s *VnetService) OnLiveOnline(on bool) {
 	if !on {
 		return
@@ -232,6 +359,9 @@ func (s *VnetService) OnLiveOnline(on bool) {
 	if room := s.eng.Room(); room != "" {
 		if l := s.liveConn(); l != nil {
 			_ = l.SendVnet(api.LiveVnetBody{Op: api.VnetJoin, Room: room, Key: s.eng.PublicKey()})
+			if h := s.eng.State().Home; h != "" {
+				_ = l.SendVnet(api.LiveVnetBody{Op: api.VnetRelayOp, Room: room, Relay: h})
+			}
 		}
 	}
 }

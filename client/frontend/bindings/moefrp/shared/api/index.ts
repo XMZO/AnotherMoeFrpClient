@@ -10,11 +10,13 @@ export type {
     PreviewTarget,
     Room,
     RoomMember,
+    RoomSettings,
     Share,
     SharePreview,
     SubscriptionRef,
     SubscriptionSummary,
     UpdateShareRequest,
     UserInfo,
-    VnetPeer
+    VnetPeer,
+    VnetRelay
 } from "./models.js";

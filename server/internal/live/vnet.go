@@ -12,15 +12,18 @@ import (
 
 // VnetRooms 由面板实现：查成员资格和成员列表。
 type VnetRooms interface {
-	Slot(ctx context.Context, roomID, userID string) (int, error) // 不是成员时返回错误
+	Slot(ctx context.Context, roomID, userID string) (int, error) // 不是成员时返回错误（游客的 userID 是 api.GuestPrefix + 游客 ID）
 	Members(ctx context.Context, roomID string) ([]api.RoomMember, error)
+	// RelayInfo 返回房间设置、能用的中继节点，以及每个座位连各中继的票据（座位号 → 节点 ID → 票据）。
+	RelayInfo(ctx context.Context, roomID string, slots []int) (api.RoomSettings, []api.VnetRelay, map[int]map[string]string)
 }
 
 // vnetState 是一个客户端在虚拟网里的状态，h.mu 保护。
 type vnetState struct {
-	room string
-	slot int
-	key  string
+	room  string
+	slot  int
+	key   string
+	relay string // 收件中继（节点 ID），空表示面板
 }
 
 const relayQueue = 256
@@ -49,6 +52,20 @@ func (h *Hub) onVnet(ctx context.Context, c *Client, b *api.LiveVnetBody) {
 			h.VnetRoomChanged(ctx, old.room)
 		}
 		h.VnetRoomChanged(ctx, b.Room)
+	case api.VnetRelayOp:
+		if len(b.Relay) > 64 {
+			return
+		}
+		h.mu.Lock()
+		me := c.vnet
+		changed := me != nil && me.room == b.Room && me.relay != b.Relay
+		if changed {
+			me.relay = b.Relay
+		}
+		h.mu.Unlock()
+		if changed {
+			h.VnetRoomChanged(ctx, b.Room)
+		}
 	case api.VnetLeave:
 		h.mu.Lock()
 		old := c.vnet
@@ -125,7 +142,7 @@ func (h *Hub) VnetRoomChanged(ctx context.Context, room string) {
 	}
 	h.mu.Lock()
 	var inRoom, gone []*Client
-	keys := map[int]string{}
+	keys, relays := map[int]string{}, map[int]string{}
 	for _, x := range h.clients {
 		if x.vnet == nil || x.vnet.room != room {
 			continue
@@ -137,6 +154,7 @@ func (h *Hub) VnetRoomChanged(ctx context.Context, room string) {
 		}
 		inRoom = append(inRoom, x)
 		keys[x.vnet.slot] = x.vnet.key
+		relays[x.vnet.slot] = x.vnet.relay
 	}
 	selfSlot := map[*Client]int{}
 	for _, x := range inRoom {
@@ -146,10 +164,24 @@ func (h *Hub) VnetRoomChanged(ctx context.Context, room string) {
 
 	peers := make([]api.VnetPeer, 0, len(members))
 	for _, m := range members {
-		peers = append(peers, api.VnetPeer{Slot: m.Slot, Nickname: m.Nickname, IP: m.IP, Key: keys[m.Slot]})
+		peers = append(peers, api.VnetPeer{Slot: m.Slot, Nickname: m.Nickname, IP: m.IP, Key: keys[m.Slot], Relay: relays[m.Slot]})
+	}
+	var settings api.RoomSettings
+	var relayNodes []api.VnetRelay
+	var tickets map[int]map[string]string
+	if len(inRoom) > 0 {
+		slots := make([]int, 0, len(inRoom))
+		for _, x := range inRoom {
+			slots = append(slots, selfSlot[x])
+		}
+		qctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		settings, relayNodes, tickets = h.Rooms.RelayInfo(qctx, room, slots)
+		cancel()
 	}
 	for _, x := range inRoom {
-		x.trySend(api.LiveMessage{Type: api.LiveVnet, Vnet: &api.LiveVnetBody{Op: api.VnetPeers, Room: room, Self: selfSlot[x], Peers: peers}})
+		st := settings
+		x.trySend(api.LiveMessage{Type: api.LiveVnet, Vnet: &api.LiveVnetBody{Op: api.VnetPeers, Room: room, Self: selfSlot[x], Peers: peers,
+			Settings: &st, Relays: relayNodes, Tickets: tickets[selfSlot[x]]}})
 	}
 	for _, x := range gone {
 		x.trySend(api.LiveMessage{Type: api.LiveVnet, Vnet: &api.LiveVnetBody{Op: api.VnetClosed, Room: room, Reason: "房间已解散，或你被移出了房间"}})

@@ -3,11 +3,21 @@ package httpapi
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
+
+	"github.com/coder/websocket"
+
+	"moefrp/server/internal/live"
+	"moefrp/server/internal/ratelimit"
+	"moefrp/shared/nodeticket"
 
 	"moefrp/server/internal/store"
 	"moefrp/shared/api"
@@ -19,7 +29,13 @@ import (
 // 联机房间（shared/api/vnet.go）：建房、邀请码加入、离开、房主踢人。
 // 谁在线、公钥、打洞信息和中继都在实时通道里（live.Hub），这里只管名单。
 
-func (s *Server) roomRoutes(mux *http.ServeMux, authed func(http.HandlerFunc) http.Handler) {
+func (s *Server) roomRoutes(mux *http.ServeMux, authed func(http.HandlerFunc) http.Handler, public func(http.HandlerFunc, *ratelimit.Limiter) http.Handler) {
+	mux.Handle("POST "+api.RouteRoomGuest, public(s.handleGuestJoin, s.limRegister))
+	mux.HandleFunc("GET "+api.RouteRoomGuest, s.handleGuestRoom)
+	mux.HandleFunc("POST "+api.RouteRoomGuestLeave, s.handleGuestLeave)
+	mux.HandleFunc("GET "+api.RouteRoomGuestLive, s.handleGuestLive)
+	mux.Handle("PATCH "+api.RouteRoom, authed(s.handleRoomSettings))
+	mux.Handle("GET "+api.RouteRoomRelays, authed(s.handleRoomRelays))
 	mux.Handle("GET "+api.RouteRooms, authed(s.handleRooms))
 	mux.Handle("POST "+api.RouteRooms, authed(s.handleCreateRoom))
 	mux.Handle("POST "+api.RouteRoomJoin, authed(s.handleJoinRoom))
@@ -31,7 +47,35 @@ func (s *Server) roomRoutes(mux *http.ServeMux, authed func(http.HandlerFunc) ht
 type roomRooms struct{ s *Server }
 
 func (r roomRooms) Slot(ctx context.Context, roomID, userID string) (int, error) {
+	if id, ok := strings.CutPrefix(userID, api.GuestPrefix); ok {
+		return store.GuestSlot(ctx, r.s.st.DB(), roomID, id)
+	}
 	return store.RoomMemberSlot(ctx, r.s.st.DB(), roomID, userID)
+}
+
+// vnetTicketTTL 是中继票据的有效期：成员每次收到成员列表都会拿到新的。
+const vnetTicketTTL = 24 * time.Hour
+
+func (r roomRooms) RelayInfo(ctx context.Context, roomID string, slots []int) (api.RoomSettings, []api.VnetRelay, map[int]map[string]string) {
+	room, err := store.GetRoom(ctx, r.s.st.DB(), roomID)
+	if err != nil {
+		return api.RoomSettings{}, nil, nil
+	}
+	relays, keys, err := r.s.nodes.VnetRelays(ctx)
+	if err != nil {
+		r.s.log.Warn("vnet relays", "err", err)
+		return room.RoomSettings, nil, nil
+	}
+	now := r.s.now()
+	tickets := map[int]map[string]string{}
+	for _, slot := range slots {
+		m := map[string]string{}
+		for _, x := range relays {
+			m[x.ID] = nodeticket.SignVnet(keys[x.ID], x.ID, roomID, slot, now.Unix(), now.Add(vnetTicketTTL).Unix())
+		}
+		tickets[slot] = m
+	}
+	return room.RoomSettings, relays, tickets
 }
 
 func (r roomRooms) Members(ctx context.Context, roomID string) ([]api.RoomMember, error) {
@@ -180,8 +224,14 @@ func (s *Server) handleKickRoom(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, fieldError("userId", validate.ReasonInvalid, "不能移出自己，要解散请点离开"))
 		return
 	}
-	if err := store.RemoveRoomMember(r.Context(), s.st.DB(), id, req.UserID); err != nil {
-		s.writeError(w, r, roomNotFound(err))
+	var kerr error
+	if gid, ok := strings.CutPrefix(req.UserID, api.GuestPrefix); ok {
+		kerr = store.DeleteGuest(r.Context(), s.st.DB(), id, gid)
+	} else {
+		kerr = store.RemoveRoomMember(r.Context(), s.st.DB(), id, req.UserID)
+	}
+	if kerr != nil {
+		s.writeError(w, r, roomNotFound(kerr))
 		return
 	}
 	s.live.VnetRoomChanged(context.Background(), id)
@@ -204,4 +254,181 @@ func roomCode() string {
 		b[i] = chars[int(b[i])%len(chars)]
 	}
 	return string(b)
+}
+
+// GET /api/v1/rooms/relays：能用的中继节点。
+func (s *Server) handleRoomRelays(w http.ResponseWriter, r *http.Request) {
+	relays, _, err := s.nodes.VnetRelays(r.Context())
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"relays": relays})
+}
+
+// PATCH /api/v1/rooms/{id}：房主改设置（允许游客、默认中继、锁定中继）。
+func (s *Server) handleRoomSettings(w http.ResponseWriter, r *http.Request) {
+	var req api.RoomSettings
+	if err := decodeJSON(r, &req); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	p := principalFrom(r)
+	id := r.PathValue("id")
+	room, err := store.GetRoom(r.Context(), s.st.DB(), id)
+	if err != nil {
+		s.writeError(w, r, roomNotFound(err))
+		return
+	}
+	if room.OwnerID != p.User.ID {
+		s.writeError(w, r, apierr.Newf(apierr.Forbidden, "只有房主能改房间设置"))
+		return
+	}
+	if req.Relay != "" {
+		if _, err := store.GetNode(r.Context(), s.st.DB(), req.Relay); err != nil {
+			s.writeError(w, r, fieldError("relay", validate.ReasonInvalid, "没有这个中继节点"))
+			return
+		}
+	}
+	if err := store.SetRoomSettings(r.Context(), s.st.DB(), id, req); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	s.live.VnetRoomChanged(context.Background(), id)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---- 游客 ----
+
+func guestTokenHash(tok string) string {
+	sum := sha256.Sum256([]byte(tok))
+	return hex.EncodeToString(sum[:])
+}
+
+// guestFrom 用请求里的游客令牌找游客。
+func (s *Server) guestFrom(r *http.Request) (store.GuestRow, error) {
+	tok, ok := strings.CutPrefix(r.Header.Get(api.HeaderAuthorization), api.BearerPrefix)
+	if !ok || tok == "" {
+		return store.GuestRow{}, apierr.New(apierr.Unauthorized)
+	}
+	g, err := store.GuestByToken(r.Context(), s.st.DB(), guestTokenHash(tok))
+	if errors.Is(err, store.ErrNotFound) {
+		return g, apierr.Newf(apierr.Unauthorized, "游客身份已失效（离开了房间、被移出或房间已解散）")
+	}
+	return g, err
+}
+
+// roomView 返回房间和成员（含谁在线）。
+func (s *Server) roomView(ctx context.Context, room store.RoomRow) (api.Room, error) {
+	out := api.Room{ID: room.ID, Name: room.Name, Code: room.Code, OwnerID: room.OwnerID, CreatedAt: room.CreatedAt, RoomSettings: room.RoomSettings}
+	ms, err := store.RoomMembers(ctx, s.st.DB(), room.ID)
+	if err != nil {
+		return out, err
+	}
+	online := s.live.VnetOnline(room.ID)
+	for i := range ms {
+		ms[i].Online = online[ms[i].Slot]
+		if ms[i].UserID == room.OwnerID {
+			out.OwnerName = ms[i].Nickname
+		}
+	}
+	out.Members = ms
+	return out, nil
+}
+
+// POST /api/v1/rooms/guest：游客用邀请码 + 昵称进房间（房主允许时）。
+func (s *Server) handleGuestJoin(w http.ResponseWriter, r *http.Request) {
+	var req api.GuestJoinRequest
+	if err := decodeJSON(r, &req); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	name := strings.TrimSpace(req.Nickname)
+	if name == "" || utf8.RuneCountInString(name) > 20 {
+		s.writeError(w, r, fieldError("nickname", validate.ReasonInvalid, "昵称 1–20 个字"))
+		return
+	}
+	code := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(req.Code), "-", ""))
+	room, err := store.GetRoomByCode(r.Context(), s.st.DB(), code)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			err = fieldError("code", validate.ReasonInvalid, "没有这个房间，检查一下邀请码")
+		}
+		s.writeError(w, r, err)
+		return
+	}
+	if !room.AllowGuests {
+		s.writeError(w, r, apierr.Newf(apierr.Forbidden, "这个房间不允许游客加入：请登录后再加入，或者让房主打开「允许游客」"))
+		return
+	}
+	b := make([]byte, 24)
+	_, _ = rand.Read(b)
+	tok := "mfg_" + base64.RawURLEncoding.EncodeToString(b)
+	g := store.GuestRow{ID: model.NewID(), RoomID: room.ID, Nickname: name}
+	slot, err := store.InsertGuest(r.Context(), s.st.DB(), g, guestTokenHash(tok), s.now().Unix())
+	if err == nil && slot == 0 {
+		err = apierr.Newf(apierr.LimitExceeded, "房间满了（最多 %d 人）", api.VnetMaxMembers)
+	}
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	view, err := s.roomView(r.Context(), room)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	s.live.VnetRoomChanged(context.Background(), room.ID)
+	writeJSON(w, http.StatusOK, api.GuestJoinResponse{Token: tok, Room: view})
+}
+
+// GET /api/v1/rooms/guest：游客看自己的房间。
+func (s *Server) handleGuestRoom(w http.ResponseWriter, r *http.Request) {
+	g, err := s.guestFrom(r)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	room, err := store.GetRoom(r.Context(), s.st.DB(), g.RoomID)
+	if err != nil {
+		s.writeError(w, r, roomNotFound(err))
+		return
+	}
+	view, err := s.roomView(r.Context(), room)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+// POST /api/v1/rooms/guest/leave：游客离开（令牌作废）。
+func (s *Server) handleGuestLeave(w http.ResponseWriter, r *http.Request) {
+	g, err := s.guestFrom(r)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	if err := store.DeleteGuest(r.Context(), s.st.DB(), g.RoomID, g.ID); err != nil {
+		s.writeError(w, r, roomNotFound(err))
+		return
+	}
+	s.live.VnetRoomChanged(context.Background(), g.RoomID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GET /api/v1/rooms/guest/live：游客的实时通道，只用来收发联机房间的消息。
+func (s *Server) handleGuestLive(w http.ResponseWriter, r *http.Request) {
+	g, err := s.guestFrom(r)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	ws, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		return
+	}
+	id := api.GuestPrefix + g.ID
+	c := &live.Client{SessionID: id, UserID: id, Nickname: g.Nickname + "（游客）", Role: "guest", IP: s.clientIP(r)}
+	s.live.Serve(context.WithoutCancel(r.Context()), ws, c)
 }

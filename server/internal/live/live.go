@@ -294,6 +294,9 @@ func (h *Hub) Recheck(ctx context.Context, valid func(ctx context.Context, sessi
 	}
 	h.mu.Unlock()
 	for _, c := range cs {
+		if strings.HasPrefix(c.SessionID, api.GuestPrefix) {
+			continue // 游客没有会话；被踢、房间解散时由联机房间那边处理
+		}
 		if why := valid(ctx, c.SessionID); why != nil {
 			select {
 			case c.send <- api.LiveMessage{Type: api.LiveEnded, Ended: why}:

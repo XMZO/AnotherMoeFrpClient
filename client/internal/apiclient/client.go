@@ -419,3 +419,47 @@ func (c *Client) KickRoom(ctx context.Context, id, userID string) error {
 	_, _, err := c.do(ctx, http.MethodPost, strings.Replace(api.RouteRoomKick, "{id}", url.PathEscape(id), 1), nil, api.KickRoomRequest{UserID: userID}, nil)
 	return err
 }
+
+// RoomRelays：GET /api/v1/rooms/relays。
+func (c *Client) RoomRelays(ctx context.Context) ([]api.VnetRelay, error) {
+	var out struct {
+		Relays []api.VnetRelay `json:"relays"`
+	}
+	_, _, err := c.do(ctx, http.MethodGet, api.RouteRoomRelays, nil, nil, &out)
+	if out.Relays == nil {
+		out.Relays = []api.VnetRelay{}
+	}
+	return out.Relays, err
+}
+
+// UpdateRoom：PATCH /api/v1/rooms/{id}（房主改设置）。
+func (c *Client) UpdateRoom(ctx context.Context, id string, st api.RoomSettings) error {
+	_, _, err := c.do(ctx, http.MethodPatch, strings.Replace(api.RouteRoom, "{id}", url.PathEscape(id), 1), nil, st, nil)
+	return err
+}
+
+// ---- 游客（没登录时进房间，Authorization 用游客令牌）----
+
+func guestHeader(token string) http.Header {
+	return http.Header{api.HeaderAuthorization: {api.BearerPrefix + token}}
+}
+
+// GuestJoin：POST /api/v1/rooms/guest。
+func (c *Client) GuestJoin(ctx context.Context, code, nickname string) (api.GuestJoinResponse, error) {
+	var out api.GuestJoinResponse
+	_, _, err := c.do(ctx, http.MethodPost, api.RouteRoomGuest, nil, api.GuestJoinRequest{Code: code, Nickname: nickname}, &out)
+	return out, err
+}
+
+// GuestRoom：GET /api/v1/rooms/guest。
+func (c *Client) GuestRoom(ctx context.Context, token string) (api.Room, error) {
+	var out api.Room
+	_, _, err := c.do(ctx, http.MethodGet, api.RouteRoomGuest, guestHeader(token), nil, &out)
+	return out, err
+}
+
+// GuestLeave：POST /api/v1/rooms/guest/leave。
+func (c *Client) GuestLeave(ctx context.Context, token string) error {
+	_, _, err := c.do(ctx, http.MethodPost, api.RouteRoomGuestLeave, guestHeader(token), nil, nil)
+	return err
+}

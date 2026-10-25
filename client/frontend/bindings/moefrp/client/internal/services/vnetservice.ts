@@ -40,6 +40,20 @@ export function Disconnect(): $CancellablePromise<void> {
 }
 
 /**
+ * GuestJoin 没登录时用邀请码 + 昵称以游客身份进房间（房主允许时），之后用 Connect 进虚拟网。
+ */
+export function GuestJoin(code: string, nickname: string): $CancellablePromise<api$0.Room> {
+    return $Call.ByID(3270044447, code, nickname);
+}
+
+/**
+ * InstallDriver 装虚拟网卡驱动（建一块网卡再关掉；要管理员权限）。进联机页时没装就调用。
+ */
+export function InstallDriver(): $CancellablePromise<void> {
+    return $Call.ByID(3093470322);
+}
+
+/**
  * JoinRoom 用邀请码加入房间。
  */
 export function JoinRoom(code: string): $CancellablePromise<void> {
@@ -54,7 +68,7 @@ export function KickMember(roomID: string, userID: string): $CancellablePromise<
 }
 
 /**
- * LeaveRoom 离开房间（房主离开等于解散）；正在这个房间里的话先断开。
+ * LeaveRoom 离开房间（房主离开等于解散）；正在这个房间里的话先断开。游客离开后游客身份作废。
  */
 export function LeaveRoom(id: string): $CancellablePromise<void> {
     return $Call.ByID(1228920231, id);
@@ -68,7 +82,7 @@ export function OnLive(b: api$0.LiveVnetBody): $CancellablePromise<void> {
 }
 
 /**
- * OnLiveOnline：实时通道重新连上时，正在房间里的话重新进（面板那边的状态在断开时清掉了）。
+ * OnLiveOnline：实时通道重新连上时，正在房间里的话重新进（面板那边的状态在断开时清掉了），收件中继也再报一次。
  */
 export function OnLiveOnline(on: boolean): $CancellablePromise<void> {
     return $Call.ByID(1078468181, on);
@@ -82,6 +96,13 @@ export function OnPacket($from: number, payload: string | null): $CancellablePro
 }
 
 /**
+ * OpenRoomsOnStart：这次是"以管理员身份重启"起来的（带 --open=rooms），界面直接打开联机页。
+ */
+export function OpenRoomsOnStart(): $CancellablePromise<boolean> {
+    return $Call.ByID(1950562390);
+}
+
+/**
  * RestartAsAdmin 以管理员身份重新启动程序（弹 UAC），成功后退出当前这个。
  */
 export function RestartAsAdmin(): $CancellablePromise<void> {
@@ -89,7 +110,14 @@ export function RestartAsAdmin(): $CancellablePromise<void> {
 }
 
 /**
- * Rooms 返回我加入的房间（含成员和谁在线）。
+ * RoomRelays 返回能用的中继节点（房主选默认中继用）。
+ */
+export function RoomRelays(): $CancellablePromise<api$0.VnetRelay[] | null> {
+    return $Call.ByID(119528564);
+}
+
+/**
+ * Rooms 返回我加入的房间（含成员和谁在线）；游客模式下是游客所在的那一个。
  */
 export function Rooms(): $CancellablePromise<api$0.Room[] | null> {
     return $Call.ByID(1821635871);
@@ -111,8 +139,22 @@ export function SetQuit(q: any): $CancellablePromise<void> {
 }
 
 /**
+ * SetRelay 选我的收件中继：auto（自动）、panel（面板）或节点 ID。房主锁定时不生效。
+ */
+export function SetRelay(pref: string): $CancellablePromise<void> {
+    return $Call.ByID(3538957740, pref);
+}
+
+/**
  * State 返回当前联机状态。
  */
 export function State(): $CancellablePromise<$models.VnetState> {
     return $Call.ByID(394344234);
+}
+
+/**
+ * UpdateRoom 房主改房间设置（允许游客、默认中继、锁定中继）。
+ */
+export function UpdateRoom(id: string, st: api$0.RoomSettings): $CancellablePromise<void> {
+    return $Call.ByID(1657566651, id, st);
 }

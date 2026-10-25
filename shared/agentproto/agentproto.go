@@ -326,3 +326,6 @@ type AccessResult struct {
 	Users     int  `json:"users"`
 	Restarted bool `json:"restarted"` // 开关官方节点时 frps 重启了
 }
+
+// FeatureVnetRelay：agent 1.4.6 起带联机房间的中继（frpsset.Settings.VnetRelayPort），见 docs/vnet.md。
+const FeatureVnetRelay = "vnet-relay"

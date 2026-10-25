@@ -14,7 +14,10 @@ import (
 type RoomRow struct {
 	ID, Name, Code, OwnerID string
 	CreatedAt               int64
+	api.RoomSettings
 }
+
+const roomColumns = `id, name, code, owner_id, created_at, allow_guests, relay, relay_locked`
 
 // InsertRoom 建房间并把房主放进 1 号座位。
 func InsertRoom(ctx context.Context, q Querier, r RoomRow) error {
@@ -29,17 +32,17 @@ func InsertRoom(ctx context.Context, q Querier, r RoomRow) error {
 
 // GetRoom 按 ID 查房间。
 func GetRoom(ctx context.Context, q Querier, id string) (RoomRow, error) {
-	return scanRoom(q.QueryRowContext(ctx, `SELECT id, name, code, owner_id, created_at FROM rooms WHERE id = ?`, id))
+	return scanRoom(q.QueryRowContext(ctx, `SELECT `+roomColumns+` FROM rooms WHERE id = ?`, id))
 }
 
 // GetRoomByCode 按邀请码查房间。
 func GetRoomByCode(ctx context.Context, q Querier, code string) (RoomRow, error) {
-	return scanRoom(q.QueryRowContext(ctx, `SELECT id, name, code, owner_id, created_at FROM rooms WHERE code = ?`, code))
+	return scanRoom(q.QueryRowContext(ctx, `SELECT `+roomColumns+` FROM rooms WHERE code = ?`, code))
 }
 
 func scanRoom(row *sql.Row) (RoomRow, error) {
 	var r RoomRow
-	err := row.Scan(&r.ID, &r.Name, &r.Code, &r.OwnerID, &r.CreatedAt)
+	err := row.Scan(&r.ID, &r.Name, &r.Code, &r.OwnerID, &r.CreatedAt, &r.AllowGuests, &r.Relay, &r.RelayLocked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RoomRow{}, ErrNotFound
 	}
@@ -66,7 +69,17 @@ func AddRoomMember(ctx context.Context, q Querier, roomID, userID string, now in
 	} else if !errors.Is(err, ErrNotFound) {
 		return 0, err
 	}
-	rows, err := q.QueryContext(ctx, `SELECT slot FROM room_members WHERE room_id = ?`, roomID)
+	slot, err := freeSlot(ctx, q, roomID)
+	if err != nil || slot == 0 {
+		return 0, err
+	}
+	_, err = q.ExecContext(ctx, `INSERT INTO room_members (room_id, user_id, slot, joined_at) VALUES (?, ?, ?, ?)`, roomID, userID, slot, now)
+	return slot, err
+}
+
+// freeSlot 返回最小的空座位（成员和游客共用），满员时返回 0。
+func freeSlot(ctx context.Context, q Querier, roomID string) (int, error) {
+	rows, err := q.QueryContext(ctx, `SELECT slot FROM room_members WHERE room_id = ? UNION ALL SELECT slot FROM room_guests WHERE room_id = ?`, roomID, roomID)
 	if err != nil {
 		return 0, err
 	}
@@ -87,8 +100,7 @@ func AddRoomMember(ctx context.Context, q Querier, roomID, userID string, now in
 	for used[slot] {
 		slot++
 	}
-	_, err = q.ExecContext(ctx, `INSERT INTO room_members (room_id, user_id, slot, joined_at) VALUES (?, ?, ?, ?)`, roomID, userID, slot, now)
-	return slot, err
+	return slot, nil
 }
 
 // RoomMemberSlot 返回用户在房间里的座位号，不在房间里时返回 ErrNotFound。
@@ -106,10 +118,12 @@ func RemoveRoomMember(ctx context.Context, q Querier, roomID, userID string) err
 	return execOne(ctx, q, `DELETE FROM room_members WHERE room_id = ? AND user_id = ?`, roomID, userID)
 }
 
-// RoomMembers 返回房间成员（按座位号）。Online 由调用方填。
+// RoomMembers 返回房间成员和游客（按座位号；游客的 UserID 是 api.GuestPrefix + 游客 ID）。Online 由调用方填。
 func RoomMembers(ctx context.Context, q Querier, roomID string) ([]api.RoomMember, error) {
 	rows, err := q.QueryContext(ctx, `SELECT m.user_id, u.nickname, m.slot FROM room_members m JOIN users u ON u.id = m.user_id
-		WHERE m.room_id = ? ORDER BY m.slot`, roomID)
+		WHERE m.room_id = ?
+		UNION ALL SELECT ? || g.id, g.nickname || '（游客）', g.slot FROM room_guests g WHERE g.room_id = ?
+		ORDER BY 3`, roomID, api.GuestPrefix, roomID)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +142,7 @@ func RoomMembers(ctx context.Context, q Querier, roomID string) ([]api.RoomMembe
 
 // UserRooms 返回用户加入的房间（不含成员）。
 func UserRooms(ctx context.Context, q Querier, userID string) ([]api.Room, error) {
-	rows, err := q.QueryContext(ctx, `SELECT r.id, r.name, r.code, r.owner_id, u.nickname, r.created_at
+	rows, err := q.QueryContext(ctx, `SELECT r.id, r.name, r.code, r.owner_id, u.nickname, r.created_at, r.allow_guests, r.relay, r.relay_locked
 		FROM rooms r JOIN room_members m ON m.room_id = r.id JOIN users u ON u.id = r.owner_id
 		WHERE m.user_id = ? ORDER BY m.joined_at`, userID)
 	if err != nil {
@@ -138,10 +152,58 @@ func UserRooms(ctx context.Context, q Querier, userID string) ([]api.Room, error
 	out := []api.Room{}
 	for rows.Next() {
 		var r api.Room
-		if err := rows.Scan(&r.ID, &r.Name, &r.Code, &r.OwnerID, &r.OwnerName, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.Code, &r.OwnerID, &r.OwnerName, &r.CreatedAt, &r.AllowGuests, &r.Relay, &r.RelayLocked); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// SetRoomSettings 保存房主的设置。
+func SetRoomSettings(ctx context.Context, q Querier, id string, st api.RoomSettings) error {
+	return execOne(ctx, q, `UPDATE rooms SET allow_guests = ?, relay = ?, relay_locked = ? WHERE id = ?`, st.AllowGuests, st.Relay, st.RelayLocked, id)
+}
+
+// GuestRow 是一个游客。
+type GuestRow struct {
+	ID, RoomID, Nickname string
+	Slot                 int
+}
+
+// InsertGuest 把游客放进最小的空座位，返回座位号；满员时返回 0（不插入）。
+func InsertGuest(ctx context.Context, q Querier, g GuestRow, tokenHash string, now int64) (int, error) {
+	slot, err := freeSlot(ctx, q, g.RoomID)
+	if err != nil || slot == 0 {
+		return 0, err
+	}
+	_, err = q.ExecContext(ctx, `INSERT INTO room_guests (id, room_id, nickname, token_hash, slot, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		g.ID, g.RoomID, g.Nickname, tokenHash, slot, now)
+	return slot, err
+}
+
+// GuestByToken 按令牌哈希找游客。
+func GuestByToken(ctx context.Context, q Querier, tokenHash string) (GuestRow, error) {
+	var g GuestRow
+	err := q.QueryRowContext(ctx, `SELECT id, room_id, nickname, slot FROM room_guests WHERE token_hash = ?`, tokenHash).
+		Scan(&g.ID, &g.RoomID, &g.Nickname, &g.Slot)
+	if errors.Is(err, sql.ErrNoRows) {
+		return GuestRow{}, ErrNotFound
+	}
+	return g, err
+}
+
+// GuestSlot 返回游客在房间里的座位号。
+func GuestSlot(ctx context.Context, q Querier, roomID, guestID string) (int, error) {
+	var slot int
+	err := q.QueryRowContext(ctx, `SELECT slot FROM room_guests WHERE room_id = ? AND id = ?`, roomID, guestID).Scan(&slot)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	return slot, err
+}
+
+// DeleteGuest 删掉游客（离开、被踢）。
+func DeleteGuest(ctx context.Context, q Querier, roomID, guestID string) error {
+	return execOne(ctx, q, `DELETE FROM room_guests WHERE room_id = ? AND id = ?`, roomID, guestID)
 }

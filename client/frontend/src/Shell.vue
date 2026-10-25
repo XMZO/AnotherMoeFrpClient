@@ -15,7 +15,7 @@ import TitleBar from './components/TitleBar.vue'
 import Icon from './ui/Icon.vue'
 import type { IconName } from './ui/icons'
 import { dialog, notify } from './ui/feedback'
-import { AppService, Events, type UpdateInfo } from './api'
+import { AppService, Events, VnetService, type UpdateInfo } from './api'
 import { useSettingsStore } from './stores/settings'
 import { useTunnelStore } from './stores/tunnel'
 import { useLogsStore } from './stores/logs'
@@ -106,6 +106,7 @@ async function takeNotices() {
 }
 
 onMounted(async () => {
+  VnetService.OpenRoomsOnStart().then((v) => v && (page.value = 'rooms')).catch(() => {}) // "以管理员身份重启"后回到联机页
   runEvents.init()
   await Promise.all([tunnel.init(), logs.init(), account.init(), settingsStore.load()]).catch(() => {})
   Events.On('update:available', (ev: any) => notifyUpdate(ev.data as UpdateInfo))
@@ -163,7 +164,7 @@ onMounted(async () => {
       <main class="main">
         <TunnelPage v-show="page === 'tunnel'" />
         <SharesPage v-if="page === 'shares'" />
-        <RoomsPage v-if="page === 'rooms'" />
+        <RoomsPage v-if="page === 'rooms'" @back="page = 'tunnel'" />
         <SettingsPage v-if="page === 'settings'" />
         <AboutPage v-if="page === 'about'" />
       </main>

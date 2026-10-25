@@ -16,14 +16,26 @@ import (
 // 面板拒绝时（会话失效、客户端版本过低）返回和普通请求一样的 *apierr.Error。
 func (c *Client) DialLive(ctx context.Context) (*websocket.Conn, error) {
 	c.mu.RLock()
-	token, mode, custom := c.token, c.mode, c.custom
+	token := c.token
+	c.mu.RUnlock()
+	return c.dialWS(ctx, api.RouteClientLive, token)
+}
+
+// DialGuestLive 用游客令牌连游客的实时通道（联机房间）。
+func (c *Client) DialGuestLive(ctx context.Context, token string) (*websocket.Conn, error) {
+	return c.dialWS(ctx, api.RouteRoomGuestLive, token)
+}
+
+func (c *Client) dialWS(ctx context.Context, route, token string) (*websocket.Conn, error) {
+	c.mu.RLock()
+	mode, custom := c.mode, c.custom
 	c.mu.RUnlock()
 	if token == "" {
 		return nil, apierr.New(apierr.Unauthorized)
 	}
 	u := *c.base
 	u.Scheme = map[string]string{"https": "wss", "http": "ws"}[u.Scheme]
-	u.Path = strings.TrimRight(u.Path, "/") + api.RouteClientLive
+	u.Path = strings.TrimRight(u.Path, "/") + route
 	h := http.Header{}
 	h.Set(api.HeaderClientVersion, c.version)
 	h.Set(api.HeaderInstallID, c.installID)

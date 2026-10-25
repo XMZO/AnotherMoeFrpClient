@@ -83,6 +83,18 @@ export interface LiveVnetBody {
     "self"?: number;
     "peers"?: VnetPeer[] | null;
     "reason"?: string;
+
+    /**
+     * peers 里还带：房间设置、能用的中继节点、自己连各中继的票据（节点 ID → 票据）
+     */
+    "settings"?: RoomSettings | null;
+    "relays"?: VnetRelay[] | null;
+    "tickets"?: { [_ in string]?: string } | null;
+
+    /**
+     * relay：我的收件中继
+     */
+    "relay"?: string;
 }
 
 /**
@@ -135,6 +147,21 @@ export interface Room {
     "ownerName": string;
     "createdAt": number;
     "members": RoomMember[] | null;
+
+    /**
+     * 允许没登录的人用邀请码以游客身份进来
+     */
+    "allowGuests": boolean;
+
+    /**
+     * 默认中继：节点 ID，空表示自动（每人选最近的）
+     */
+    "relay": string;
+
+    /**
+     * 锁定：所有人只能用 Relay（为空时都用自动）
+     */
+    "relayLocked": boolean;
 }
 
 /**
@@ -150,6 +177,26 @@ export interface RoomMember {
      * 正在房间里（客户端连着虚拟网）
      */
     "online": boolean;
+}
+
+/**
+ * RoomSettings 是房主能改的设置（PATCH /api/v1/rooms/{id}）。
+ */
+export interface RoomSettings {
+    /**
+     * 允许没登录的人用邀请码以游客身份进来
+     */
+    "allowGuests": boolean;
+
+    /**
+     * 默认中继：节点 ID，空表示自动（每人选最近的）
+     */
+    "relay": string;
+
+    /**
+     * 锁定：所有人只能用 Relay（为空时都用自动）
+     */
+    "relayLocked": boolean;
 }
 
 /**
@@ -279,4 +326,20 @@ export interface VnetPeer {
     "nickname": string;
     "ip": string;
     "key"?: string;
+
+    /**
+     * 他的收件中继（节点 ID），空表示面板；发给他的中继包送到这里
+     */
+    "relay"?: string;
+}
+
+/**
+ * VnetRelay 是一个能中继的节点：成员连 ws://Addr:Port/vnet，带面板签的票据（LiveVnetBody.Tickets）。
+ */
+export interface VnetRelay {
+    "id": string;
+    "name": string;
+    "region"?: string;
+    "addr": string;
+    "port": number;
 }

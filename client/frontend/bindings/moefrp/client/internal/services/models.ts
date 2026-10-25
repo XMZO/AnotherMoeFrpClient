@@ -222,20 +222,39 @@ export type VnetLive = any;
  * VnetState 是界面上的联机状态。
  */
 export interface VnetState {
+    "room": string;
+    "self": number;
+    "peers": vnet$0.PeerState[] | null;
+
+    /**
+     * 能用的中继节点（按延迟）
+     */
+    "relays": vnet$0.RelayView[] | null;
+
+    /**
+     * 我的收件中继（节点 ID，空表示面板）
+     */
+    "home": string;
+
+    /**
+     * 我的选择：auto / panel / 节点 ID
+     */
+    "pref": string;
+
+    /**
+     * 房间设置（默认中继、是否锁定）
+     */
+    "settings": api$0.RoomSettings;
+
     /**
      * 有管理员权限（没有就不能进房间，界面提示重启为管理员）
      */
     "admin": boolean;
 
     /**
-     * 正在哪个房间（空表示没在）
+     * 虚拟网卡驱动已经装好
      */
-    "room": string;
-
-    /**
-     * 自己的座位号（0 表示还没收到面板的成员列表）
-     */
-    "self": number;
+    "driver": boolean;
 
     /**
      * 自己的虚拟 IP
@@ -243,9 +262,9 @@ export interface VnetState {
     "ip": string;
 
     /**
-     * 其他成员和连接方式
+     * 以游客身份在哪个房间（没登录时）
      */
-    "peers": vnet$0.PeerState[] | null;
+    "guest"?: string;
 
     /**
      * 最近一次出错

@@ -27,6 +27,8 @@ type Settings struct {
 	AllowPorts        string `json:"allowPorts" ui:"group=basic;kind=ports;label=允许映射的端口;placeholder=不限，例如 10000-20000,30000;hint=tcp / udp 代理的远程端口范围；用户组和单个用户还可以再收窄"`
 	MaxPortsPerClient int    `json:"maxPortsPerClient" ui:"group=basic;label=每个客户端最多占用端口;min=0;max=65535;hint=0 不限"`
 	LogLevel          string `json:"logLevel" ui:"group=basic;kind=select;label=日志级别;options=trace,debug,info,warn,error;hint=在节点的「日志」页查看"`
+	// VnetRelayPort 是联机房间的中继端口（agent 1.4.6 起，不是 frps 的）：打洞打不通的成员经它转发，0 关闭
+	VnetRelayPort int `json:"vnetRelayPort,omitempty" ui:"group=basic;label=联机中继端口;min=0;max=65535;hint=TCP。联机房间里打洞打不通的成员经这个端口中继（需要在防火墙放行）；0 关闭"`
 
 	// 传输协议
 	KCPBindPort  int  `json:"kcpBindPort" ui:"group=transport;label=KCP 端口;min=0;max=65535;hint=UDP，可以和客户端连接端口相同；0 关闭"`

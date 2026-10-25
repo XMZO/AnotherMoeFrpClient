@@ -42,6 +42,7 @@ func (s *Server) roomRoutes(mux *http.ServeMux, authed func(http.HandlerFunc) ht
 	mux.Handle("POST "+api.RouteRoomJoin, authed(s.handleJoinRoom))
 	mux.Handle("POST "+api.RouteRoomLeave, authed(s.handleLeaveRoom))
 	mux.Handle("POST "+api.RouteRoomKick, authed(s.handleKickRoom))
+	mux.Handle("POST "+api.RouteRoomCode, authed(s.handleRoomCode))
 }
 
 // roomRooms 实现 live.VnetRooms。
@@ -57,15 +58,16 @@ func (r roomRooms) Slot(ctx context.Context, roomID, userID string) (int, error)
 // vnetTicketTTL 是中继票据的有效期：成员每次收到成员列表都会拿到新的。
 const vnetTicketTTL = 24 * time.Hour
 
-func (r roomRooms) RelayInfo(ctx context.Context, roomID string, slots []int) (string, api.RoomSettings, []api.VnetRelay, map[int]map[string]string) {
-	room, err := store.GetRoom(ctx, r.s.st.DB(), roomID)
+func (r roomRooms) RelayInfo(ctx context.Context, roomID string, slots []int) (api.Room, []api.VnetRelay, map[int]map[string]string) {
+	row, err := store.GetRoom(ctx, r.s.st.DB(), roomID)
 	if err != nil {
-		return "", api.RoomSettings{}, nil, nil
+		return api.Room{}, nil, nil
 	}
+	room := api.Room{ID: row.ID, Name: row.Name, Code: row.Code, RoomSettings: row.RoomSettings}
 	relays, keys, err := r.s.nodes.VnetRelays(ctx)
 	if err != nil {
 		r.s.log.Warn("vnet relays", "err", err)
-		return room.Name, room.RoomSettings, nil, nil
+		return room, nil, nil
 	}
 	now := r.s.now()
 	tickets := map[int]map[string]string{}
@@ -76,7 +78,7 @@ func (r roomRooms) RelayInfo(ctx context.Context, roomID string, slots []int) (s
 		}
 		tickets[slot] = m
 	}
-	return room.Name, room.RoomSettings, relays, tickets
+	return room, relays, tickets
 }
 
 func (r roomRooms) Members(ctx context.Context, roomID string) ([]api.RoomMember, error) {
@@ -105,6 +107,38 @@ func (s *Server) handleRooms(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, api.RoomsResponse{Rooms: rooms})
+}
+
+// POST /api/v1/rooms/{id}/code：房主换新邀请码。旧码马上作废；已经在房间里的成员和游客不受影响，在线的成员收到新码。
+func (s *Server) handleRoomCode(w http.ResponseWriter, r *http.Request) {
+	p := principalFrom(r)
+	id := r.PathValue("id")
+	room, err := store.GetRoom(r.Context(), s.st.DB(), id)
+	if err != nil {
+		s.writeError(w, r, roomNotFound(err))
+		return
+	}
+	if room.OwnerID != p.User.ID {
+		s.writeError(w, r, apierr.Newf(apierr.Forbidden, "只有房主能换邀请码"))
+		return
+	}
+	err = s.st.Tx(r.Context(), func(tx *sql.Tx) error {
+		for range 5 { // 邀请码撞了就换一个
+			code := roomCode()
+			if _, err := store.GetRoomByCode(r.Context(), tx, code); errors.Is(err, store.ErrNotFound) {
+				room.Code = code
+				return store.SetRoomCode(r.Context(), tx, id, code)
+			}
+		}
+		return errors.New("room code collision")
+	})
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	s.live.VnetRoomChanged(context.Background(), id)
+	writeJSON(w, http.StatusOK, api.Room{ID: room.ID, Name: room.Name, Code: room.Code, OwnerID: room.OwnerID, OwnerName: p.User.Nickname,
+		CreatedAt: room.CreatedAt, RoomSettings: room.RoomSettings})
 }
 
 // POST /api/v1/rooms

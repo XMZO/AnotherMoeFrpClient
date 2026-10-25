@@ -131,6 +131,13 @@ export function Rooms(): $CancellablePromise<api$0.Room[] | null> {
 }
 
 /**
+ * RotateCode 房主换新邀请码：旧码马上作废，已经在房间里的人不受影响。
+ */
+export function RotateCode(id: string): $CancellablePromise<api$0.Room> {
+    return $Call.ByID(2204949219, id);
+}
+
+/**
  * SendChat 在当前房间里发一条聊天消息。
  */
 export function SendChat(text: string): $CancellablePromise<void> {

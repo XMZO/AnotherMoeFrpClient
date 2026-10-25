@@ -165,6 +165,14 @@ func (s *VnetService) UpdateRoom(id string, st api.RoomSettings, name string) er
 	return apperr.Normalize(s.api.UpdateRoom(ctx, id, api.RoomPatch{RoomSettings: st, Name: name}))
 }
 
+// RotateCode 房主换新邀请码：旧码马上作废，已经在房间里的人不受影响。
+func (s *VnetService) RotateCode(id string) (api.Room, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), apiclient.DefaultTimeout)
+	defer cancel()
+	r, err := s.api.RotateRoomCode(ctx, id)
+	return r, apperr.Normalize(err)
+}
+
 // SetRelay 选我的收件中继：auto（自动）、panel（面板）或节点 ID。房主锁定时不生效。
 func (s *VnetService) SetRelay(pref string) {
 	s.eng.SetRelayPref(pref)

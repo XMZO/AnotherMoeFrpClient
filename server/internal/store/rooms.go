@@ -185,6 +185,11 @@ func UserRooms(ctx context.Context, q Querier, userID string) ([]api.Room, error
 	return out, rows.Err()
 }
 
+// SetRoomCode 换邀请码。
+func SetRoomCode(ctx context.Context, q Querier, id, code string) error {
+	return execOne(ctx, q, `UPDATE rooms SET code = ? WHERE id = ?`, code, id)
+}
+
 // SetRoomName 改房间名。
 func SetRoomName(ctx context.Context, q Querier, id, name string) error {
 	return execOne(ctx, q, `UPDATE rooms SET name = ? WHERE id = ?`, name, id)

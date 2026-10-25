@@ -102,6 +102,11 @@ export interface LiveVnetBody {
     "roomName"?: string;
 
     /**
+     * peers：邀请码（房主换码后成员跟着变）
+     */
+    "roomCode"?: string;
+
+    /**
      * chat（客户端发）
      */
     "text"?: string;

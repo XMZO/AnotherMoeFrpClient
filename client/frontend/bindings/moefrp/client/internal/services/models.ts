@@ -224,6 +224,7 @@ export type VnetLive = any;
 export interface VnetState {
     "room": string;
     "roomName"?: string;
+    "roomCode"?: string;
     "self": number;
     "peers": vnet$0.PeerState[] | null;
 

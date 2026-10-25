@@ -42,6 +42,9 @@
 
 房主在房间设置里改名（PATCH 带 `name`，不带就不改）。面板在成员列表（peers）里带上 `roomName`，在房间里的成员马上看到新名字。
 
+房主可以换邀请码（`POST /api/v1/rooms/{id}/code`，联机页邀请码旁边的"换码"）：旧码马上作废，防止泄露后被滥用；
+已经在房间里的成员和游客不受影响。peers 里带 `roomCode`，在线成员马上看到新码。
+
 ## 语音
 
 联机页的"加入语音"（前端 `client/frontend/src/voice.ts`）：像 Discord 的语音频道，轻量版。

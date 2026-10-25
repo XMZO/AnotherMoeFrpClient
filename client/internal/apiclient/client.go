@@ -433,6 +433,13 @@ func (c *Client) RoomRelays(ctx context.Context) ([]api.VnetRelay, error) {
 }
 
 // UpdateRoom：PATCH /api/v1/rooms/{id}（房主改设置）。
+// RotateRoomCode 房主换新邀请码（旧码作废）。
+func (c *Client) RotateRoomCode(ctx context.Context, id string) (api.Room, error) {
+	var out api.Room
+	_, _, err := c.do(ctx, http.MethodPost, strings.Replace(api.RouteRoomCode, "{id}", url.PathEscape(id), 1), nil, nil, &out)
+	return out, err
+}
+
 func (c *Client) UpdateRoom(ctx context.Context, id string, st api.RoomPatch) error {
 	_, _, err := c.do(ctx, http.MethodPatch, strings.Replace(api.RouteRoom, "{id}", url.PathEscape(id), 1), nil, st, nil)
 	return err

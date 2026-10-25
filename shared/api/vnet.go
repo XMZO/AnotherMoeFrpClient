@@ -12,6 +12,7 @@ const (
 	RouteRoomJoin   = Prefix + "/rooms/join"       // POST {code}
 	RouteRoomLeave  = Prefix + "/rooms/{id}/leave" // POST：离开（房主离开等于解散）
 	RouteRoomKick   = Prefix + "/rooms/{id}/kick"  // POST {userId}：房主踢人
+	RouteRoomCode   = Prefix + "/rooms/{id}/code"  // POST：房主换新邀请码（旧码作废，已经在房间里的人不受影响），返回 Room
 	RouteRoom       = Prefix + "/rooms/{id}"       // PATCH RoomSettings（可以带 name 改房间名）：房主改设置
 	RouteRoomRelays = Prefix + "/rooms/relays"     // GET：能用的中继节点（房主选默认中继用，不含票据）
 
@@ -162,6 +163,7 @@ type LiveVnetBody struct {
 	Tickets  map[string]string `json:"tickets,omitempty"`
 	Relay    string            `json:"relay,omitempty"`    // relay：我的收件中继
 	RoomName string            `json:"roomName,omitempty"` // peers：房间名（房主改名后成员跟着变）
+	RoomCode string            `json:"roomCode,omitempty"` // peers：邀请码（房主换码后成员跟着变）
 
 	Text    string        `json:"text,omitempty"`    // chat（客户端发）
 	Chat    *VnetChatMsg  `json:"chat,omitempty"`    // chat（面板转发）

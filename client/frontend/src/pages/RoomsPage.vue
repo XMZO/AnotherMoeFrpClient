@@ -28,6 +28,7 @@ interface VnetState {
   driver: boolean
   room: string
   roomName?: string
+  roomCode?: string
   self: number
   ip: string
   peers: PeerState[]
@@ -214,6 +215,32 @@ async function leave(r: Room) {
 
 // 房间名：正在的房间用面板推来的最新名字（房主改名后马上变）
 const roomName = (r: Room) => (r.id === state.value.room && state.value.roomName ? state.value.roomName : r.name)
+// 邀请码：正在的房间用面板推来的最新码（房主换码后马上变）
+const codeOf = (r: Room) => (r.id === state.value.room && state.value.roomCode ? state.value.roomCode : r.code)
+watch(
+  () => state.value.roomCode,
+  (n, o) => {
+    if (n && o && n !== o) load()
+  },
+)
+async function rotateCode(r: Room) {
+  const yes = await confirm({
+    title: '换新邀请码',
+    content: '旧邀请码马上作废，拿着旧码的人进不来了；已经在房间里的成员和游客不受影响。',
+    positiveText: '换码',
+  })
+  if (!yes) return
+  busy.value = 'code'
+  try {
+    const nr = await VnetService.RotateCode(r.id)
+    message.success(`新邀请码 ${fmtCode(nr.code)}`)
+    await load()
+  } catch (e) {
+    message.error(describeError(e))
+  } finally {
+    busy.value = ''
+  }
+}
 watch(
   () => state.value.roomName,
   (n, o) => {
@@ -375,7 +402,10 @@ const login = () => account.openAuth('login')
             </div>
             <div v-if="active" class="rl-tile pri">
               <small>邀请码</small>
-              <button type="button" class="mono copyable rl-val" title="复制邀请码" @click="copy(fmtCode(active.code), '邀请码')">{{ fmtCode(active.code) }}<Icon name="copy" size="s" /></button>
+              <button type="button" class="mono copyable rl-val" title="复制邀请码" @click="copy(fmtCode(codeOf(active)), '邀请码')">{{ fmtCode(codeOf(active)) }}<Icon name="copy" size="s" /></button>
+              <button v-if="isOwner(active)" type="button" class="rl-rot" title="换新邀请码（旧码作废，已经在房间里的人不受影响）" :disabled="busy === 'code'" @click="rotateCode(active)">
+                <Icon name="refresh" size="xs" :class="{ spin: busy === 'code' }" />换码
+              </button>
             </div>
             <div class="rl-tile" :title="relayLocked ? '房主锁定了中继' : '打洞打不通时，别人发给你的数据经它转发；“自动”选最近的'">
               <small>中继{{ relayLocked ? '（锁定）' : '' }}</small>
@@ -636,6 +666,23 @@ const login = () => account.openAuth('login')
   letter-spacing: 0.5px;
   line-height: 1.2;
   white-space: nowrap;
+}
+.rl-rot {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  padding: 4px 8px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--pri-text);
+  opacity: 0.75;
+}
+.rl-rot:hover {
+  opacity: 1;
+  background: color-mix(in oklab, var(--pri) 12%, transparent);
 }
 .rl-relay-sel {
   flex: 1;

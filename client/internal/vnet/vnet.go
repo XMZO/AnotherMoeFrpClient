@@ -81,6 +81,7 @@ type Engine struct {
 	sigq  chan outSignal
 	rs    relayState
 	name  string // 房间名（面板在成员列表里带过来，房主改名后跟着变）
+	code  string // 邀请码（房主换码后跟着变）
 }
 
 type peer struct {
@@ -168,7 +169,7 @@ func (e *Engine) closeLocked() {
 	} else if e.tun != nil {
 		_ = e.tun.Close()
 	}
-	e.dev, e.tun, e.bind, e.room, e.self, e.name = nil, nil, nil, "", 0, ""
+	e.dev, e.tun, e.bind, e.room, e.self, e.name, e.code = nil, nil, nil, "", 0, "", ""
 }
 
 // Room 返回当前房间（没在房间里为空）。
@@ -202,6 +203,9 @@ func (e *Engine) SetPeers(msg api.LiveVnetBody) error {
 	self, list := msg.Self, msg.Peers
 	if msg.RoomName != "" {
 		e.name = msg.RoomName
+	}
+	if msg.RoomCode != "" {
+		e.code = msg.RoomCode
 	}
 	defer e.updateRelaysLocked(msg)
 	if e.self != self {
@@ -270,6 +274,7 @@ func (e *Engine) SetPeers(msg api.LiveVnetBody) error {
 type Snapshot struct {
 	Room     string           `json:"room"`
 	RoomName string           `json:"roomName,omitempty"`
+	RoomCode string           `json:"roomCode,omitempty"`
 	Self     int              `json:"self"`
 	Peers    []PeerState      `json:"peers"`
 	Relays   []RelayView      `json:"relays"`   // 能用的中继节点（按延迟）
@@ -286,7 +291,7 @@ func (e *Engine) State() Snapshot {
 	if pref == "" {
 		pref = RelayAuto
 	}
-	st := Snapshot{Room: e.room, RoomName: e.name, Self: e.self, Peers: []PeerState{}, Relays: e.relayViewsLocked(), Home: e.rs.home, Pref: pref, Settings: e.rs.settings}
+	st := Snapshot{Room: e.room, RoomName: e.name, RoomCode: e.code, Self: e.self, Peers: []PeerState{}, Relays: e.relayViewsLocked(), Home: e.rs.home, Pref: pref, Settings: e.rs.settings}
 	for _, p := range e.peers {
 		mode := ModeOffline
 		switch {

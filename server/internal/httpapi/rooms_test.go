@@ -173,6 +173,16 @@ func TestRooms(t *testing.T) {
 	n.do(req{method: "PATCH", path: strings.Replace(api.RouteRoom, "{id}", room.ID, 1), token: ta, body: map[string]any{"allowGuests": true, "name": "  "}}).apiErr(apierr.ValidationFailed)
 	n.do(req{method: "PATCH", path: strings.Replace(api.RouteRoom, "{id}", room.ID, 1), token: ta, body: map[string]any{"allowGuests": true, "name": "新名字"}}).expect(http.StatusNoContent)
 	a.expect(api.VnetPeers, func(m api.LiveVnetBody) bool { return m.RoomName == "新名字" })
+	// 房主换邀请码：旧码作废，在线成员收到新码；别人不能换
+	n.do(req{method: "POST", path: strings.Replace(api.RouteRoomCode, "{id}", room.ID, 1), token: tb}).apiErr(apierr.Forbidden)
+	var rc api.Room
+	n.do(req{method: "POST", path: strings.Replace(api.RouteRoomCode, "{id}", room.ID, 1), token: ta}).expect(http.StatusOK).decode(&rc)
+	if rc.Code == "" || rc.Code == room.Code {
+		t.Fatalf("新邀请码：%q（旧 %q）", rc.Code, room.Code)
+	}
+	a.expect(api.VnetPeers, func(m api.LiveVnetBody) bool { return m.RoomCode == rc.Code })
+	n.do(req{method: "POST", path: api.RouteRoomGuest, body: api.GuestJoinRequest{Code: room.Code, Nickname: "路人2"}}).apiErr(apierr.ValidationFailed)
+	room.Code = rc.Code
 	var gj api.GuestJoinResponse
 	n.do(req{method: "POST", path: api.RouteRoomGuest, body: api.GuestJoinRequest{Code: room.Code, Nickname: "路人"}}).expect(http.StatusOK).decode(&gj)
 	if gj.Token == "" || !gj.Room.AllowGuests {

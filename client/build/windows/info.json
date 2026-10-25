@@ -1,10 +1,10 @@
 {
 	"fixed": {
-		"file_version": "3.2.11"
+		"file_version": "3.2.12"
 	},
 	"info": {
 		"0409": {
-			"ProductVersion": "3.2.11",
+			"ProductVersion": "3.2.12",
 			"CompanyName": "XMZO",
 			"FileDescription": "萌！FRP 高级客户端",
 			"LegalCopyright": "Copyright © 2026 XMZO. All rights reserved.",

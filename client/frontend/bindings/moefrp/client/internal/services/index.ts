@@ -8,6 +8,7 @@ import * as ProfileService from "./profileservice.js";
 import * as SettingsService from "./settingsservice.js";
 import * as ShareService from "./shareservice.js";
 import * as TunnelService from "./tunnelservice.js";
+import * as VnetService from "./vnetservice.js";
 export {
     AppService,
     AuthService,
@@ -15,10 +16,12 @@ export {
     ProfileService,
     SettingsService,
     ShareService,
-    TunnelService
+    TunnelService,
+    VnetService
 };
 
 export type {
+    Emitter,
     ImageInfo,
     License,
     LogoutInfo,
@@ -28,5 +31,7 @@ export type {
     StartupInfo,
     SubscriptionSaveResult,
     UpdateInfo,
-    VersionInfo
+    VersionInfo,
+    VnetLive,
+    VnetState
 } from "./models.js";

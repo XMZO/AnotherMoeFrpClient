@@ -67,6 +67,25 @@ export interface LiveNoticeBody {
 }
 
 /**
+ * LiveVnetBody 是 vnet 消息。
+ */
+export interface LiveVnetBody {
+    "op": string;
+    "room": string;
+    "key"?: string;
+    "to"?: number;
+    "from"?: number;
+    "data"?: string;
+
+    /**
+     * peers：自己的座位号
+     */
+    "self"?: number;
+    "peers"?: VnetPeer[] | null;
+    "reason"?: string;
+}
+
+/**
  * PreviewNode 是预览里的节点：只有备注和协议，不含地址和 token。
  */
 export interface PreviewNode {
@@ -99,6 +118,38 @@ export interface PreviewTarget {
     "serverName": string;
     "type": string;
     "localPort"?: number;
+}
+
+/**
+ * Room 是一个联机房间。
+ */
+export interface Room {
+    "id": string;
+    "name": string;
+
+    /**
+     * 邀请码，别人输入它加入
+     */
+    "code": string;
+    "ownerId": string;
+    "ownerName": string;
+    "createdAt": number;
+    "members": RoomMember[] | null;
+}
+
+/**
+ * RoomMember 是房间成员。
+ */
+export interface RoomMember {
+    "userId": string;
+    "nickname": string;
+    "slot": number;
+    "ip": string;
+
+    /**
+     * 正在房间里（客户端连着虚拟网）
+     */
+    "online": boolean;
 }
 
 /**
@@ -218,4 +269,14 @@ export interface UserInfo {
      */
     "role": string;
     "createdAt": string;
+}
+
+/**
+ * VnetPeer 是房间里的一个成员（peers 消息里）。Key 为空表示不在线。
+ */
+export interface VnetPeer {
+    "slot": number;
+    "nickname": string;
+    "ip": string;
+    "key"?: string;
 }

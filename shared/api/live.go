@@ -40,6 +40,8 @@ type LiveMessage struct {
 
 	Hello  *LiveHelloBody  `json:"hello,omitempty"`  // hello
 	Status *LiveTunnelInfo `json:"status,omitempty"` // status
+
+	Vnet *LiveVnetBody `json:"vnet,omitempty"` // vnet（两个方向），见 vnet.go
 }
 
 // 通知的级别和显示方式。

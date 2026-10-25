@@ -6,6 +6,9 @@
 import * as engine$0 from "../engine/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as vnet$0 from "../vnet/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as api$0 from "../../../shared/api/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -16,6 +19,11 @@ import * as model$0 from "../../../shared/model/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as quota$0 from "../../../shared/quota/models.js";
+
+/**
+ * Emitter 把事件推给前端，由 main 在 Wails 应用创建后注入。
+ */
+export type Emitter = any;
 
 /**
  * ImageInfo 是一张已下载的图片。
@@ -203,4 +211,44 @@ export interface VersionInfo {
     "frp": string;
     "wails": string;
     "go": string;
+}
+
+/**
+ * VnetLive 是实时通道里联机房间要用的部分（live.Client）。
+ */
+export type VnetLive = any;
+
+/**
+ * VnetState 是界面上的联机状态。
+ */
+export interface VnetState {
+    /**
+     * 有管理员权限（没有就不能进房间，界面提示重启为管理员）
+     */
+    "admin": boolean;
+
+    /**
+     * 正在哪个房间（空表示没在）
+     */
+    "room": string;
+
+    /**
+     * 自己的座位号（0 表示还没收到面板的成员列表）
+     */
+    "self": number;
+
+    /**
+     * 自己的虚拟 IP
+     */
+    "ip": string;
+
+    /**
+     * 其他成员和连接方式
+     */
+    "peers": vnet$0.PeerState[] | null;
+
+    /**
+     * 最近一次出错
+     */
+    "error"?: string;
 }

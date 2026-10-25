@@ -5,6 +5,7 @@
 *.db-journal
 *.exe
 *.dll
+!client/third_party/wintun/wintun.dll
 *.7z
 config.toml
 node_modules/

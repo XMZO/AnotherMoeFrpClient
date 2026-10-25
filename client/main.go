@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -134,6 +135,7 @@ func isolation(home string) (instance, credTarget string) {
 
 func main() {
 	started := processStart()
+	waitElevatedParent() // "以管理员身份重启"：等原来的进程退出，再走单实例
 	hooks := testhooks.Get()
 	if hooks.Diag != "" {
 		diagFile, _ = os.OpenFile(hooks.Diag, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
@@ -208,6 +210,8 @@ func main() {
 	tunnelCtl.SetTicketPool(nodeTickets)
 	tunnelCtl.SetOfficial(profiles.Sync().Official) // 上次缓存的官方节点，离线也能用
 	imageSvc, imageCtl := services.NewImageService(paths.ImagesDir(), settings, func() *http.Client { return api.NewHTTPClient(30 * time.Second) })
+	// 联机房间（虚拟局域网）：信令和中继都走实时通道
+	vnetSvc := services.NewVnetService(api, func(format string, args ...any) { diag(format, args...) })
 	syncMgr := cloudsync.New(cloudsync.Options{
 		API: api, Creds: credstore.NewWinCred(credTarget), Profiles: profiles, Engine: eng, DeviceName: hostname,
 		Logf: func(format string, args ...any) {
@@ -217,7 +221,10 @@ func main() {
 		OnOfficial: tunnelCtl.SetOfficial,
 		OnImages:   imageCtl.SetSources, // 图源只给登录的用户
 		// 票据按会话发：换了会话（重新登录、被踢下线、退出）旧票据都不能用，清空重新领
-		OnSessionChange: nodeTickets.Clear,
+		OnSessionChange: func() {
+			nodeTickets.Clear()
+			vnetSvc.Disconnect() // 换了会话：原来的房间不能再用
+		},
 	})
 	profileSvc := services.NewProfileService(profiles, settings, eng, syncMgr)
 	authSvc := services.NewAuthService(syncMgr, profiles, eng)
@@ -251,9 +258,15 @@ func main() {
 		Ended: func(b apiLiveEnded) {
 			syncMgr.CheckError(&apierr.Error{Code: apierr.Code(b.Code), Message: b.Message})
 		},
-		Online: func(on bool) { diag("live: connected=%v", on) },
+		Online: func(on bool) {
+			diag("live: connected=%v", on)
+			vnetSvc.OnLiveOnline(on)
+		},
+		Vnet:       vnetSvc.OnLive,
+		VnetPacket: vnetSvc.OnPacket,
 		Log:    func(format string, args ...any) { diag(format, args...) },
 	})
+	vnetSvc.SetLive(liveCh)
 	tunnelCtl.OnStatus(func(st engine.Status) { liveCh.SetStatus(tunnelCtl.LiveStatus(st)) })
 	liveCh.SetStatus(tunnelCtl.LiveStatus(eng.Status()))
 	settingsSvc.OnNetworkProxy = func(mode, custom string) {
@@ -292,6 +305,7 @@ func main() {
 	}
 	var newWindow func(visible bool) *application.WebviewWindow
 	stopEngine := func(why string) {
+		vnetSvc.Disconnect() // 关掉虚拟网卡
 		stopOnce.Do(func() {
 			t0 := time.Now()
 			err := eng.Shutdown(quitGrace, quitWait)
@@ -350,6 +364,7 @@ func main() {
 			application.NewService(settingsSvc),
 			application.NewService(shareSvc),
 			application.NewService(imageSvc),
+			application.NewService(vnetSvc),
 		},
 		// /moefrp-img/<id> 由图片面板提供（PLAN 6.9），其余是前端资源
 		Assets:  application.AssetOptions{Handler: imageCtl.Handler(application.AssetFileServerFS(assets))},
@@ -457,6 +472,7 @@ func main() {
 	})
 	appSvc.OpenBrowser = app.Browser.OpenURL
 	appSvc.QuitApp = func() { go quit() }
+	vnetSvc.SetQuit(quit)
 	appSvc.CloseAs = func(action string) {
 		if action == store.CloseQuit {
 			go quit()
@@ -480,6 +496,7 @@ func main() {
 		updater.SetEmitter(emit)
 		go updater.Run(updaterStop)
 		notices.SetEmitter(emit)
+		vnetSvc.SetEmitter(emit)
 		go liveCh.Run(updaterStop)
 		// 启动后自动连接上次的配置（PLAN 6.8，默认关闭）
 		if settings.Get().AutoConnect {
@@ -593,4 +610,26 @@ func fatalBox(msg string) {
 	log.Print(msg)
 	windows.MessageBox(0, windows.StringToUTF16Ptr(msg), windows.StringToUTF16Ptr(productName), windows.MB_ICONERROR|windows.MB_OK)
 	os.Exit(1)
+}
+
+// waitElevatedParent：带 --elevated-from=<pid> 启动（联机房间要管理员权限，"以管理员身份重启"）时，
+// 等原来的进程退出（最多 15 秒），否则单实例会把这个新进程当成第二个实例。
+func waitElevatedParent() {
+	for _, a := range os.Args[1:] {
+		v, ok := strings.CutPrefix(a, "--elevated-from=")
+		if !ok {
+			continue
+		}
+		pid, err := strconv.Atoi(v)
+		if err != nil {
+			return
+		}
+		h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(pid))
+		if err != nil {
+			return // 已经退出了
+		}
+		_, _ = windows.WaitForSingleObject(h, 15000)
+		_ = windows.CloseHandle(h)
+		return
+	}
 }

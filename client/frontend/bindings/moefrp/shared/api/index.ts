@@ -4,13 +4,17 @@
 export type {
     CreateShareRequest,
     LiveNoticeBody,
+    LiveVnetBody,
     PreviewNode,
     PreviewProxy,
     PreviewTarget,
+    Room,
+    RoomMember,
     Share,
     SharePreview,
     SubscriptionRef,
     SubscriptionSummary,
     UpdateShareRequest,
-    UserInfo
+    UserInfo,
+    VnetPeer
 } from "./models.js";

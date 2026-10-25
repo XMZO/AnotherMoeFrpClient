@@ -85,6 +85,7 @@ func (s *Server) initLive(ctx context.Context) error {
 			s.log.Warn("save client info", "session", sessionID, "err", err)
 		}
 	}
+	s.live.Rooms = roomRooms{s}
 	s.nodes.SetHooks(nodesHooks(s))
 	v, ok, err := store.GetSetting(ctx, s.st.DB(), settingClientConfig)
 	if err != nil {

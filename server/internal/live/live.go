@@ -42,8 +42,10 @@ type Client struct {
 	status api.LiveTunnelInfo
 	seenAt time.Time // 最近一次收到状态
 
-	send   chan api.LiveMessage
-	cancel context.CancelFunc
+	send    chan api.LiveMessage
+	sendBin chan []byte // 联机房间的中继帧
+	cancel  context.CancelFunc
+	vnet    *vnetState // 在哪个房间的虚拟网里，Hub.mu 保护
 }
 
 // Info 是后台"客户端"页的一行。
@@ -79,6 +81,8 @@ type Hub struct {
 
 	// OnHello 在客户端报上设备信息后调用（面板把它记到会话上），在单独的 goroutine 里。
 	OnHello func(sessionID, ip string, hello api.LiveHelloBody)
+	// Rooms 是联机房间的成员资格（面板设置），为空时不支持联机房间。
+	Rooms VnetRooms
 
 	mu      sync.Mutex
 	clients map[string]*Client // 按会话 ID；同一会话新连接顶掉旧的
@@ -102,6 +106,7 @@ func (h *Hub) Serve(ctx context.Context, ws *websocket.Conn, c *Client) {
 	defer cancel()
 	c.cancel = cancel
 	c.send = make(chan api.LiveMessage, sendQueue)
+	c.sendBin = make(chan []byte, relayQueue)
 	c.ConnectedAt = h.now()
 
 	h.mu.Lock()
@@ -115,8 +120,13 @@ func (h *Hub) Serve(ctx context.Context, ws *websocket.Conn, c *Client) {
 		if h.clients[c.SessionID] == c {
 			delete(h.clients, c.SessionID)
 		}
+		v := c.vnet
+		c.vnet = nil
 		h.mu.Unlock()
 		ws.Close(websocket.StatusNormalClosure, "")
+		if v != nil {
+			h.VnetRoomChanged(context.Background(), v.room) // 房间里的其他人看到他下线
+		}
 	}()
 
 	c.send <- api.LiveMessage{Type: api.LiveWelcome, ServerTime: h.now().Unix()}
@@ -139,6 +149,13 @@ func (h *Hub) Serve(ctx context.Context, ws *websocket.Conn, c *Client) {
 			if m.Type == api.LiveEnded {
 				return // 会话结束：说完原因就断开
 			}
+		case b := <-c.sendBin:
+			wctx, wcancel := context.WithTimeout(ctx, writeTimeout)
+			err := ws.Write(wctx, websocket.MessageBinary, b)
+			wcancel()
+			if err != nil {
+				return
+			}
 		case <-ping.C:
 			pctx, pcancel := context.WithTimeout(ctx, pingTimeout)
 			err := ws.Ping(pctx)
@@ -153,12 +170,20 @@ func (h *Hub) Serve(ctx context.Context, ws *websocket.Conn, c *Client) {
 func (h *Hub) readLoop(ctx context.Context, cancel context.CancelFunc, ws *websocket.Conn, c *Client) {
 	defer cancel()
 	for {
-		_, b, err := ws.Read(ctx)
+		typ, b, err := ws.Read(ctx)
 		if err != nil {
 			return
 		}
+		if typ == websocket.MessageBinary {
+			h.relay(c, b)
+			continue
+		}
 		var m api.LiveMessage
 		if json.Unmarshal(b, &m) != nil {
+			continue
+		}
+		if m.Type == api.LiveVnet {
+			h.onVnet(ctx, c, m.Vnet)
 			continue
 		}
 		c.mu.Lock()

@@ -380,3 +380,42 @@ func DeviceName(hostname string) string {
 	}
 	return string(r)
 }
+
+// ---- 联机房间 ----
+
+// Rooms：GET /api/v1/rooms。
+func (c *Client) Rooms(ctx context.Context) ([]api.Room, error) {
+	var out api.RoomsResponse
+	if _, _, err := c.do(ctx, http.MethodGet, api.RouteRooms, nil, nil, &out); err != nil {
+		return nil, err
+	}
+	if out.Rooms == nil {
+		out.Rooms = []api.Room{}
+	}
+	return out.Rooms, nil
+}
+
+// CreateRoom：POST /api/v1/rooms。
+func (c *Client) CreateRoom(ctx context.Context, name string) (api.Room, error) {
+	var out api.Room
+	_, _, err := c.do(ctx, http.MethodPost, api.RouteRooms, nil, api.CreateRoomRequest{Name: name}, &out)
+	return out, err
+}
+
+// JoinRoom：POST /api/v1/rooms/join。
+func (c *Client) JoinRoom(ctx context.Context, code string) error {
+	_, _, err := c.do(ctx, http.MethodPost, api.RouteRoomJoin, nil, api.JoinRoomRequest{Code: code}, nil)
+	return err
+}
+
+// LeaveRoom：POST /api/v1/rooms/{id}/leave（房主离开等于解散）。
+func (c *Client) LeaveRoom(ctx context.Context, id string) error {
+	_, _, err := c.do(ctx, http.MethodPost, strings.Replace(api.RouteRoomLeave, "{id}", url.PathEscape(id), 1), nil, nil, nil)
+	return err
+}
+
+// KickRoom：POST /api/v1/rooms/{id}/kick。
+func (c *Client) KickRoom(ctx context.Context, id, userID string) error {
+	_, _, err := c.do(ctx, http.MethodPost, strings.Replace(api.RouteRoomKick, "{id}", url.PathEscape(id), 1), nil, api.KickRoomRequest{UserID: userID}, nil)
+	return err
+}

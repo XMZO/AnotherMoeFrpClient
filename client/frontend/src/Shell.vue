@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import TunnelPage from './pages/TunnelPage.vue'
 import SettingsPage from './pages/SettingsPage.vue'
 import SharesPage from './pages/SharesPage.vue'
+import RoomsPage from './pages/RoomsPage.vue'
 import AboutPage from './pages/AboutPage.vue'
 import AccountArea from './components/AccountArea.vue'
 import AuthModal from './components/AuthModal.vue'
@@ -24,11 +25,12 @@ import { describeError } from './errors'
 import { message } from './ui/feedback'
 import mascot from './assets/mascot.png'
 
-type Page = 'tunnel' | 'shares' | 'settings' | 'about'
+type Page = 'tunnel' | 'shares' | 'rooms' | 'settings' | 'about'
 const page = ref<Page>('tunnel')
 const nav: { key: Page; label: string; icon: IconName }[] = [
   { key: 'tunnel', label: '隧道', icon: 'tunnel' },
   { key: 'shares', label: '分享', icon: 'share' },
+  { key: 'rooms', label: '联机', icon: 'users' },
   { key: 'settings', label: '设置', icon: 'settings' },
   { key: 'about', label: '关于', icon: 'star' },
 ]
@@ -161,6 +163,7 @@ onMounted(async () => {
       <main class="main">
         <TunnelPage v-show="page === 'tunnel'" />
         <SharesPage v-if="page === 'shares'" />
+        <RoomsPage v-if="page === 'rooms'" />
         <SettingsPage v-if="page === 'settings'" />
         <AboutPage v-if="page === 'about'" />
       </main>

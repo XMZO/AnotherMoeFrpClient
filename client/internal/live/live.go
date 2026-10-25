@@ -24,15 +24,18 @@ import (
 
 // Handlers 是收到各类消息时的回调，在通道的 goroutine 上调用，不要阻塞太久。没设的忽略。
 type Handlers struct {
-	Sync     func()                           // 云端配置、订阅变了
-	Official func()                           // 官方节点列表、限额、访问地址变了
-	Tickets  func(node string)                // 登录票据作废了（node 为空表示全部）
-	Config   func(api.ClientConfigResponse)   // 客户端配置变了（版本、最低版本、公告）
-	Notice   func(api.LiveNoticeBody)         // 管理员推送的通知
-	Tunnel   func(api.LiveTunnelCommand)      // 管理员远程控制隧道
-	Ended    func(api.LiveEndedBody)          // 会话被面板结束了（被踢、改密码、账号停用）
-	Online   func(connected bool)             // 通道连上 / 断开
-	Log      func(format string, args ...any) // 调试日志
+	Sync     func()                         // 云端配置、订阅变了
+	Official func()                         // 官方节点列表、限额、访问地址变了
+	Tickets  func(node string)              // 登录票据作废了（node 为空表示全部）
+	Config   func(api.ClientConfigResponse) // 客户端配置变了（版本、最低版本、公告）
+	Notice   func(api.LiveNoticeBody)       // 管理员推送的通知
+	Tunnel   func(api.LiveTunnelCommand)    // 管理员远程控制隧道
+	Ended    func(api.LiveEndedBody)        // 会话被面板结束了（被踢、改密码、账号停用）
+	Online   func(connected bool)           // 通道连上 / 断开
+	// Vnet 是联机房间的消息，VnetPacket 是中继过来的数据包（from 是发送方的座位号，payload 不能留着用）。
+	Vnet       func(api.LiveVnetBody)
+	VnetPacket func(from int, payload []byte)
+	Log        func(format string, args ...any) // 调试日志
 }
 
 const (
@@ -201,12 +204,18 @@ func (c *Client) session(parent context.Context, token string) error {
 	}()
 
 	for {
-		_, b, err := ws.Read(ctx)
+		typ, b, err := ws.Read(ctx)
 		if err != nil {
 			if ctx.Err() != nil && parent.Err() == nil {
 				return nil // 主动断开（令牌变了、换代理）
 			}
 			return err
+		}
+		if typ == websocket.MessageBinary {
+			if len(b) > 1 && c.h.VnetPacket != nil {
+				c.h.VnetPacket(int(b[0]), b[1:])
+			}
+			continue
 		}
 		var m api.LiveMessage
 		if json.Unmarshal(b, &m) != nil {
@@ -218,6 +227,35 @@ func (c *Client) session(parent context.Context, token string) error {
 		}
 	}
 }
+
+// SendVnet 发一条联机房间消息；通道没连上时返回错误（连上后由 Online 回调重新进房间）。
+func (c *Client) SendVnet(b api.LiveVnetBody) error {
+	c.mu.Lock()
+	ws := c.conn
+	c.mu.Unlock()
+	if ws == nil {
+		return errNotConnected
+	}
+	return c.write(context.Background(), ws, api.LiveMessage{Type: api.LiveVnet, Vnet: &b})
+}
+
+// SendPacket 经面板中继一个数据包给房间里座位号为 to 的成员。
+func (c *Client) SendPacket(to int, payload []byte) error {
+	c.mu.Lock()
+	ws := c.conn
+	c.mu.Unlock()
+	if ws == nil {
+		return errNotConnected
+	}
+	b := make([]byte, 1+len(payload))
+	b[0] = byte(to)
+	copy(b[1:], payload)
+	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+	defer cancel()
+	return ws.Write(ctx, websocket.MessageBinary, b)
+}
+
+var errNotConnected = errors.New("live channel not connected")
 
 func (c *Client) sendStatus(ctx context.Context, ws *websocket.Conn) error {
 	c.mu.Lock()
@@ -265,6 +303,10 @@ func (c *Client) dispatch(m api.LiveMessage) {
 	case api.LiveEnded:
 		if c.h.Ended != nil && m.Ended != nil {
 			c.h.Ended(*m.Ended)
+		}
+	case api.LiveVnet:
+		if c.h.Vnet != nil && m.Vnet != nil {
+			c.h.Vnet(*m.Vnet)
 		}
 	}
 }

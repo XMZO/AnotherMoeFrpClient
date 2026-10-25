@@ -20,7 +20,7 @@ const emit = defineEmits<{ back: [] }>()
 interface Member { userId: string; nickname: string; slot: number; ip: string; online: boolean }
 interface Settings { allowGuests: boolean; relay: string; relayLocked: boolean }
 interface Room extends Settings { id: string; name: string; code: string; ownerId: string; ownerName: string; members: Member[] }
-interface PeerState { slot: number; nickname: string; ip: string; mode: string }
+interface PeerState { slot: number; nickname: string; ip: string; mode: string; rtt?: number }
 interface RelayView { id: string; name: string; region?: string; latency: number }
 interface VnetState {
   admin: boolean
@@ -65,6 +65,8 @@ const modeView: Record<string, [string, string]> = {
   connecting: ['打洞中', 'info'],
   offline: ['不在线', ''],
 }
+// 成员延迟（毫秒）的颜色：60 以内绿，150 以内黄，再高红
+const rttClass = (ms?: number) => (!ms ? '' : ms < 60 ? 'good' : ms < 150 ? 'mid' : 'bad')
 const fmtCode = (c: string) => (c.length === 8 ? `${c.slice(0, 4)}-${c.slice(4)}` : c)
 const latencyText = (l: number) => (l > 0 ? `${l} ms` : l < 0 ? '连不上' : '测速中')
 const titles = { create: '创建房间', join: '加入房间', guest: '游客加入' }
@@ -332,6 +334,7 @@ const login = () => account.openAuth('login')
             <div v-for="p in state.peers" :key="p.slot" class="rl-peer">
               <b :title="p.nickname">{{ p.nickname }}</b>
               <button type="button" class="mono copyable peerip" title="复制" @click="copy(p.ip, p.nickname + ' 的虚拟 IP')">{{ p.ip }}<Icon name="copy" size="xs" /></button>
+              <span v-if="p.mode !== 'offline'" class="rl-rtt mono" :class="rttClass(p.rtt)" title="到他的延迟（往返）">{{ p.rtt ? p.rtt + ' ms' : '— ms' }}</span>
               <span class="bdg" :class="modeView[p.mode]?.[1]">{{ modeView[p.mode]?.[0] ?? p.mode }}</span>
               <button v-if="isOwner(active) && memberOf(p.slot)" type="button" class="rc-kick" title="移出房间" @click="kick(active!, memberOf(p.slot)!)"><Icon name="x" size="xs" /></button>
             </div>
@@ -507,7 +510,7 @@ const login = () => account.openAuth('login')
 /* 成员多的时候是紧凑的多列网格，超过 4 行在框里滚动，页面不会越拉越长 */
 .rl-peers {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   align-content: start;
   gap: 6px;
   margin-top: 12px;
@@ -534,6 +537,21 @@ const login = () => account.openAuth('login')
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.rl-rtt {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.rl-rtt.good {
+  color: var(--ok-text);
+}
+.rl-rtt.mid {
+  color: var(--warn-text);
+}
+.rl-rtt.bad {
+  color: var(--bad-text);
 }
 .rc-m.more {
   color: var(--text-3);

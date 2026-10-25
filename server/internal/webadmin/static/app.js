@@ -2955,6 +2955,9 @@
       const accDomain = input({ value: accSet.domain || '', placeholder: '例如 sh1.example.com（可选）', maxlength: 253 });
       const accV4 = input({ value: accSet.ipv4 || '', placeholder: auto(acc.detectedV4), maxlength: 15, class: 'input mono' });
       const accV6 = input({ value: accSet.ipv6 || '', placeholder: auto(acc.detectedV6), maxlength: 45, class: 'input mono' });
+      // 联机房间的中继端口：存在 frps 配置里（"配置"页"基础"组也能改），这里放一份显眼的
+      const relayWas = (n.settings && n.settings.vnetRelayPort) || 0;
+      const relayPort = input({ type: 'number', min: 0, max: 65535, value: String(relayWas), placeholder: '7072', class: 'input mono', inputmode: 'numeric' });
       const save = button('保存', {
         kind: 'primary', small: true,
         onclick: () => busy(save, async () => {
@@ -2967,7 +2970,12 @@
             await api('PATCH', '/nodes/' + encodeURIComponent(id), { name: name.value, publicAddr: addr.value, downloadMirror: mirror.value, region: region.value() });
             if (accessChanged) await api('PUT', '/nodes/' + encodeURIComponent(id) + '/official', access);
             if (addrsChanged) await api('PUT', '/nodes/' + encodeURIComponent(id) + '/access', addrs);
-            toast(accessChanged ? '已保存，正在推送到节点' : '已保存');
+            const rp = Number(relayPort.value) || 0;
+            if (rp !== relayWas) {
+              const cur = n.settings || (await frpsSchema()).defaults;
+              await api('PUT', '/nodes/' + encodeURIComponent(id) + '/settings', Object.assign({}, cur, { vnetRelayPort: rp }));
+            }
+            toast(accessChanged || rp !== relayWas ? '已保存，正在推送到节点' : '已保存');
             load(true);
           } catch (e) {
             fail(e);
@@ -3046,7 +3054,9 @@
           field('给用户看的说明', desc, '显示在客户端的节点列表里。限额在节点列表的"限额"里按用户组设置'),
           h('div', { class: 'field-label access-title' }, '用户访问地址',
             h('span', { class: 'muted' }, '显示在客户端，用户复制去访问自己的 tcp / udp 代理。IP 留空自动检测，填 - 不显示')),
-          h('div', { class: 'access-grid' }, field('域名', accDomain), field('IPv4', accV4), field('IPv6', accV6))),
+          h('div', { class: 'access-grid' }, field('域名', accDomain), field('IPv4', accV4), field('IPv6', accV6)),
+          field('联机中继端口', relayPort, n.info && !(n.info.features || []).includes('vnet-relay') ? 'agent 要升级到 1.4.6 才支持' :
+            'TCP（推荐 7072），要在防火墙 / 安全组放行。联机房间里打洞打不通的成员经它转发；0 关闭')),
         ops: h('div', { class: 'ops' },
           op('重启 frps', '客户端会短暂断开', '/restart', 'frps 已重启', { icon: 'refresh' }),
           op('升级 agent', n.upgradeTo ? '可升级到 ' + n.upgradeTo : '已是最新版本', '/upgrade', '已开始升级，结果在"命令"页的历史里',

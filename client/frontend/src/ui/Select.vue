@@ -195,6 +195,7 @@ onBeforeUnmount(() => listen(false))
 }
 .sel-pop {
   min-width: 0;
+  z-index: 1200; /* 在弹窗（1050–1100）上面：弹窗里的下拉框不被盖住 */
 }
 .sel-opt {
   justify-content: space-between;

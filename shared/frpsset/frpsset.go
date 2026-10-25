@@ -54,7 +54,7 @@ type Settings struct {
 
 // Defaults 是新节点的默认配置。
 func Defaults() Settings {
-	return Settings{BindPort: 7000, AllowPorts: "10000-60000", LogLevel: "info", TCPMux: true, DetailedErrorsToClient: true}
+	return Settings{BindPort: 7000, AllowPorts: "10000-60000", LogLevel: "info", TCPMux: true, DetailedErrorsToClient: true, VnetRelayPort: 7072}
 }
 
 // Group 是表单里的一组配置。

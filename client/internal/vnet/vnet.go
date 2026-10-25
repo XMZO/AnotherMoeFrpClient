@@ -53,6 +53,7 @@ type PeerState struct {
 	IP       string `json:"ip"`
 	Self     bool   `json:"self"`
 	Mode     string `json:"mode"`
+	RTT      int    `json:"rtt,omitempty"` // 延迟（毫秒），0 表示还不知道
 }
 
 // AdapterName 是虚拟网卡的名字（网络连接里看到的）。
@@ -88,6 +89,8 @@ type peer struct {
 	relay    string // 他的收件中继（节点 ID），空表示面板
 	ice      *iceSession
 	direct   *directConn
+	rtt      time.Duration // 延迟（平滑后），见 latency.go
+	rttAt    time.Time
 }
 
 // New 创建引擎，还没有网卡。onChange 在成员或连接方式变化时调用（界面刷新）。
@@ -125,6 +128,7 @@ func (e *Engine) Start(room string) (string, error) {
 	e.done = make(chan struct{})
 	e.sigq = make(chan outSignal, 256)
 	go e.sendSignals(e.sigq, e.done)
+	go e.pingLoop(e.done)
 	e.dev = device.NewDevice(&bcastTun{Device: t, e: e}, e.bind, device.NewLogger(device.LogLevelError, "vnet: "))
 	if err := e.dev.IpcSet("private_key=" + hex.EncodeToString(e.priv) + "\n"); err != nil {
 		e.closeLocked()
@@ -227,7 +231,7 @@ func (e *Engine) SetPeers(msg api.LiveVnetBody) error {
 			p.ice.close()
 			p.ice = nil
 		}
-		p.key = x.Key
+		p.key, p.rtt = x.Key, 0
 		if k := wgKeyHex(x.Key); k != "" {
 			fmt.Fprintf(&b, "public_key=%s\nreplace_allowed_ips=true\nallowed_ip=%s/32\nendpoint=%d\npersistent_keepalive_interval=25\n", k, x.IP, x.Slot)
 			if self < x.Slot { // 座位号小的一方发起打洞
@@ -288,7 +292,7 @@ func (e *Engine) State() Snapshot {
 		default:
 			mode = ModeRelay
 		}
-		st.Peers = append(st.Peers, PeerState{Slot: p.slot, Nickname: p.nickname, IP: p.ip, Mode: mode})
+		st.Peers = append(st.Peers, PeerState{Slot: p.slot, Nickname: p.nickname, IP: p.ip, Mode: mode, RTT: p.rttMs()})
 	}
 	slices.SortFunc(st.Peers, func(a, b PeerState) int { return a.Slot - b.Slot })
 	return st
@@ -374,6 +378,9 @@ type bind struct {
 func newBind(e *Engine) *bind { return &bind{e: e, recv: make(chan pkt, 1024)} }
 
 func (b *bind) deliver(from int, payload []byte) {
+	if b.e.handleProbe(from, payload) {
+		return
+	}
 	c := make([]byte, len(payload))
 	copy(c, payload)
 	select {

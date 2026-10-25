@@ -338,16 +338,15 @@ const login = () => account.openAuth('login')
         <div class="room-grid">
           <article v-for="r in rooms" :key="r.id" class="card room-card" :class="{ cur: r.id === state.room }">
             <div class="rc-top">
-              <div class="rc-t">
-                <b>{{ r.name }}</b>
-                <small>房主 {{ r.ownerName }} · {{ r.members.filter((m) => m.online).length }}/{{ r.members.length }} 人在线{{ r.allowGuests ? ' · 允许游客' : '' }}</small>
-              </div>
-              <div class="rc-acts">
-                <button type="button" class="mono copyable code" title="复制邀请码，发给朋友" @click="copy(fmtCode(r.code), '邀请码')">
-                  <Icon name="link" size="xs" />{{ fmtCode(r.code) }}<Icon name="copy" size="xs" />
-                </button>
-                <button v-if="isOwner(r)" type="button" class="btn soft xs" title="允许游客、默认中继" @click="openSettings(r)"><Icon name="settings" size="xs" />设置</button>
-              </div>
+              <b class="rc-name">{{ r.name }}</b>
+              <button v-if="isOwner(r)" type="button" class="btn soft xs" title="允许游客、默认中继" @click="openSettings(r)"><Icon name="settings" size="xs" />设置</button>
+            </div>
+            <small class="rc-meta">房主 {{ r.ownerName }} · {{ r.members.filter((m) => m.online).length }}/{{ r.members.length }} 人在线</small>
+            <div class="rc-code">
+              <button type="button" class="mono copyable code" title="复制邀请码，发给朋友" @click="copy(fmtCode(r.code), '邀请码')">
+                <Icon name="link" size="xs" />邀请码 {{ fmtCode(r.code) }}<Icon name="copy" size="xs" />
+              </button>
+              <span v-if="r.allowGuests" class="bdg info">允许游客</span>
             </div>
             <div class="rc-members">
               <span v-for="m in r.members" :key="m.userId" class="rc-m" :class="{ on: m.online }" :title="m.ip">
@@ -533,7 +532,7 @@ const login = () => account.openAuth('login')
 }
 .rc-top {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
 }
 .rc-t {
@@ -553,11 +552,25 @@ const login = () => account.openAuth('login')
   color: var(--text-3);
   font-weight: 600;
 }
-.rc-acts {
+.rc-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rc-meta {
+  margin-top: -6px;
+  font-size: 12px;
+  color: var(--text-3);
+  font-weight: 600;
+}
+.rc-code {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
-  flex: none;
 }
 .copyable.code {
   padding: 3px 8px;

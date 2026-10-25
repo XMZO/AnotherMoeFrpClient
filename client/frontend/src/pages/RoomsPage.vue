@@ -310,7 +310,7 @@ const login = () => account.openAuth('login')
             </div>
             <div v-if="active" class="rl-ip">
               <small>邀请码（发给朋友）</small>
-              <button type="button" class="mono copyable code" title="复制邀请码" @click="copy(fmtCode(active.code), '邀请码')">{{ fmtCode(active.code) }}<Icon name="copy" size="xs" /></button>
+              <button type="button" class="mono copyable code big" title="复制邀请码" @click="copy(fmtCode(active.code), '邀请码')">{{ fmtCode(active.code) }}<Icon name="copy" size="s" /></button>
             </div>
             <button v-if="isOwner(active)" type="button" class="btn soft sm" @click="openSettings(active!)"><Icon name="settings" size="s" />房间设置</button>
             <button type="button" class="btn ghost sm" :disabled="busy === 'disc'" @click="disconnect"><Icon name="stop" size="s" />断开</button>
@@ -571,6 +571,13 @@ const login = () => account.openAuth('login')
   background: var(--pri-soft);
   color: var(--pri-text);
   font-size: 12.5px;
+}
+.copyable.code.big {
+  padding: 6px 14px;
+  border-radius: 12px;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 1px;
 }
 .rc-members {
   display: flex;

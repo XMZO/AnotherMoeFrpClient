@@ -231,7 +231,12 @@ func (e *Engine) setPeersLocked(msg api.LiveVnetBody) (*device.Device, string, e
 	if msg.RoomCode != "" {
 		e.code = msg.RoomCode
 	}
+	wasNoDirect := e.rs.settings.NoDirect
+	if msg.Settings != nil {
+		e.rs.settings = *msg.Settings // 先更新：下面打不打洞要看 NoDirect
+	}
 	defer e.updateRelaysLocked(msg)
+	defer e.applyNoDirectLocked(wasNoDirect)
 	if e.self != self {
 		e.self = self
 		if err := configureAdapter(AdapterName, api.VnetIP(self), api.VnetIP6(self)); err != nil {
@@ -372,6 +377,25 @@ func (e *Engine) send(slot int, pkt []byte) error {
 		return nil
 	}
 	return e.tr.Relay(slot, pkt)
+}
+
+// applyNoDirectLocked：房主改了"禁止直连"。打开时断掉所有直连和正在打的洞（之后走中继）；关掉时重新打洞。
+func (e *Engine) applyNoDirectLocked(was bool) {
+	now := e.rs.settings.NoDirect
+	if now == was {
+		return
+	}
+	for _, p := range e.peers {
+		if now {
+			e.dropDirectLocked(p)
+			if p.ice != nil {
+				p.ice.close()
+				p.ice = nil
+			}
+		} else if p.key != "" && p.ice == nil && p.direct == nil && e.self < p.slot {
+			e.startICELocked(p, 0)
+		}
+	}
 }
 
 // selfIP 返回自己的虚拟 IP（还没分到座位时 ok 为 false）。

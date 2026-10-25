@@ -194,6 +194,11 @@ export interface Room {
     "noVoice": boolean;
 
     /**
+     * 禁止直连：成员之间不打洞，全部走中继（也不会互相看到公网 IP）
+     */
+    "noDirect": boolean;
+
+    /**
      * 被禁言的座位号（不能在语音里说话）
      */
     "muted": number[] | null;
@@ -237,6 +242,11 @@ export interface RoomSettings {
      * 关闭语音（默认开着）
      */
     "noVoice": boolean;
+
+    /**
+     * 禁止直连：成员之间不打洞，全部走中继（也不会互相看到公网 IP）
+     */
+    "noDirect": boolean;
 
     /**
      * 被禁言的座位号（不能在语音里说话）

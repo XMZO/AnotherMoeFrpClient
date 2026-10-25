@@ -306,9 +306,10 @@ func (s *Server) handleRoomSettings(w http.ResponseWriter, r *http.Request) {
 	// noVoice、muted 没带就保持原样（旧版本客户端改设置时不会把语音设置清掉）
 	var body struct {
 		api.RoomSettings
-		NoVoice *bool   `json:"noVoice"`
-		Muted   *[]int  `json:"muted"`
-		Name    *string `json:"name"` // 改房间名（不带就不改）
+		NoVoice  *bool   `json:"noVoice"`
+		NoDirect *bool   `json:"noDirect"`
+		Muted    *[]int  `json:"muted"`
+		Name     *string `json:"name"` // 改房间名（不带就不改）
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		s.writeError(w, r, err)
@@ -326,9 +327,12 @@ func (s *Server) handleRoomSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req := body.RoomSettings
-	req.NoVoice, req.Muted = room.NoVoice, room.Muted
+	req.NoVoice, req.Muted, req.NoDirect = room.NoVoice, room.Muted, room.NoDirect
 	if body.NoVoice != nil {
 		req.NoVoice = *body.NoVoice
+	}
+	if body.NoDirect != nil {
+		req.NoDirect = *body.NoDirect
 	}
 	if body.Muted != nil {
 		req.Muted = []int{}

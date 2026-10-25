@@ -91,8 +91,11 @@ func newAgent() (*ice.Agent, error) {
 	})
 }
 
-// startICELocked 发起一次打洞（发起方）。调用方持有 e.mu。
+// startICELocked 发起一次打洞（发起方）。调用方持有 e.mu。房主禁止了直连时不打洞（全部走中继）。
 func (e *Engine) startICELocked(p *peer, gen int) {
+	if e.rs.settings.NoDirect {
+		return
+	}
 	a, err := newAgent()
 	if err != nil {
 		e.logf("vnet: ice agent: %v", err)
@@ -198,8 +201,8 @@ func (e *Engine) OnSignal(from int, data string) {
 	}
 	switch sg.T {
 	case "offer": // 我是应答方：换一个新的 agent
-		if e.self < from {
-			return // 两边都以为自己该发起：以座位号小的为准
+		if e.self < from || e.rs.settings.NoDirect {
+			return // 两边都以为自己该发起：以座位号小的为准；房主禁止了直连
 		}
 		e.dropDirectLocked(p)
 		if p.ice != nil {

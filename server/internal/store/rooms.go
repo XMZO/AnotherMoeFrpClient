@@ -19,7 +19,7 @@ type RoomRow struct {
 	api.RoomSettings
 }
 
-const roomColumns = `id, name, code, owner_id, created_at, allow_guests, relay, relay_locked, no_voice, voice_muted`
+const roomColumns = `id, name, code, owner_id, created_at, allow_guests, relay, relay_locked, no_voice, voice_muted, no_direct`
 
 // InsertRoom 建房间并把房主放进 1 号座位。
 func InsertRoom(ctx context.Context, q Querier, r RoomRow) error {
@@ -45,7 +45,7 @@ func GetRoomByCode(ctx context.Context, q Querier, code string) (RoomRow, error)
 func scanRoom(row *sql.Row) (RoomRow, error) {
 	var r RoomRow
 	var muted string
-	err := row.Scan(&r.ID, &r.Name, &r.Code, &r.OwnerID, &r.CreatedAt, &r.AllowGuests, &r.Relay, &r.RelayLocked, &r.NoVoice, &muted)
+	err := row.Scan(&r.ID, &r.Name, &r.Code, &r.OwnerID, &r.CreatedAt, &r.AllowGuests, &r.Relay, &r.RelayLocked, &r.NoVoice, &muted, &r.NoDirect)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RoomRow{}, ErrNotFound
 	}
@@ -165,7 +165,7 @@ func RoomMembers(ctx context.Context, q Querier, roomID string) ([]api.RoomMembe
 
 // UserRooms 返回用户加入的房间（不含成员）。
 func UserRooms(ctx context.Context, q Querier, userID string) ([]api.Room, error) {
-	rows, err := q.QueryContext(ctx, `SELECT r.id, r.name, r.code, r.owner_id, u.nickname, r.created_at, r.allow_guests, r.relay, r.relay_locked, r.no_voice, r.voice_muted
+	rows, err := q.QueryContext(ctx, `SELECT r.id, r.name, r.code, r.owner_id, u.nickname, r.created_at, r.allow_guests, r.relay, r.relay_locked, r.no_voice, r.voice_muted, r.no_direct
 		FROM rooms r JOIN room_members m ON m.room_id = r.id JOIN users u ON u.id = r.owner_id
 		WHERE m.user_id = ? ORDER BY m.joined_at`, userID)
 	if err != nil {
@@ -176,7 +176,7 @@ func UserRooms(ctx context.Context, q Querier, userID string) ([]api.Room, error
 	for rows.Next() {
 		var r api.Room
 		var muted string
-		if err := rows.Scan(&r.ID, &r.Name, &r.Code, &r.OwnerID, &r.OwnerName, &r.CreatedAt, &r.AllowGuests, &r.Relay, &r.RelayLocked, &r.NoVoice, &muted); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.Code, &r.OwnerID, &r.OwnerName, &r.CreatedAt, &r.AllowGuests, &r.Relay, &r.RelayLocked, &r.NoVoice, &muted, &r.NoDirect); err != nil {
 			return nil, err
 		}
 		r.Muted = parseSlots(muted)
@@ -197,8 +197,8 @@ func SetRoomName(ctx context.Context, q Querier, id, name string) error {
 
 // SetRoomSettings 保存房主的设置。
 func SetRoomSettings(ctx context.Context, q Querier, id string, st api.RoomSettings) error {
-	return execOne(ctx, q, `UPDATE rooms SET allow_guests = ?, relay = ?, relay_locked = ?, no_voice = ?, voice_muted = ? WHERE id = ?`,
-		st.AllowGuests, st.Relay, st.RelayLocked, st.NoVoice, joinSlots(st.Muted), id)
+	return execOne(ctx, q, `UPDATE rooms SET allow_guests = ?, relay = ?, relay_locked = ?, no_voice = ?, voice_muted = ?, no_direct = ? WHERE id = ?`,
+		st.AllowGuests, st.Relay, st.RelayLocked, st.NoVoice, joinSlots(st.Muted), st.NoDirect, id)
 }
 
 // GuestRow 是一个游客。

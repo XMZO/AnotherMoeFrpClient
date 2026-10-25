@@ -64,6 +64,7 @@ type RoomSettings struct {
 	Relay       string `json:"relay"`       // 默认中继：节点 ID，空表示自动（每人选最近的）
 	RelayLocked bool   `json:"relayLocked"` // 锁定：所有人只能用 Relay（为空时都用自动）
 	NoVoice     bool   `json:"noVoice"`     // 关闭语音（默认开着）
+	NoDirect    bool   `json:"noDirect"`    // 禁止直连：成员之间不打洞，全部走中继（也不会互相看到公网 IP）
 	Muted       []int  `json:"muted"`       // 被禁言的座位号（不能在语音里说话）
 }
 

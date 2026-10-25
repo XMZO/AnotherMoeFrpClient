@@ -19,7 +19,7 @@ import { joinVoice, leaveVoice, peerVolume, setDeaf, setInput, setMic, setOutput
 const emit = defineEmits<{ back: [] }>()
 
 interface Member { userId: string; nickname: string; slot: number; ip: string; online: boolean }
-interface Settings { allowGuests: boolean; relay: string; relayLocked: boolean; noVoice?: boolean; muted?: number[] | null }
+interface Settings { allowGuests: boolean; relay: string; relayLocked: boolean; noVoice?: boolean; muted?: number[] | null; noDirect?: boolean }
 interface Room extends Settings { id: string; name: string; code: string; ownerId: string; ownerName: string; members: Member[] }
 interface PeerState { slot: number; nickname: string; ip: string; mode: string; rtt?: number; via?: string }
 interface RelayView { id: string; name: string; region?: string; latency: number }
@@ -48,12 +48,13 @@ const state = ref<VnetState>({ admin: true, driver: true, room: '', self: 0, ip:
 const installing = ref(false)
 const installErr = ref('')
 const modal = ref<{ show: boolean; mode: 'create' | 'join' | 'guest'; value: string; nick: string; error: string }>({ show: false, mode: 'create', value: '', nick: '', error: '' })
-const setDlg = ref<{ show: boolean; room: Room | null; name: string; allowGuests: boolean; voice: boolean; relay: string; relayLocked: boolean; relays: { id: string; name: string }[] }>({
+const setDlg = ref<{ show: boolean; room: Room | null; name: string; allowGuests: boolean; voice: boolean; noDirect: boolean; relay: string; relayLocked: boolean; relays: { id: string; name: string }[] }>({
   show: false,
   room: null,
   name: '',
   allowGuests: false,
   voice: true,
+  noDirect: false,
   relay: '',
   relayLocked: false,
   relays: [],
@@ -276,7 +277,7 @@ async function toggleMute(slot: number) {
   const cur = st.muted ?? []
   const muted = cur.includes(slot) ? cur.filter((x) => x !== slot) : [...cur, slot]
   try {
-    await VnetService.UpdateRoom(r.id, { allowGuests: st.allowGuests, relay: st.relay, relayLocked: st.relayLocked, noVoice: !!st.noVoice, muted }, '')
+    await VnetService.UpdateRoom(r.id, { allowGuests: st.allowGuests, relay: st.relay, relayLocked: st.relayLocked, noVoice: !!st.noVoice, noDirect: !!st.noDirect, muted }, '')
   } catch (e) {
     message.error(describeError(e))
   }
@@ -292,7 +293,7 @@ async function kick(r: Room, m: Member) {
 }
 
 async function openSettings(r: Room) {
-  setDlg.value = { show: true, room: r, name: roomName(r), allowGuests: r.allowGuests, voice: !r.noVoice, relay: r.relay, relayLocked: r.relayLocked, relays: [] }
+  setDlg.value = { show: true, room: r, name: roomName(r), allowGuests: r.allowGuests, voice: !r.noVoice, noDirect: !!r.noDirect, relay: r.relay, relayLocked: r.relayLocked, relays: [] }
   try {
     setDlg.value.relays = ((await VnetService.RoomRelays()) ?? []).map((x: any) => ({ id: x.id, name: x.name }))
   } catch {
@@ -315,6 +316,7 @@ async function saveSettings() {
       relay: d.relay,
       relayLocked: d.relayLocked,
       noVoice: !d.voice,
+      noDirect: d.noDirect,
       muted: state.value.settings.muted ?? d.room.muted ?? [],
     }, name !== roomName(d.room) ? name : '')
     message.success('房间设置已保存')
@@ -397,7 +399,7 @@ const login = () => account.openAuth('login')
           <div class="rl-head">
             <span class="tile-ic ok"><Icon name="users" size="s" /></span>
             <div class="rl-t">
-              <b><span class="rl-name">{{ active ? roomName(active) : '…' }}</span><span class="bdg ok">正在房间里</span><span v-if="active" class="bdg" :class="active.allowGuests ? 'info' : ''">{{ active.allowGuests ? '允许游客' : '禁止游客' }}</span></b>
+              <b><span class="rl-name">{{ active ? roomName(active) : '…' }}</span><span class="bdg ok">正在房间里</span><span v-if="active" class="bdg" :class="active.allowGuests ? 'info' : ''">{{ active.allowGuests ? '允许游客' : '禁止游客' }}</span><span v-if="state.settings.noDirect" class="bdg gold" title="房主禁止了直连：成员之间全部经中继转发">仅中继</span></b>
             </div>
             <div class="rl-acts">
               <button v-if="isOwner(active)" type="button" class="btn soft sm" @click="openSettings(active!)"><Icon name="settings" size="s" />房间设置</button>
@@ -586,6 +588,10 @@ const login = () => account.openAuth('login')
         <span class="lbl">默认中继</span>
         <Select v-model="setDlg.relay" :options="settingsRelayOptions" />
         <Check v-model="setDlg.relayLocked" style="margin-top: 8px">锁定：所有人只能用这个中继（不锁定时成员可以自己换）</Check>
+      </div>
+      <div class="sw-line" style="margin-top: 12px">
+        <div class="set-txt"><b>禁止直连</b><small>成员之间不打洞，全部经中继转发：延迟高一点，但不会互相看到公网 IP</small></div>
+        <Switch v-model="setDlg.noDirect" label="禁止直连" />
       </div>
       <template #footer>
         <button type="button" class="btn quiet sm" @click="setDlg.show = false">取消</button>

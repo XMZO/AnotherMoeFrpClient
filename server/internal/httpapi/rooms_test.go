@@ -173,6 +173,11 @@ func TestRooms(t *testing.T) {
 	n.do(req{method: "PATCH", path: strings.Replace(api.RouteRoom, "{id}", room.ID, 1), token: ta, body: map[string]any{"allowGuests": true, "name": "  "}}).apiErr(apierr.ValidationFailed)
 	n.do(req{method: "PATCH", path: strings.Replace(api.RouteRoom, "{id}", room.ID, 1), token: ta, body: map[string]any{"allowGuests": true, "name": "新名字"}}).expect(http.StatusNoContent)
 	a.expect(api.VnetPeers, func(m api.LiveVnetBody) bool { return m.RoomName == "新名字" })
+	// 禁止直连：在线成员收到设置；不带 noDirect 改设置时保持原样
+	n.do(req{method: "PATCH", path: strings.Replace(api.RouteRoom, "{id}", room.ID, 1), token: ta, body: map[string]any{"allowGuests": true, "noDirect": true}}).expect(http.StatusNoContent)
+	a.expect(api.VnetPeers, func(m api.LiveVnetBody) bool { return m.Settings != nil && m.Settings.NoDirect })
+	n.do(req{method: "PATCH", path: strings.Replace(api.RouteRoom, "{id}", room.ID, 1), token: ta, body: map[string]any{"allowGuests": true}}).expect(http.StatusNoContent)
+	a.expect(api.VnetPeers, func(m api.LiveVnetBody) bool { return m.Settings != nil && m.Settings.NoDirect })
 	// 房主换邀请码：旧码作废，在线成员收到新码；别人不能换
 	n.do(req{method: "POST", path: strings.Replace(api.RouteRoomCode, "{id}", room.ID, 1), token: tb}).apiErr(apierr.Forbidden)
 	var rc api.Room

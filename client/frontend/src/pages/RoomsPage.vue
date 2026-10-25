@@ -11,7 +11,7 @@ import { Events, VnetService } from '../api'
 import { useAccountStore } from '../stores/account'
 import { describeError, toAppError } from '../errors'
 import mascot from '../assets/mascot.png'
-import { joinVoice, leaveVoice, setDeaf, setMic, voice } from '../voice'
+import { joinVoice, leaveVoice, refreshDevices, setDeaf, setInput, setMic, setOutput, voice } from '../voice'
 
 // 联机房间：和朋友组成虚拟局域网（客户端 internal/vnet，面板 shared/api/vnet.go，docs/vnet.md）。
 // 进页面先把关：没登录 → 登录 / 游客加入 / 返回；没有管理员权限 → 以管理员身份重启（装驱动）/ 返回；
@@ -27,6 +27,7 @@ interface VnetState {
   admin: boolean
   driver: boolean
   room: string
+  roomName?: string
   self: number
   ip: string
   peers: PeerState[]
@@ -46,9 +47,10 @@ const state = ref<VnetState>({ admin: true, driver: true, room: '', self: 0, ip:
 const installing = ref(false)
 const installErr = ref('')
 const modal = ref<{ show: boolean; mode: 'create' | 'join' | 'guest'; value: string; nick: string; error: string }>({ show: false, mode: 'create', value: '', nick: '', error: '' })
-const setDlg = ref<{ show: boolean; room: Room | null; allowGuests: boolean; voice: boolean; relay: string; relayLocked: boolean; relays: { id: string; name: string }[] }>({
+const setDlg = ref<{ show: boolean; room: Room | null; name: string; allowGuests: boolean; voice: boolean; relay: string; relayLocked: boolean; relays: { id: string; name: string }[] }>({
   show: false,
   room: null,
+  name: '',
   allowGuests: false,
   voice: true,
   relay: '',
@@ -210,6 +212,24 @@ async function leave(r: Room) {
   if (yes) act('leave-' + r.id, () => VnetService.LeaveRoom(r.id), owner ? '房间已解散' : '已离开房间')
 }
 
+// 房间名：正在的房间用面板推来的最新名字（房主改名后马上变）
+const roomName = (r: Room) => (r.id === state.value.room && state.value.roomName ? state.value.roomName : r.name)
+watch(
+  () => state.value.roomName,
+  (n, o) => {
+    if (n && o && n !== o) load() // 房主改了名：刷新房间卡片
+  },
+)
+
+// 语音设备
+const devOpen = ref(false)
+const inputOptions = computed(() => [{ value: '', label: '跟随系统默认' }, ...voice.inputs.map((d) => ({ value: d.id, label: d.label }))])
+const outputOptions = computed(() => [{ value: '', label: '跟随系统默认' }, ...voice.outputs.map((d) => ({ value: d.id, label: d.label }))])
+function toggleDevices() {
+  devOpen.value = !devOpen.value
+  if (devOpen.value) refreshDevices()
+}
+
 // 语音：房主禁言 / 解除禁言某个座位
 const isMuted = (slot: number) => (state.value.settings.muted ?? []).includes(slot)
 const voiceCount = computed(() => Object.keys(voice.members).length + 1)
@@ -221,7 +241,7 @@ async function toggleMute(slot: number) {
   const cur = st.muted ?? []
   const muted = cur.includes(slot) ? cur.filter((x) => x !== slot) : [...cur, slot]
   try {
-    await VnetService.UpdateRoom(r.id, { allowGuests: st.allowGuests, relay: st.relay, relayLocked: st.relayLocked, noVoice: !!st.noVoice, muted })
+    await VnetService.UpdateRoom(r.id, { allowGuests: st.allowGuests, relay: st.relay, relayLocked: st.relayLocked, noVoice: !!st.noVoice, muted }, '')
   } catch (e) {
     message.error(describeError(e))
   }
@@ -237,7 +257,7 @@ async function kick(r: Room, m: Member) {
 }
 
 async function openSettings(r: Room) {
-  setDlg.value = { show: true, room: r, allowGuests: r.allowGuests, voice: !r.noVoice, relay: r.relay, relayLocked: r.relayLocked, relays: [] }
+  setDlg.value = { show: true, room: r, name: roomName(r), allowGuests: r.allowGuests, voice: !r.noVoice, relay: r.relay, relayLocked: r.relayLocked, relays: [] }
   try {
     setDlg.value.relays = ((await VnetService.RoomRelays()) ?? []).map((x: any) => ({ id: x.id, name: x.name }))
   } catch {
@@ -248,6 +268,11 @@ async function openSettings(r: Room) {
 async function saveSettings() {
   const d = setDlg.value
   if (!d.room) return
+  const name = d.name.trim()
+  if (!name) {
+    message.error('房间名不能为空')
+    return
+  }
   busy.value = 'settings'
   try {
     await VnetService.UpdateRoom(d.room.id, {
@@ -256,7 +281,7 @@ async function saveSettings() {
       relayLocked: d.relayLocked,
       noVoice: !d.voice,
       muted: state.value.settings.muted ?? d.room.muted ?? [],
-    })
+    }, name !== roomName(d.room) ? name : '')
     message.success('房间设置已保存')
     d.show = false
     await load()
@@ -338,7 +363,7 @@ const login = () => account.openAuth('login')
             <span class="tile-ic lg ok"><Icon name="users" /></span>
             <div class="rl-t">
               <small>正在房间里</small>
-              <b><span class="rl-name">{{ active?.name ?? '…' }}</span><span v-if="active" class="bdg" :class="active.allowGuests ? 'info' : ''">{{ active.allowGuests ? '允许游客' : '禁止游客' }}</span></b>
+              <b><span class="rl-name">{{ active ? roomName(active) : '…' }}</span><span v-if="active" class="bdg" :class="active.allowGuests ? 'info' : ''">{{ active.allowGuests ? '允许游客' : '禁止游客' }}</span></b>
             </div>
             <div class="rl-acts">
               <button v-if="isOwner(active)" type="button" class="btn soft sm" @click="openSettings(active!)"><Icon name="settings" size="s" />房间设置</button>
@@ -381,6 +406,12 @@ const login = () => account.openAuth('login')
               </button>
               <button type="button" class="btn quiet sm danger" @click="leaveVoice"><Icon name="logout" size="s" />退出语音</button>
             </template>
+            <button type="button" class="btn ghost sm" :class="{ on: devOpen }" title="选择麦克风和扬声器" @click="toggleDevices"><Icon name="settings" size="s" />设备</button>
+            <div v-if="devOpen" class="rl-dev">
+              <label><span>麦克风</span><Select :model-value="voice.inputId" :options="inputOptions" @change="setInput" /></label>
+              <label><span>扬声器</span><Select :model-value="voice.outputId" :options="outputOptions" @change="setOutput" /></label>
+              <small v-if="!voice.inputs.length">进一次语音（允许麦克风）后能看到设备名字</small>
+            </div>
           </div>
           <div class="rl-sub">
             <b>成员</b>
@@ -470,6 +501,10 @@ const login = () => account.openAuth('login')
     </Modal>
 
     <Modal v-model:show="setDlg.show" title="房间设置" icon="settings" :width="440">
+      <div class="fld" style="margin-bottom: 12px">
+        <label class="lbl" for="room-rename">房间名</label>
+        <input id="room-rename" v-model="setDlg.name" class="inp" maxlength="30" placeholder="成员会马上看到新名字" />
+      </div>
       <div class="sw-line">
         <div class="set-txt"><b>允许游客</b><small>没登录的人也能用邀请码以游客身份进来</small></div>
         <Switch v-model="setDlg.allowGuests" label="允许游客" />
@@ -653,6 +688,29 @@ const login = () => account.openAuth('login')
 }
 .rc-kick.on {
   color: var(--bad-text);
+}
+.rl-dev {
+  flex-basis: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 12px;
+  padding-top: 6px;
+}
+.rl-dev label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.rl-dev label span {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: var(--text-3);
+}
+.rl-dev small {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--text-3);
 }
 .rl-sub {
   display: flex;

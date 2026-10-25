@@ -169,6 +169,10 @@ func TestRooms(t *testing.T) {
 		t.Fatalf("语音设置：%+v", vr.Rooms)
 	}
 	n.do(req{method: "PATCH", path: strings.Replace(api.RouteRoom, "{id}", room.ID, 1), token: ta, body: api.RoomSettings{AllowGuests: true, Muted: []int{}}}).expect(http.StatusNoContent)
+	// 房主改房间名：在房间里的成员收到新名字；空名字不行
+	n.do(req{method: "PATCH", path: strings.Replace(api.RouteRoom, "{id}", room.ID, 1), token: ta, body: map[string]any{"allowGuests": true, "name": "  "}}).apiErr(apierr.ValidationFailed)
+	n.do(req{method: "PATCH", path: strings.Replace(api.RouteRoom, "{id}", room.ID, 1), token: ta, body: map[string]any{"allowGuests": true, "name": "新名字"}}).expect(http.StatusNoContent)
+	a.expect(api.VnetPeers, func(m api.LiveVnetBody) bool { return m.RoomName == "新名字" })
 	var gj api.GuestJoinResponse
 	n.do(req{method: "POST", path: api.RouteRoomGuest, body: api.GuestJoinRequest{Code: room.Code, Nickname: "路人"}}).expect(http.StatusOK).decode(&gj)
 	if gj.Token == "" || !gj.Room.AllowGuests {

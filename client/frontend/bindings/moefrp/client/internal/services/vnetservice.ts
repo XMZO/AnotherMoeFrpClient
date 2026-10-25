@@ -174,10 +174,10 @@ export function State(): $CancellablePromise<$models.VnetState> {
 }
 
 /**
- * UpdateRoom 房主改房间设置（允许游客、默认中继、锁定中继）。
+ * UpdateRoom 房主改房间设置（允许游客、默认中继、锁定中继、语音）；name 不为空时顺便改房间名。
  */
-export function UpdateRoom(id: string, st: api$0.RoomSettings): $CancellablePromise<void> {
-    return $Call.ByID(1657566651, id, st);
+export function UpdateRoom(id: string, st: api$0.RoomSettings, name: string): $CancellablePromise<void> {
+    return $Call.ByID(1657566651, id, st, name);
 }
 
 /**

@@ -97,6 +97,11 @@ export interface LiveVnetBody {
     "relay"?: string;
 
     /**
+     * peers：房间名（房主改名后成员跟着变）
+     */
+    "roomName"?: string;
+
+    /**
      * chat（客户端发）
      */
     "text"?: string;

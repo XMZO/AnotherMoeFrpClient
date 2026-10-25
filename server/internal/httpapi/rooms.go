@@ -57,15 +57,15 @@ func (r roomRooms) Slot(ctx context.Context, roomID, userID string) (int, error)
 // vnetTicketTTL 是中继票据的有效期：成员每次收到成员列表都会拿到新的。
 const vnetTicketTTL = 24 * time.Hour
 
-func (r roomRooms) RelayInfo(ctx context.Context, roomID string, slots []int) (api.RoomSettings, []api.VnetRelay, map[int]map[string]string) {
+func (r roomRooms) RelayInfo(ctx context.Context, roomID string, slots []int) (string, api.RoomSettings, []api.VnetRelay, map[int]map[string]string) {
 	room, err := store.GetRoom(ctx, r.s.st.DB(), roomID)
 	if err != nil {
-		return api.RoomSettings{}, nil, nil
+		return "", api.RoomSettings{}, nil, nil
 	}
 	relays, keys, err := r.s.nodes.VnetRelays(ctx)
 	if err != nil {
 		r.s.log.Warn("vnet relays", "err", err)
-		return room.RoomSettings, nil, nil
+		return room.Name, room.RoomSettings, nil, nil
 	}
 	now := r.s.now()
 	tickets := map[int]map[string]string{}
@@ -76,7 +76,7 @@ func (r roomRooms) RelayInfo(ctx context.Context, roomID string, slots []int) (a
 		}
 		tickets[slot] = m
 	}
-	return room.RoomSettings, relays, tickets
+	return room.Name, room.RoomSettings, relays, tickets
 }
 
 func (r roomRooms) Members(ctx context.Context, roomID string) ([]api.RoomMember, error) {
@@ -272,8 +272,9 @@ func (s *Server) handleRoomSettings(w http.ResponseWriter, r *http.Request) {
 	// noVoice、muted 没带就保持原样（旧版本客户端改设置时不会把语音设置清掉）
 	var body struct {
 		api.RoomSettings
-		NoVoice *bool  `json:"noVoice"`
-		Muted   *[]int `json:"muted"`
+		NoVoice *bool   `json:"noVoice"`
+		Muted   *[]int  `json:"muted"`
+		Name    *string `json:"name"` // 改房间名（不带就不改）
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		s.writeError(w, r, err)
@@ -300,6 +301,19 @@ func (s *Server) handleRoomSettings(w http.ResponseWriter, r *http.Request) {
 		for _, n := range *body.Muted {
 			if n >= 1 && n <= 250 && !slices.Contains(req.Muted, n) {
 				req.Muted = append(req.Muted, n)
+			}
+		}
+	}
+	if body.Name != nil {
+		name := strings.TrimSpace(*body.Name)
+		if name == "" || utf8.RuneCountInString(name) > 30 {
+			s.writeError(w, r, fieldError("name", validate.ReasonInvalid, "房间名 1–30 个字"))
+			return
+		}
+		if name != room.Name {
+			if err := store.SetRoomName(r.Context(), s.st.DB(), id, name); err != nil {
+				s.writeError(w, r, err)
+				return
 			}
 		}
 	}

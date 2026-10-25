@@ -158,11 +158,11 @@ func (s *VnetService) OpenRoomsOnStart() bool {
 	return false
 }
 
-// UpdateRoom 房主改房间设置（允许游客、默认中继、锁定中继）。
-func (s *VnetService) UpdateRoom(id string, st api.RoomSettings) error {
+// UpdateRoom 房主改房间设置（允许游客、默认中继、锁定中继、语音）；name 不为空时顺便改房间名。
+func (s *VnetService) UpdateRoom(id string, st api.RoomSettings, name string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), apiclient.DefaultTimeout)
 	defer cancel()
-	return apperr.Normalize(s.api.UpdateRoom(ctx, id, st))
+	return apperr.Normalize(s.api.UpdateRoom(ctx, id, api.RoomPatch{RoomSettings: st, Name: name}))
 }
 
 // SetRelay 选我的收件中继：auto（自动）、panel（面板）或节点 ID。房主锁定时不生效。

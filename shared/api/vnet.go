@@ -12,7 +12,7 @@ const (
 	RouteRoomJoin   = Prefix + "/rooms/join"       // POST {code}
 	RouteRoomLeave  = Prefix + "/rooms/{id}/leave" // POST：离开（房主离开等于解散）
 	RouteRoomKick   = Prefix + "/rooms/{id}/kick"  // POST {userId}：房主踢人
-	RouteRoom       = Prefix + "/rooms/{id}"       // PATCH RoomSettings：房主改设置
+	RouteRoom       = Prefix + "/rooms/{id}"       // PATCH RoomSettings（可以带 name 改房间名）：房主改设置
 	RouteRoomRelays = Prefix + "/rooms/relays"     // GET：能用的中继节点（房主选默认中继用，不含票据）
 
 	// 游客（没登录，用邀请码 + 昵称进房间，房主允许时）：拿到只能用于这个房间的游客令牌（Bearer）。
@@ -57,6 +57,12 @@ type RoomSettings struct {
 	RelayLocked bool   `json:"relayLocked"` // 锁定：所有人只能用 Relay（为空时都用自动）
 	NoVoice     bool   `json:"noVoice"`     // 关闭语音（默认开着）
 	Muted       []int  `json:"muted"`       // 被禁言的座位号（不能在语音里说话）
+}
+
+// RoomPatch：PATCH /api/v1/rooms/{id}。Name 为空表示不改名。
+type RoomPatch struct {
+	RoomSettings
+	Name string `json:"name,omitempty"`
 }
 
 // GuestJoinRequest：POST /api/v1/rooms/guest。
@@ -154,7 +160,8 @@ type LiveVnetBody struct {
 	Settings *RoomSettings     `json:"settings,omitempty"`
 	Relays   []VnetRelay       `json:"relays,omitempty"`
 	Tickets  map[string]string `json:"tickets,omitempty"`
-	Relay    string            `json:"relay,omitempty"` // relay：我的收件中继
+	Relay    string            `json:"relay,omitempty"`    // relay：我的收件中继
+	RoomName string            `json:"roomName,omitempty"` // peers：房间名（房主改名后成员跟着变）
 
 	Text    string        `json:"text,omitempty"`    // chat（客户端发）
 	Chat    *VnetChatMsg  `json:"chat,omitempty"`    // chat（面板转发）

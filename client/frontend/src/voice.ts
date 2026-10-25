@@ -45,7 +45,27 @@ export const voice = reactive({
   muted: [] as number[],
   self: 0,
   error: '',
+  // 设备：空字符串表示跟随系统默认；插拔设备时列表自动刷新，选中的设备拔掉了就回到默认
+  inputs: [] as { id: string; label: string }[],
+  outputs: [] as { id: string; label: string }[],
+  inputId: load('moefrp.voice.in'),
+  outputId: load('moefrp.voice.out'),
 })
+
+function load(k: string): string {
+  try {
+    return localStorage.getItem(k) ?? ''
+  } catch {
+    return ''
+  }
+}
+function store(k: string, v: string) {
+  try {
+    localStorage.setItem(k, v)
+  } catch {
+    /* 存不了就算了 */
+  }
+}
 
 let room = ''
 let online = new Set<number>()
@@ -130,6 +150,7 @@ function newPeer(slot: number): Peer {
     a.autoplay = true
     a.srcObject = stream
     p.audio = a
+    sink(a)
     applyRemote(slot)
     a.play().catch(() => {})
     try {
@@ -209,6 +230,83 @@ function tick() {
   for (const [slot, p] of peers) voice.speaking[slot] = !!p.level && !voice.muted.includes(slot) && p.level() > th
 }
 
+// ---- 设备 ----
+
+const MIC = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
+
+async function openMic(id: string): Promise<MediaStream> {
+  if (id) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({ audio: { ...MIC, deviceId: { exact: id } } })
+    } catch {
+      /* 选的设备不在了：用默认的 */
+    }
+  }
+  return navigator.mediaDevices.getUserMedia({ audio: MIC })
+}
+
+function sink(a: HTMLAudioElement) {
+  const fn = (a as any).setSinkId as ((id: string) => Promise<void>) | undefined
+  fn?.call(a, voice.outputId).catch(() => fn.call(a, '').catch(() => {}))
+}
+
+export async function refreshDevices() {
+  try {
+    const list = await navigator.mediaDevices.enumerateDevices()
+    const pick = (kind: MediaDeviceKind) =>
+      list
+        .filter((d) => d.kind === kind && d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications')
+        .map((d, i) => ({ id: d.deviceId, label: d.label || `${kind === 'audioinput' ? '麦克风' : '扬声器'} ${i + 1}` }))
+    voice.inputs = pick('audioinput')
+    voice.outputs = pick('audiooutput')
+  } catch {
+    /* 拿不到列表就只有默认 */
+  }
+}
+
+// 换麦克风：重新打开，替换每条连接里发出去的声音（不用重新协商）
+export async function setInput(id: string) {
+  voice.inputId = id
+  store('moefrp.voice.in', id)
+  if (!voice.joined) return
+  if (!local) {
+    // 之前没麦克风（只听）：重新进一次语音才能发声
+    leaveVoice()
+    await joinVoice()
+    return
+  }
+  let next: MediaStream
+  try {
+    next = await openMic(id)
+  } catch {
+    voice.error = '打不开这个麦克风'
+    return
+  }
+  const track = next.getAudioTracks()[0]
+  for (const p of peers.values()) {
+    const s = p.pc.getSenders().find((x) => x.track?.kind === 'audio')
+    await s?.replaceTrack(track).catch(() => {})
+  }
+  local.getTracks().forEach((t) => t.stop())
+  local = next
+  localLevel = meter(local)
+  applyLocal()
+}
+
+export function setOutput(id: string) {
+  voice.outputId = id
+  store('moefrp.voice.out', id)
+  for (const p of peers.values()) if (p.audio) sink(p.audio)
+}
+
+// 插拔设备：刷新列表；选中的设备没了就回到默认；跟随默认时重新打开（系统默认设备可能换了）
+async function onDeviceChange() {
+  await refreshDevices()
+  if (voice.outputId && !voice.outputs.some((d) => d.id === voice.outputId)) setOutput('')
+  if (voice.inputId && !voice.inputs.some((d) => d.id === voice.inputId)) await setInput('')
+  else if (voice.joined && local && !voice.inputId) await setInput('')
+}
+
 // 进语音
 export async function joinVoice() {
   if (voice.joined || voice.joining || !room || voice.noVoice) return
@@ -216,9 +314,7 @@ export async function joinVoice() {
   voice.error = ''
   try {
     try {
-      local = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-      })
+      local = await openMic(voice.inputId)
       voice.hasMic = true
       localLevel = meter(local)
     } catch {
@@ -227,6 +323,7 @@ export async function joinVoice() {
       voice.error = '没拿到麦克风，只能听'
     }
     await audioCtx().resume()
+    refreshDevices() // 拿到麦克风权限后才有设备名字
     voice.joined = true
     applyLocal()
     broadcast({ k: 'hello', mic: micLive() })
@@ -297,6 +394,8 @@ let started = false
 export async function initVoice() {
   if (started) return
   started = true
+  navigator.mediaDevices?.addEventListener('devicechange', () => void onDeviceChange())
+  refreshDevices()
   Events.On('vnet:state', (ev: any) => onState(ev.data as VnetLite))
   Events.On('vnet:voice', (ev: any) => {
     const d = ev.data as { from: number; data: string }

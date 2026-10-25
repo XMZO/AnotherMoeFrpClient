@@ -159,8 +159,8 @@ onMounted(async () => {
             <Icon :name="n.icon" />
             <span>{{ n.label }}</span>
             <span v-if="n.key === 'tunnel' && tunnel.active" class="nav-dot" title="隧道运行中" />
-            <small v-if="n.key === 'about' && appVersion" class="nav-ver">v{{ appVersion }}</small>
           </button>
+          <small v-if="appVersion" class="nav-ver" title="当前版本">v{{ appVersion }}</small>
         </div>
         <div class="rail-fill" />
         <ImagePanel v-if="account.loggedIn" />
@@ -279,7 +279,7 @@ onMounted(async () => {
   animation: boing 0.55s var(--ease-spring);
 }
 .nav-ver {
-  margin-top: -2px;
+  text-align: center;
   font-size: 9.5px;
   font-weight: 700;
   color: var(--text-3);

@@ -11,7 +11,7 @@ import { Events, VnetService } from '../api'
 import { useAccountStore } from '../stores/account'
 import { describeError, toAppError } from '../errors'
 import mascot from '../assets/mascot.png'
-import { joinVoice, leaveVoice, refreshDevices, setDeaf, setInput, setMic, setOutput, voice } from '../voice'
+import { joinVoice, leaveVoice, setDeaf, setInput, setMic, setOutput, voice } from '../voice'
 
 // 联机房间：和朋友组成虚拟局域网（客户端 internal/vnet，面板 shared/api/vnet.go，docs/vnet.md）。
 // 进页面先把关：没登录 → 登录 / 游客加入 / 返回；没有管理员权限 → 以管理员身份重启（装驱动）/ 返回；
@@ -221,14 +221,9 @@ watch(
   },
 )
 
-// 语音设备
-const devOpen = ref(false)
+// 语音设备（选择框一直显示在语音条左边）
 const inputOptions = computed(() => [{ value: '', label: '跟随系统默认' }, ...voice.inputs.map((d) => ({ value: d.id, label: d.label }))])
 const outputOptions = computed(() => [{ value: '', label: '跟随系统默认' }, ...voice.outputs.map((d) => ({ value: d.id, label: d.label }))])
-function toggleDevices() {
-  devOpen.value = !devOpen.value
-  if (devOpen.value) refreshDevices()
-}
 
 // 语音：房主禁言 / 解除禁言某个座位
 const isMuted = (slot: number) => (state.value.settings.muted ?? []).includes(slot)
@@ -390,8 +385,10 @@ const login = () => account.openAuth('login')
           </div>
           <div class="rl-voice" :class="{ on: voice.joined }">
             <span class="rl-vic" :class="{ talk: voice.speaking[voice.self] }"><Icon name="headset" size="s" /></span>
+            <label class="rl-dev" title="麦克风"><Icon name="mic" size="xs" /><Select :model-value="voice.inputId" :options="inputOptions" @change="setInput" /></label>
+            <label class="rl-dev" title="扬声器"><Icon name="headset" size="xs" /><Select :model-value="voice.outputId" :options="outputOptions" @change="setOutput" /></label>
             <template v-if="!voice.joined">
-              <span class="rl-vt">{{ voice.noVoice ? '房主关闭了语音' : '语音（自动降噪，只走虚拟网）' }}</span>
+              <span class="rl-vt">{{ voice.noVoice ? '房主关闭了语音' : '语音 · 自动降噪' }}</span>
               <button type="button" class="btn pri sm" :disabled="voice.noVoice || voice.joining" data-testid="voice-join" @click="startVoice">
                 <Icon name="headset" size="s" />{{ voice.joining ? '连接中…' : '加入语音' }}
               </button>
@@ -406,12 +403,6 @@ const login = () => account.openAuth('login')
               </button>
               <button type="button" class="btn quiet sm danger" @click="leaveVoice"><Icon name="logout" size="s" />退出语音</button>
             </template>
-            <button type="button" class="btn ghost sm" :class="{ on: devOpen }" title="选择麦克风和扬声器" @click="toggleDevices"><Icon name="settings" size="s" />设备</button>
-            <div v-if="devOpen" class="rl-dev">
-              <label><span>麦克风</span><Select :model-value="voice.inputId" :options="inputOptions" @change="setInput" /></label>
-              <label><span>扬声器</span><Select :model-value="voice.outputId" :options="outputOptions" @change="setOutput" /></label>
-              <small v-if="!voice.inputs.length">进一次语音（允许麦克风）后能看到设备名字</small>
-            </div>
           </div>
           <div class="rl-sub">
             <b>成员</b>
@@ -676,7 +667,8 @@ const login = () => account.openAuth('login')
 }
 .rl-vt {
   flex: 1;
-  min-width: 120px;
+  min-width: 100px;
+  text-align: right;
   font-size: 12.5px;
   font-weight: 800;
   color: var(--text-2);
@@ -690,27 +682,18 @@ const login = () => account.openAuth('login')
   color: var(--bad-text);
 }
 .rl-dev {
-  flex-basis: 100%;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 8px 12px;
-  padding-top: 6px;
-}
-.rl-dev label {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
+  width: 200px;
   min-width: 0;
-}
-.rl-dev label span {
-  font-size: 11.5px;
-  font-weight: 800;
   color: var(--text-3);
 }
-.rl-dev small {
-  grid-column: 1 / -1;
-  font-size: 12px;
-  color: var(--text-3);
+.rl-dev .sel-btn {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  font-size: 12.5px;
 }
 .rl-sub {
   display: flex;

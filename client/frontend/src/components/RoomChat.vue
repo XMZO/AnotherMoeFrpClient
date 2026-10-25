@@ -140,7 +140,7 @@ const time = (at: number) => new Date(at).toLocaleTimeString('zh-CN', { hour: '2
       </section>
     </Transition>
     <button type="button" class="rchat-fab" :class="{ on: open }" :aria-label="open ? '收起聊天' : '打开房间聊天'" data-testid="room-chat" @click="open = !open">
-      <Icon :name="open ? 'x' : 'chat'" />
+      <Icon :name="open ? 'x' : 'chat'" size="s" />
       <span v-if="unread && !open" class="rchat-badge">{{ unread > 99 ? '99+' : unread }}</span>
     </button>
   </div>
@@ -149,18 +149,18 @@ const time = (at: number) => new Date(at).toLocaleTimeString('zh-CN', { hour: '2
 <style>
 .rchat {
   position: fixed;
-  right: 20px;
-  bottom: 20px;
+  right: 16px;
+  bottom: 16px;
   z-index: 900;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 12px;
+  gap: 10px;
 }
 .rchat-fab {
   position: relative;
-  width: 52px;
-  height: 52px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   display: grid;
   place-items: center;
@@ -174,23 +174,23 @@ const time = (at: number) => new Date(at).toLocaleTimeString('zh-CN', { hour: '2
 }
 .rchat-badge {
   position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
+  top: -5px;
+  right: -5px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
   border-radius: 99px;
   background: var(--bad);
   color: #fff;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 800;
-  line-height: 20px;
+  line-height: 17px;
   text-align: center;
 }
 .rchat-box {
   width: 330px;
   height: 430px;
-  max-height: calc(100vh - 110px);
+  max-height: calc(100vh - 90px);
   display: flex;
   flex-direction: column;
   border-radius: 18px;

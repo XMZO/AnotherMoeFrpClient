@@ -10,6 +10,11 @@ export interface PeerState {
     "ip": string;
     "self": boolean;
     "mode": string;
+
+    /**
+     * 延迟（毫秒），0 表示还不知道
+     */
+    "rtt"?: number;
 }
 
 /**

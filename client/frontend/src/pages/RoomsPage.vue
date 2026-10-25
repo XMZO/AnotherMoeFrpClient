@@ -319,6 +319,9 @@ const login = () => account.openAuth('login')
             </div>
             <button v-if="isOwner(active)" type="button" class="btn soft sm" @click="openSettings(active!)"><Icon name="settings" size="s" />房间设置</button>
             <button type="button" class="btn ghost sm" :disabled="busy === 'disc'" @click="disconnect"><Icon name="stop" size="s" />断开</button>
+            <button v-if="active" type="button" class="btn quiet sm danger" :disabled="busy === 'leave-' + active.id" @click="leave(active)">
+              <Icon name="logout" size="s" />{{ isOwner(active) ? '解散' : '离开' }}
+            </button>
           </div>
           <div class="rl-relay">
             <span class="lbl">收件中继</span>
@@ -356,9 +359,9 @@ const login = () => account.openAuth('login')
               </span>
               <span v-if="r.members.length > CARD_MEMBERS" class="rc-m more" title="进入房间后在上面看完整名单">+{{ r.members.length - CARD_MEMBERS }}</span>
             </div>
-            <div class="rc-foot">
-              <button v-if="r.id === state.room" type="button" class="btn ghost xs" :disabled="busy === 'disc'" @click="disconnect">断开</button>
-              <button v-else type="button" class="btn pri xs" :disabled="busy === 'go-' + r.id" :data-testid="`room-go-${r.name}`" @click="enter(r)">
+            <!-- 正在这个房间里时，断开和解散 / 离开在上面"正在房间里"那块 -->
+            <div v-if="r.id !== state.room" class="rc-foot">
+              <button type="button" class="btn pri xs" :disabled="busy === 'go-' + r.id" :data-testid="`room-go-${r.name}`" @click="enter(r)">
                 <Icon :name="busy === 'go-' + r.id ? 'refresh' : 'play'" size="xs" :class="{ spin: busy === 'go-' + r.id }" />进入
               </button>
               <span class="grow" />

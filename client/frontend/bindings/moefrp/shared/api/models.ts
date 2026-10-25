@@ -95,6 +95,21 @@ export interface LiveVnetBody {
      * relay：我的收件中继
      */
     "relay"?: string;
+
+    /**
+     * chat（客户端发）
+     */
+    "text"?: string;
+
+    /**
+     * chat（面板转发）
+     */
+    "chat"?: VnetChatMsg | null;
+
+    /**
+     * chat：进房间时最近的消息
+     */
+    "history"?: VnetChatMsg[] | null;
 }
 
 /**
@@ -316,6 +331,23 @@ export interface UserInfo {
      */
     "role": string;
     "createdAt": string;
+}
+
+/**
+ * VnetChatMsg 是一条房间聊天消息。
+ */
+export interface VnetChatMsg {
+    /**
+     * 座位号
+     */
+    "from": number;
+    "nickname": string;
+    "text": string;
+
+    /**
+     * Unix 毫秒
+     */
+    "at": number;
 }
 
 /**

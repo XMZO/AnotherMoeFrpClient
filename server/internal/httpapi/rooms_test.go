@@ -135,7 +135,14 @@ func TestRooms(t *testing.T) {
 		t.Fatal("中继帧没到")
 	}
 
-	// 名单里能看到谁在线
+	// 聊天：房间里所有人都收到（包括自己），后进来的人看到最近的
+	a.send(api.LiveVnetBody{Op: api.VnetChat, Room: room.ID, Text: "  来 MC 吗  "})
+	if m := b.expect(api.VnetChat, func(m api.LiveVnetBody) bool { return m.Chat != nil }); m.Chat.Text != "来 MC 吗" || m.Chat.From != 1 || m.Chat.Nickname != "alice" {
+		t.Fatalf("chat：%+v", m.Chat)
+	}
+	a.expect(api.VnetChat, func(m api.LiveVnetBody) bool { return m.Chat != nil })
+
+		// 名单里能看到谁在线
 	var rs api.RoomsResponse
 	n.do(req{method: "GET", path: api.RouteRooms, token: tb}).expect(http.StatusOK).decode(&rs)
 	if len(rs.Rooms) != 1 || len(rs.Rooms[0].Members) != 2 || !rs.Rooms[0].Members[1].Online {

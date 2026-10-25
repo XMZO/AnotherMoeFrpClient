@@ -2,6 +2,7 @@ package live
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"moefrp/shared/api"
@@ -47,7 +48,11 @@ func (h *Hub) onVnet(ctx context.Context, c *Client, b *api.LiveVnetBody) {
 		h.mu.Lock()
 		old := c.vnet
 		c.vnet = &vnetState{room: b.Room, slot: slot, key: b.Key}
+		hist := append([]api.VnetChatMsg(nil), h.chat[b.Room]...)
 		h.mu.Unlock()
+		if len(hist) > 0 { // 刚进来的人看到最近的聊天
+			c.trySend(api.LiveMessage{Type: api.LiveVnet, Vnet: &api.LiveVnetBody{Op: api.VnetChat, Room: b.Room, History: hist}})
+		}
 		if old != nil && old.room != b.Room {
 			h.VnetRoomChanged(ctx, old.room)
 		}
@@ -65,6 +70,39 @@ func (h *Hub) onVnet(ctx context.Context, c *Client, b *api.LiveVnetBody) {
 		h.mu.Unlock()
 		if changed {
 			h.VnetRoomChanged(ctx, b.Room)
+		}
+	case api.VnetChat:
+		text := []rune(strings.TrimSpace(b.Text))
+		if len(text) == 0 {
+			return
+		}
+		if len(text) > api.VnetChatMax {
+			text = text[:api.VnetChatMax]
+		}
+		h.mu.Lock()
+		me := c.vnet
+		if me == nil || me.room != b.Room {
+			h.mu.Unlock()
+			return
+		}
+		msg := api.VnetChatMsg{From: me.slot, Nickname: c.Nickname, Text: string(text), At: h.now().UnixMilli()}
+		if h.chat == nil {
+			h.chat = map[string][]api.VnetChatMsg{}
+		}
+		hist := append(h.chat[me.room], msg)
+		if len(hist) > api.VnetChatKeep {
+			hist = hist[len(hist)-api.VnetChatKeep:]
+		}
+		h.chat[me.room] = hist
+		var to []*Client
+		for _, x := range h.clients {
+			if x.vnet != nil && x.vnet.room == me.room {
+				to = append(to, x)
+			}
+		}
+		h.mu.Unlock()
+		for _, x := range to {
+			x.trySend(api.LiveMessage{Type: api.LiveVnet, Vnet: &api.LiveVnetBody{Op: api.VnetChat, Room: b.Room, Chat: &msg}})
 		}
 	case api.VnetLeave:
 		h.mu.Lock()
@@ -134,7 +172,10 @@ func (h *Hub) VnetRoomChanged(ctx context.Context, room string) {
 	members, err := h.Rooms.Members(qctx, room)
 	cancel()
 	if err != nil {
-		members = nil // 房间没了：所有人移出
+		members = nil // 房间没了：所有人移出，聊天记录也清掉
+		h.mu.Lock()
+		delete(h.chat, room)
+		h.mu.Unlock()
 	}
 	slots := map[int]api.RoomMember{}
 	for _, m := range members {

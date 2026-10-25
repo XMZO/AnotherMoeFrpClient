@@ -19,6 +19,13 @@ import * as api$0 from "../../../shared/api/models.js";
 import * as $models from "./models.js";
 
 /**
+ * ChatHistory 返回当前房间的聊天（打开聊天窗口时用）。
+ */
+export function ChatHistory(): $CancellablePromise<api$0.VnetChatMsg[] | null> {
+    return $Call.ByID(3575040745);
+}
+
+/**
  * Connect 进入房间的虚拟局域网：建虚拟网卡，告诉面板自己的公钥，之后面板推成员列表过来。
  */
 export function Connect(roomID: string): $CancellablePromise<void> {
@@ -121,6 +128,13 @@ export function RoomRelays(): $CancellablePromise<api$0.VnetRelay[] | null> {
  */
 export function Rooms(): $CancellablePromise<api$0.Room[] | null> {
     return $Call.ByID(1821635871);
+}
+
+/**
+ * SendChat 在当前房间里发一条聊天消息。
+ */
+export function SendChat(text: string): $CancellablePromise<void> {
+    return $Call.ByID(1707813013, text);
 }
 
 export function SetEmitter(e: $models.Emitter): $CancellablePromise<void> {

@@ -118,7 +118,22 @@ const (
 	VnetPeers   = "peers"  // 面板 → 客户端：房间成员（进入后、成员变化时）
 	VnetClosed  = "closed" // 面板 → 客户端：房间没了或被踢出，Reason 是原因
 	VnetRelayOp = "relay"  // 客户端 → 面板：我的收件中继换成 Relay（节点 ID，空表示面板）
+	VnetChat    = "chat"   // 双向：房间聊天。客户端发 Text；面板转发给房间里所有人（Chat），进房间时带最近的（History）
 )
+
+// VnetChatMax 是一条聊天消息的最大字数，VnetChatKeep 是面板给每个房间在内存里留的条数。
+const (
+	VnetChatMax  = 500
+	VnetChatKeep = 50
+)
+
+// VnetChatMsg 是一条房间聊天消息。
+type VnetChatMsg struct {
+	From     int    `json:"from"` // 座位号
+	Nickname string `json:"nickname"`
+	Text     string `json:"text"`
+	At       int64  `json:"at"` // Unix 毫秒
+}
 
 // LiveVnetBody 是 vnet 消息。
 type LiveVnetBody struct {
@@ -137,6 +152,10 @@ type LiveVnetBody struct {
 	Relays   []VnetRelay       `json:"relays,omitempty"`
 	Tickets  map[string]string `json:"tickets,omitempty"`
 	Relay    string            `json:"relay,omitempty"` // relay：我的收件中继
+
+	Text    string        `json:"text,omitempty"`    // chat（客户端发）
+	Chat    *VnetChatMsg  `json:"chat,omitempty"`    // chat（面板转发）
+	History []VnetChatMsg `json:"history,omitempty"` // chat：进房间时最近的消息
 }
 
 // VnetPeer 是房间里的一个成员（peers 消息里）。Key 为空表示不在线。

@@ -17,6 +17,7 @@ export type {
     SubscriptionSummary,
     UpdateShareRequest,
     UserInfo,
+    VnetChatMsg,
     VnetPeer,
     VnetRelay
 } from "./models.js";

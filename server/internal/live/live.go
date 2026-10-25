@@ -83,6 +83,7 @@ type Hub struct {
 	OnHello func(sessionID, ip string, hello api.LiveHelloBody)
 	// Rooms 是联机房间的成员资格（面板设置），为空时不支持联机房间。
 	Rooms VnetRooms
+	chat  map[string][]api.VnetChatMsg // 房间 → 最近的聊天（只在内存里，mu 保护）
 
 	mu      sync.Mutex
 	clients map[string]*Client // 按会话 ID；同一会话新连接顶掉旧的

@@ -9,6 +9,7 @@ import AccountArea from './components/AccountArea.vue'
 import AuthModal from './components/AuthModal.vue'
 import ConflictDialog from './components/ConflictDialog.vue'
 import CloseAsk from './components/CloseAsk.vue'
+import RoomChat from './components/RoomChat.vue'
 import SyncNotices from './components/SyncNotices.vue'
 import ImagePanel from './components/ImagePanel.vue'
 import TitleBar from './components/TitleBar.vue'
@@ -173,6 +174,7 @@ onMounted(async () => {
     <AuthModal />
     <ConflictDialog />
     <CloseAsk />
+    <RoomChat />
     <SyncNotices />
   </div>
 </template>

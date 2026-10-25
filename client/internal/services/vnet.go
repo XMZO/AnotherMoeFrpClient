@@ -18,6 +18,17 @@ import (
 // EventVnet：联机房间的状态变了（进出房间、成员上下线、直连 / 中继切换），数据是 VnetState。
 const EventVnet = "vnet:state"
 
+// EventVnetChat：房间聊天有新消息，数据是 VnetChatEvent。
+const EventVnetChat = "vnet:chat"
+
+// VnetChatEvent 是聊天推送：全部消息（最多 vnetChatKeep 条）和新来的那条（进房间收到历史时为空）。
+type VnetChatEvent struct {
+	Msgs []api.VnetChatMsg `json:"msgs"`
+	New  *api.VnetChatMsg  `json:"new,omitempty"`
+}
+
+const vnetChatKeep = 100
+
 // apperr 码：建虚拟网卡要管理员权限。
 const codeNeedAdmin apierr.Code = "vnet_need_admin"
 
@@ -49,6 +60,7 @@ type VnetService struct {
 	quit  func()
 	guest *guestLive // 游客模式（没登录，用游客令牌）
 	drvOK bool       // 这次运行里装过驱动或建过网卡
+	chat  []api.VnetChatMsg
 }
 
 // NewVnetService：live 在 main 里建好实时通道后用 SetLive 注入。
@@ -256,6 +268,45 @@ func (s *VnetService) Connect(roomID string) error {
 	return nil
 }
 
+// SendChat 在当前房间里发一条聊天消息。
+func (s *VnetService) SendChat(text string) error {
+	room := s.eng.Room()
+	if room == "" {
+		return apperr.New(apperr.InvalidArg, "not in a room")
+	}
+	l := s.liveConn()
+	if l == nil {
+		return apperr.New(apperr.ServerUnreachable, "live channel not connected")
+	}
+	return apperr.Normalize(l.SendVnet(api.LiveVnetBody{Op: api.VnetChat, Room: room, Text: text}))
+}
+
+// ChatHistory 返回当前房间的聊天（打开聊天窗口时用）。
+func (s *VnetService) ChatHistory() []api.VnetChatMsg {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]api.VnetChatMsg{}, s.chat...)
+}
+
+func (s *VnetService) onChat(b api.LiveVnetBody) {
+	s.mu.Lock()
+	if b.History != nil {
+		s.chat = append([]api.VnetChatMsg(nil), b.History...)
+	}
+	if b.Chat != nil {
+		s.chat = append(s.chat, *b.Chat)
+	}
+	if len(s.chat) > vnetChatKeep {
+		s.chat = s.chat[len(s.chat)-vnetChatKeep:]
+	}
+	ev := VnetChatEvent{Msgs: append([]api.VnetChatMsg{}, s.chat...), New: b.Chat}
+	emit := s.emit
+	s.mu.Unlock()
+	if emit != nil {
+		emit(EventVnetChat, ev)
+	}
+}
+
 // Shutdown 在程序退出时调用：断开虚拟网，清掉 wintun 的回调。
 func (s *VnetService) Shutdown() {
 	s.Disconnect()
@@ -273,6 +324,9 @@ func (s *VnetService) Disconnect() {
 		_ = l.SendVnet(api.LiveVnetBody{Op: api.VnetLeave, Room: room})
 	}
 	s.eng.Stop()
+	s.mu.Lock()
+	s.chat = nil // 聊天跟着房间走
+	s.mu.Unlock()
 	s.changed()
 }
 
@@ -344,6 +398,8 @@ func (s *VnetService) OnLive(b api.LiveVnetBody) {
 		s.changed()
 	case api.VnetSignal:
 		s.eng.OnSignal(b.From, b.Data)
+	case api.VnetChat:
+		s.onChat(b)
 	case api.VnetClosed:
 		s.eng.Stop()
 		if g := s.guestConn(); g != nil && g.room == b.Room {

@@ -57,6 +57,9 @@ const (
 const (
 	quitGrace = 500 * time.Millisecond
 	quitWait  = 2 * time.Second
+	// quitDeadline：点了退出以后最多给清理（停隧道、关虚拟网卡、关窗口）这么久，到点不管做没做完直接结束进程，
+	// 退出永远不会卡住（隧道和虚拟网的连接断开后，节点和面板那边自己会发现）。
+	quitDeadline = 1200 * time.Millisecond
 )
 
 const (
@@ -314,7 +317,13 @@ func main() {
 		})
 	}
 	quit := func() {
-		quitting.Store(true)
+		if !quitting.Swap(true) {
+			go func() {
+				time.Sleep(quitDeadline)
+				diag("quit deadline reached, terminating")
+				exitProcess(0)
+			}()
+		}
 		app.Quit()
 	}
 	showWindow := func() {
@@ -518,6 +527,10 @@ func main() {
 		stopEngine("run error")
 		exitProcess(1)
 	}
+	go func() { // 不是从 quit 退出的（比如关机注销）：清理同样最多等 quitDeadline
+		time.Sleep(quitDeadline)
+		exitProcess(0)
+	}()
 	stopEngine("run returned")
 	diag("app.Run returned")
 	exitProcess(0)

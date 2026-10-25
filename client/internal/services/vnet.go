@@ -96,12 +96,12 @@ func (t vnetTransport) Signal(room string, to int, data string) error {
 	return l.SendVnet(api.LiveVnetBody{Op: api.VnetSignal, Room: room, To: to, Data: data})
 }
 
-func (t vnetTransport) SetRelay(room, relay string) error {
+func (t vnetTransport) SetRelay(room, relay string, homes []string) error {
 	l := t.s.liveConn()
 	if l == nil {
 		return nil // 连上后重新进房间时会再告诉面板
 	}
-	return l.SendVnet(api.LiveVnetBody{Op: api.VnetRelayOp, Room: room, Relay: relay})
+	return l.SendVnet(api.LiveVnetBody{Op: api.VnetRelayOp, Room: room, Relay: relay, Homes: homes})
 }
 
 func (t vnetTransport) Relay(to int, payload []byte) error {
@@ -471,8 +471,8 @@ func (s *VnetService) OnLiveOnline(on bool) {
 				s.setErr("")
 				s.changed()
 			}
-			if h := s.eng.State().Home; h != "" {
-				_ = l.SendVnet(api.LiveVnetBody{Op: api.VnetRelayOp, Room: room, Relay: h})
+			if relay, homes := s.eng.Homes(); relay != "" || len(homes) > 0 {
+				_ = l.SendVnet(api.LiveVnetBody{Op: api.VnetRelayOp, Room: room, Relay: relay, Homes: homes})
 			}
 		}
 	}

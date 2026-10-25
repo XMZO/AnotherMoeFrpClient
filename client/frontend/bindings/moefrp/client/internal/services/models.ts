@@ -239,6 +239,11 @@ export interface VnetState {
     "home": string;
 
     /**
+     * 备用收件中继（节点 ID，可能为空）
+     */
+    "backup": string;
+
+    /**
      * 我的选择：auto / panel / 节点 ID
      */
     "pref": string;

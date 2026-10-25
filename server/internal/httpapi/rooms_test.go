@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -116,6 +117,18 @@ func TestRooms(t *testing.T) {
 	if m := b.expect(api.VnetPeers, bothKeys); m.Self != 2 {
 		t.Fatalf("bob 的座位：%+v", m)
 	}
+
+	// 收件中继（主 + 备用）：报给面板后，别人在成员列表里看到；超过上限的不收
+	a.send(api.LiveVnetBody{Op: api.VnetRelayOp, Room: room.ID, Relay: "n1", Homes: []string{"n1", "n2"}})
+	b.expect(api.VnetPeers, func(m api.LiveVnetBody) bool {
+		for _, p := range m.Peers {
+			if p.Slot == 1 {
+				return p.Relay == "n1" && slices.Equal(p.Homes, []string{"n1", "n2"})
+			}
+		}
+		return false
+	})
+	a.send(api.LiveVnetBody{Op: api.VnetRelayOp, Room: room.ID, Relay: "n1", Homes: []string{"n1", "n2", "n3"}})
 
 	// 打洞信息转发
 	a.send(api.LiveVnetBody{Op: api.VnetSignal, Room: room.ID, To: 2, Data: "offer"})

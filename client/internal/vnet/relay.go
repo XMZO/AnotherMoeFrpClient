@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,9 +15,10 @@ import (
 	"moefrp/shared/api"
 )
 
-// 节点中继（docs/vnet.md）：每个成员有一个"收件中继"，别人发给他的、打洞没通的包送到那里；
-// 发包的人连对方的收件中继发。收件中继：房主锁定了就用房主选的；否则按自己的选择（自动 / 面板 / 某个节点），
-// 自动 = 房主设的默认，没设就测延迟选最近的；节点都不行就用面板。
+// 节点中继（docs/vnet.md）：每个成员连着一到两个"收件中继"节点（主 + 备用），别人发给他的、打洞没通的包送到其中一个；
+// 发包的人从对方连着的节点里挑一个自己也连着、延迟最低的发。一个节点出问题马上换另一个，不用退回面板。
+// 主收件中继：房主锁定了就用房主选的；否则按自己的选择（自动 / 面板 / 某个节点），自动 = 房主设的默认，没设就测延迟选最近的；
+// 备用 = 除主的以外延迟最低的（房主锁定了某个节点、或者选了面板时没有备用）。节点都不行就用面板。
 
 // 收件中继的选择。
 const (
@@ -44,7 +46,9 @@ type relayState struct {
 	settings api.RoomSettings
 	pref     string         // 我的选择：RelayAuto、RelayPanel 或节点 ID
 	latency  map[string]int // 节点 ID → 毫秒（-1 连不上）
-	home     string         // 实际的收件中继（节点 ID，空表示面板）
+	home     string         // 主收件中继（节点 ID，空表示面板）
+	backup   string         // 备用收件中继
+	reported string         // 上次告诉面板的（免得重复发）
 	conns    map[string]*relayConn
 	dialing  map[string]bool
 	measured bool
@@ -112,16 +116,66 @@ func (e *Engine) chooseHomeLocked() {
 	if _, ok := r.nodes[want]; !ok {
 		want = ""
 	}
-	if want == r.home {
+	backup := ""
+	if want != "" && pick != RelayPanel && !(r.settings.RelayLocked && r.settings.Relay != "") {
+		// 备用：除主的以外延迟最低的；现在的备用还能连就不换
+		if l, ok := r.latency[r.backup]; ok && l > 0 && r.backup != want {
+			backup = r.backup
+		} else {
+			best := -1
+			for id := range r.nodes {
+				if l, ok := r.latency[id]; ok && l > 0 && id != want && (best < 0 || l < best) {
+					best, backup = l, id
+				}
+			}
+		}
+	}
+	if want != r.home || backup != r.backup {
+		r.home, r.backup = want, backup
+		go e.onChange()
+	}
+	for _, id := range []string{want, backup} {
+		if id != "" {
+			e.ensureRelayLocked(id)
+		}
+	}
+	e.reportHomesLocked()
+}
+
+// homesLocked 返回要告诉面板的收件中继：relay 是主的（给旧版本客户端），homes 是现在真正连着的（主的在前）。
+// 只报连着的：报了没连着的节点，别人发到那里的包会被节点丢掉（黑洞）。
+func (e *Engine) homesLocked() (relay string, homes []string) {
+	r := &e.rs
+	for _, id := range []string{r.home, r.backup} {
+		if id != "" && r.conns[id] != nil {
+			homes = append(homes, id)
+		}
+	}
+	relay = r.home
+	if len(homes) > 0 && homes[0] != r.home {
+		relay = homes[0] // 主的没连上、备用连着：旧版本客户端也送到连着的那个
+	}
+	return relay, homes
+}
+
+// Homes 返回要告诉面板的收件中继（实时通道重连后再报一次用）。
+func (e *Engine) Homes() (string, []string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.homesLocked()
+}
+
+// reportHomesLocked：收件中继（或者它们的连接状态）变了就告诉面板。调用方持有 e.mu。
+func (e *Engine) reportHomesLocked() {
+	relay, homes := e.homesLocked()
+	key := relay + "|" + strings.Join(homes, ",")
+	if key == e.rs.reported || e.room == "" {
 		return
 	}
-	r.home = want
-	if want != "" {
-		e.ensureRelayLocked(want)
-	}
+	e.rs.reported = key
 	room := e.room
 	go func() {
-		if err := e.tr.SetRelay(room, want); err != nil {
+		if err := e.tr.SetRelay(room, relay, homes); err != nil {
 			e.logf("vnet: set relay: %v", err)
 		}
 		e.onChange()
@@ -182,10 +236,7 @@ func (e *Engine) measure() {
 	e.mu.Lock()
 	e.rs.latency = res
 	if e.dev != nil {
-		e.chooseHomeLocked()
-		if e.rs.home != "" { // 定期检查：收件中继没连着就补上
-			e.ensureRelayLocked(e.rs.home)
-		}
+		e.chooseHomeLocked() // 也会补上没连着的收件中继
 	}
 	e.mu.Unlock()
 	e.onChange()
@@ -228,6 +279,7 @@ func (e *Engine) ensureRelayLocked(id string) {
 		c := &relayConn{ws: ws, done: make(chan struct{})}
 		r.conns[id] = c
 		b := e.bind
+		e.reportHomesLocked()
 		e.mu.Unlock()
 		e.logf("vnet: 连上中继 %s", n.Name)
 		go func() { // 收：第一个字节是发送方的座位号
@@ -235,6 +287,9 @@ func (e *Engine) ensureRelayLocked(id string) {
 				e.mu.Lock()
 				if r.conns[id] == c {
 					delete(r.conns, id)
+					if e.done == done {
+						e.reportHomesLocked()
+					}
 				}
 				e.mu.Unlock()
 				close(c.done)
@@ -264,19 +319,51 @@ func (e *Engine) redialHomeLater(id string, done chan struct{}, after time.Durat
 		case <-time.After(after):
 		}
 		e.mu.Lock()
-		if e.done == done && e.rs.home == id {
+		if e.done == done && (e.rs.home == id || e.rs.backup == id) {
 			e.ensureRelayLocked(id)
 		}
 		e.mu.Unlock()
 	}()
 }
 
-// relaySend 经节点中继发一个包；没连上返回 false（调用方改走面板），同时在后台去连。
-func (e *Engine) relaySend(id string, slot int, pkt []byte) bool {
+// relayForLocked 返回现在发给这个成员会走的节点（界面显示用），没有就是空（走面板）。调用方持有 e.mu。
+func (e *Engine) relayForLocked(p *peer) string {
+	cands := p.homes
+	if len(cands) == 0 && p.relay != "" {
+		cands = []string{p.relay}
+	}
+	pick, best := "", 0
+	for _, id := range cands {
+		if e.rs.conns[id] == nil {
+			continue
+		}
+		l := e.rs.latency[id]
+		if l <= 0 {
+			l = 1 << 20
+		}
+		if pick == "" || l < best {
+			pick, best = id, l
+		}
+	}
+	return pick
+}
+
+// relaySend 经节点中继发一个包给座位号为 slot 的成员：从他连着的节点（homes，旧版本只有 primary）里
+// 挑一个我也连着、延迟最低的；一个都没连着就返回 false（调用方改走面板），同时在后台去连。
+func (e *Engine) relaySend(primary string, homes []string, slot int, pkt []byte) bool {
+	cands := homes
+	if len(cands) == 0 && primary != "" {
+		cands = []string{primary}
+	}
+	if len(cands) == 0 {
+		return false
+	}
 	e.mu.Lock()
-	c := e.rs.conns[id]
+	c := e.rs.conns[e.relayForLocked(&peer{relay: primary, homes: homes})]
 	if c == nil {
-		e.ensureRelayLocked(id)
+		for _, id := range cands {
+			e.ensureRelayLocked(id)
+		}
 	}
 	e.mu.Unlock()
 	if c == nil {

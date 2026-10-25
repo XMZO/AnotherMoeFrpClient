@@ -2,6 +2,7 @@ package live
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,7 +25,8 @@ type vnetState struct {
 	room  string
 	slot  int
 	key   string
-	relay string // 收件中继（节点 ID），空表示面板
+	relay string   // 收件中继（节点 ID），空表示面板
+	homes []string // 连着的所有收件中继（主的在前）
 }
 
 const relayQueue = 256
@@ -58,14 +60,19 @@ func (h *Hub) onVnet(ctx context.Context, c *Client, b *api.LiveVnetBody) {
 		}
 		h.VnetRoomChanged(ctx, b.Room)
 	case api.VnetRelayOp:
-		if len(b.Relay) > 64 {
+		if len(b.Relay) > 64 || len(b.Homes) > api.VnetMaxHomes {
 			return
+		}
+		for _, x := range b.Homes {
+			if len(x) > 64 {
+				return
+			}
 		}
 		h.mu.Lock()
 		me := c.vnet
-		changed := me != nil && me.room == b.Room && me.relay != b.Relay
+		changed := me != nil && me.room == b.Room && (me.relay != b.Relay || !slices.Equal(me.homes, b.Homes))
 		if changed {
-			me.relay = b.Relay
+			me.relay, me.homes = b.Relay, slices.Clone(b.Homes)
 		}
 		h.mu.Unlock()
 		if changed {
@@ -183,7 +190,7 @@ func (h *Hub) VnetRoomChanged(ctx context.Context, room string) {
 	}
 	h.mu.Lock()
 	var inRoom, gone []*Client
-	keys, relays := map[int]string{}, map[int]string{}
+	keys, relays, homes := map[int]string{}, map[int]string{}, map[int][]string{}
 	for _, x := range h.clients {
 		if x.vnet == nil || x.vnet.room != room {
 			continue
@@ -196,6 +203,7 @@ func (h *Hub) VnetRoomChanged(ctx context.Context, room string) {
 		inRoom = append(inRoom, x)
 		keys[x.vnet.slot] = x.vnet.key
 		relays[x.vnet.slot] = x.vnet.relay
+		homes[x.vnet.slot] = x.vnet.homes
 	}
 	selfSlot := map[*Client]int{}
 	for _, x := range inRoom {
@@ -205,7 +213,7 @@ func (h *Hub) VnetRoomChanged(ctx context.Context, room string) {
 
 	peers := make([]api.VnetPeer, 0, len(members))
 	for _, m := range members {
-		peers = append(peers, api.VnetPeer{Slot: m.Slot, Nickname: m.Nickname, IP: m.IP, Key: keys[m.Slot], Relay: relays[m.Slot],
+		peers = append(peers, api.VnetPeer{Slot: m.Slot, Nickname: m.Nickname, IP: m.IP, Key: keys[m.Slot], Relay: relays[m.Slot], Homes: homes[m.Slot],
 			Guest: strings.HasPrefix(m.UserID, api.GuestPrefix)})
 	}
 	var info api.Room

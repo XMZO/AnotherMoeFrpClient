@@ -34,8 +34,8 @@ import (
 // Transport 是到面板的实时通道：发打洞信息、中继数据包。
 type Transport interface {
 	Signal(room string, to int, data string) error
-	Relay(to int, payload []byte) error       // 经面板中继
-	SetRelay(room string, relay string) error // 告诉面板我的收件中继（节点 ID，空表示面板）
+	Relay(to int, payload []byte) error                // 经面板中继
+	SetRelay(room, relay string, homes []string) error // 告诉面板我的收件中继：主的（节点 ID，空表示面板）和连着的所有
 }
 
 // 连接方式。
@@ -90,8 +90,9 @@ type peer struct {
 	nickname string
 	guest    bool
 	ip       string
-	key      string // base64 公钥，空表示不在线
-	relay    string // 他的收件中继（节点 ID），空表示面板
+	key      string   // base64 公钥，空表示不在线
+	relay    string   // 他的收件中继（节点 ID），空表示面板
+	homes    []string // 他连着的所有收件中继（新版本才有；发中继包时挑一个我也连着的）
 	ice      *iceSession
 	direct   *directConn
 	// directDown：直连暂时没响应（ICE Disconnected，网络抖动时常见，一般几秒后自己恢复）。
@@ -264,7 +265,7 @@ func (e *Engine) setPeersLocked(msg api.LiveVnetBody) (*device.Device, string, e
 			p = &peer{slot: x.Slot}
 			e.peers[x.Slot] = p
 		}
-		p.nickname, p.ip, p.relay, p.guest = x.Nickname, x.IP, x.Relay, x.Guest
+		p.nickname, p.ip, p.relay, p.homes, p.guest = x.Nickname, x.IP, x.Relay, x.Homes, x.Guest
 		if p.key == x.Key {
 			continue
 		}
@@ -311,6 +312,7 @@ type Snapshot struct {
 	Peers    []PeerState      `json:"peers"`
 	Relays   []RelayView      `json:"relays"`   // 能用的中继节点（按延迟）
 	Home     string           `json:"home"`     // 我的收件中继（节点 ID，空表示面板）
+	Backup   string           `json:"backup"`   // 备用收件中继（节点 ID，可能为空）
 	Pref     string           `json:"pref"`     // 我的选择：auto / panel / 节点 ID
 	Settings api.RoomSettings `json:"settings"` // 房间设置（默认中继、是否锁定）
 }
@@ -323,7 +325,7 @@ func (e *Engine) State() Snapshot {
 	if pref == "" {
 		pref = RelayAuto
 	}
-	st := Snapshot{Room: e.room, RoomName: e.name, RoomCode: e.code, Self: e.self, Peers: []PeerState{}, Relays: e.relayViewsLocked(), Home: e.rs.home, Pref: pref, Settings: e.rs.settings}
+	st := Snapshot{Room: e.room, RoomName: e.name, RoomCode: e.code, Self: e.self, Peers: []PeerState{}, Relays: e.relayViewsLocked(), Home: e.rs.home, Backup: e.rs.backup, Pref: pref, Settings: e.rs.settings}
 	for _, p := range e.peers {
 		mode := ModeOffline
 		switch {
@@ -340,8 +342,8 @@ func (e *Engine) State() Snapshot {
 		via := ""
 		if mode == ModeRelay || mode == ModeConnecting {
 			via = "面板服务器"
-			if n, ok := e.rs.nodes[p.relay]; ok && e.rs.conns[p.relay] != nil {
-				via = n.Name
+			if id := e.relayForLocked(p); id != "" {
+				via = e.rs.nodes[id].Name
 			}
 		}
 		st.Peers = append(st.Peers, PeerState{Slot: p.slot, Nickname: p.nickname, IP: p.ip, Mode: mode, RTT: p.rttMs(), Via: via, Guest: p.guest})
@@ -364,9 +366,9 @@ func (e *Engine) OnPacket(from int, payload []byte) {
 func (e *Engine) send(slot int, pkt []byte) error {
 	e.mu.Lock()
 	var d *directConn
-	relay := ""
+	relay, homes := "", []string(nil)
 	if p := e.peers[slot]; p != nil {
-		d, relay = p.direct, p.relay
+		d, relay, homes = p.direct, p.relay, p.homes
 		if p.directDown {
 			d = nil
 		}
@@ -383,7 +385,7 @@ func (e *Engine) send(slot int, pkt []byte) error {
 		}
 		e.mu.Unlock()
 	}
-	if relay != "" && e.relaySend(relay, slot, pkt) {
+	if e.relaySend(relay, homes, slot, pkt) {
 		return nil
 	}
 	return e.tr.Relay(slot, pkt)

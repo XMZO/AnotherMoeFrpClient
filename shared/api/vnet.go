@@ -139,6 +139,9 @@ const (
 	// 语音（WebRTC，走虚拟网）的协商借用 signal：Data 是客户端自己的 JSON（{"t":"voice",...}），面板原样转发。
 )
 
+// VnetMaxHomes 是一个成员同时连着的收件中继节点数（主 + 备用）。
+const VnetMaxHomes = 2
+
 // VnetChatMax 是一条聊天消息的最大字数，VnetChatKeep 是面板给每个房间在内存里留的条数。
 const (
 	VnetChatMax  = 500
@@ -169,7 +172,8 @@ type LiveVnetBody struct {
 	Settings *RoomSettings     `json:"settings,omitempty"`
 	Relays   []VnetRelay       `json:"relays,omitempty"`
 	Tickets  map[string]string `json:"tickets,omitempty"`
-	Relay    string            `json:"relay,omitempty"`    // relay：我的收件中继
+	Relay    string            `json:"relay,omitempty"`    // relay：我的收件中继（主）
+	Homes    []string          `json:"homes,omitempty"`    // relay：我连着、能收包的所有中继节点（主的在前，最多 VnetMaxHomes 个）
 	RoomName string            `json:"roomName,omitempty"` // peers：房间名（房主改名后成员跟着变）
 	RoomCode string            `json:"roomCode,omitempty"` // peers：邀请码（房主换码后成员跟着变）
 
@@ -180,12 +184,13 @@ type LiveVnetBody struct {
 
 // VnetPeer 是房间里的一个成员（peers 消息里）。Key 为空表示不在线。
 type VnetPeer struct {
-	Slot     int    `json:"slot"`
-	Nickname string `json:"nickname"`
-	IP       string `json:"ip"`
-	Key      string `json:"key,omitempty"`
-	Relay    string `json:"relay,omitempty"` // 他的收件中继（节点 ID），空表示面板；发给他的中继包送到这里
-	Guest    bool   `json:"guest,omitempty"` // 游客（没登录、用邀请码进来的）；昵称后面也带"（游客）"，给旧版本客户端看
+	Slot     int      `json:"slot"`
+	Nickname string   `json:"nickname"`
+	IP       string   `json:"ip"`
+	Key      string   `json:"key,omitempty"`
+	Relay    string   `json:"relay,omitempty"` // 他的收件中继（节点 ID），空表示面板；发给他的中继包送到这里
+	Homes    []string `json:"homes,omitempty"` // 他连着、能收包的中继节点（主的在前）；发给他的中继包送到其中任一个都行
+	Guest    bool     `json:"guest,omitempty"` // 游客（没登录、用邀请码进来的）；昵称后面也带"（游客）"，给旧版本客户端看
 }
 
 // 中继帧（实时通道的二进制消息）：第一个字节是座位号，后面是 WireGuard 数据包。

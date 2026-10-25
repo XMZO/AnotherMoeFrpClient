@@ -92,9 +92,14 @@ export interface LiveVnetBody {
     "tickets"?: { [_ in string]?: string } | null;
 
     /**
-     * relay：我的收件中继
+     * relay：我的收件中继（主）
      */
     "relay"?: string;
+
+    /**
+     * relay：我连着、能收包的所有中继节点（主的在前，最多 VnetMaxHomes 个）
+     */
+    "homes"?: string[] | null;
 
     /**
      * peers：房间名（房主改名后成员跟着变）
@@ -403,6 +408,11 @@ export interface VnetPeer {
      * 他的收件中继（节点 ID），空表示面板；发给他的中继包送到这里
      */
     "relay"?: string;
+
+    /**
+     * 他连着、能收包的中继节点（主的在前）；发给他的中继包送到其中任一个都行
+     */
+    "homes"?: string[] | null;
 
     /**
      * 游客（没登录、用邀请码进来的）；昵称后面也带"（游客）"，给旧版本客户端看

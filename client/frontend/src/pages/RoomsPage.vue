@@ -34,6 +34,7 @@ interface VnetState {
   peers: PeerState[]
   relays: RelayView[]
   home: string
+  backup?: string
   pref: string
   settings: Settings
   guest?: string
@@ -86,8 +87,9 @@ const hints = { create: '创建后把邀请码发给朋友', join: '朋友创建
 const relayOptions = computed(() => {
   const st = state.value
   const homeName = st.relays.find((r) => r.id === st.home)?.name ?? '面板服务器'
+  const backupName = st.relays.find((r) => r.id === st.backup)?.name ?? ''
   return [
-    { value: 'auto', label: `自动（${homeName}）`, hint: '推荐' },
+    { value: 'auto', label: `自动（${homeName}${backupName ? '，备用 ' + backupName : ''}）`, hint: '推荐' },
     { value: 'panel', label: '面板服务器转发', hint: '兜底，较慢' },
     ...st.relays.map((r) => ({ value: r.id, label: r.name, hint: latencyText(r.latency), tone: r.latency < 0 ? ('bad' as const) : rttClass(r.latency) })),
   ]

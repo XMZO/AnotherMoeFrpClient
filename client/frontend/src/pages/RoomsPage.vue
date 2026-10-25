@@ -20,7 +20,7 @@ const emit = defineEmits<{ back: [] }>()
 interface Member { userId: string; nickname: string; slot: number; ip: string; online: boolean }
 interface Settings { allowGuests: boolean; relay: string; relayLocked: boolean }
 interface Room extends Settings { id: string; name: string; code: string; ownerId: string; ownerName: string; members: Member[] }
-interface PeerState { slot: number; nickname: string; ip: string; mode: string; rtt?: number }
+interface PeerState { slot: number; nickname: string; ip: string; mode: string; rtt?: number; via?: string }
 interface RelayView { id: string; name: string; region?: string; latency: number }
 interface VnetState {
   admin: boolean
@@ -343,7 +343,7 @@ const login = () => account.openAuth('login')
               <b :title="p.nickname">{{ p.nickname }}</b>
               <button type="button" class="mono copyable peerip" title="复制" @click="copy(p.ip, p.nickname + ' 的虚拟 IP')">{{ p.ip }}<Icon name="copy" size="xs" /></button>
               <span v-if="p.mode !== 'offline'" class="rl-rtt mono" :class="rttClass(p.rtt)" title="到他的延迟（往返）">{{ p.rtt ? p.rtt + ' ms' : '— ms' }}</span>
-              <span class="bdg" :class="modeView[p.mode]?.[1]">{{ modeView[p.mode]?.[0] ?? p.mode }}</span>
+              <span class="bdg" :class="modeView[p.mode]?.[1]" :title="p.via ? `发给他的数据经 ${p.via} 转发` : undefined">{{ modeView[p.mode]?.[0] ?? p.mode }}{{ p.mode === 'relay' && p.via ? ' · ' + p.via : '' }}</span>
               <button v-if="isOwner(active) && memberOf(p.slot)" type="button" class="rc-kick" title="移出房间" @click="kick(active!, memberOf(p.slot)!)"><Icon name="x" size="xs" /></button>
             </div>
             <p v-if="!state.peers.length" class="fld-help">房间里只有你，把邀请码发给朋友吧</p>

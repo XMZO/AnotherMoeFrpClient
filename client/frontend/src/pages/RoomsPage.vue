@@ -306,7 +306,7 @@ const login = () => account.openAuth('login')
             </div>
             <div v-if="state.ip" class="rl-ip">
               <small>我的虚拟 IP</small>
-              <button type="button" class="mono copyable" title="复制" @click="copy(state.ip, '虚拟 IP')">{{ state.ip }}<Icon name="copy" size="xs" /></button>
+              <button type="button" class="mono copyable bigip" title="复制" @click="copy(state.ip, '虚拟 IP')">{{ state.ip }}<Icon name="copy" size="s" /></button>
             </div>
             <div v-if="active" class="rl-ip">
               <small>邀请码（发给朋友）</small>
@@ -323,7 +323,7 @@ const login = () => account.openAuth('login')
           <div class="rl-peers">
             <div v-for="p in state.peers" :key="p.slot" class="rl-peer">
               <b>{{ p.nickname }}</b>
-              <button type="button" class="mono copyable" title="复制" @click="copy(p.ip, p.nickname + ' 的虚拟 IP')">{{ p.ip }}<Icon name="copy" size="xs" /></button>
+              <button type="button" class="mono copyable peerip" title="复制" @click="copy(p.ip, p.nickname + ' 的虚拟 IP')">{{ p.ip }}<Icon name="copy" size="xs" /></button>
               <span class="bdg" :class="modeView[p.mode]?.[1]">{{ modeView[p.mode]?.[0] ?? p.mode }}</span>
             </div>
             <p v-if="!state.peers.length" class="fld-help">房间里只有你，把邀请码发给朋友吧</p>
@@ -571,6 +571,13 @@ const login = () => account.openAuth('login')
   background: var(--pri-soft);
   color: var(--pri-text);
   font-size: 12.5px;
+}
+.copyable.bigip {
+  font-size: 20px;
+  font-weight: 800;
+}
+.copyable.peerip {
+  font-size: 15px;
 }
 .copyable.code.big {
   padding: 6px 14px;

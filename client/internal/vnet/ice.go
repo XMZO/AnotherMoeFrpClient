@@ -130,7 +130,27 @@ func (e *Engine) wireAgent(p *peer, s *iceSession) {
 		}
 	})
 	_ = s.agent.OnConnectionStateChange(func(st ice.ConnectionState) {
-		if st != ice.ConnectionStateFailed && st != ice.ConnectionStateDisconnected && st != ice.ConnectionStateClosed {
+		switch st {
+		case ice.ConnectionStateDisconnected, ice.ConnectionStateConnected:
+			// 暂时没响应：数据先走中继，直连留着等它恢复；恢复了切回直连（不关掉，免得来回重新打洞）
+			down := st == ice.ConnectionStateDisconnected
+			e.mu.Lock()
+			changed := p.ice == s && p.direct != nil && p.directDown != down
+			if changed {
+				p.directDown = down
+			}
+			e.mu.Unlock()
+			if changed {
+				if down {
+					e.logf("vnet: %s 直连暂时没响应，先走中继", p.nickname)
+				} else {
+					e.logf("vnet: %s 直连恢复", p.nickname)
+				}
+				go e.onChange()
+			}
+			return
+		case ice.ConnectionStateFailed, ice.ConnectionStateClosed:
+		default:
 			return
 		}
 		e.mu.Lock()

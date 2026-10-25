@@ -94,8 +94,11 @@ type peer struct {
 	relay    string // 他的收件中继（节点 ID），空表示面板
 	ice      *iceSession
 	direct   *directConn
-	rtt      time.Duration // 延迟（平滑后），见 latency.go
-	rttAt    time.Time
+	// directDown：直连暂时没响应（ICE Disconnected，网络抖动时常见，一般几秒后自己恢复）。
+	// 这期间数据先走中继，直连留着；恢复成 Connected 就切回来。彻底失败（Failed）才关掉直连重新打洞。
+	directDown bool
+	rtt        time.Duration // 延迟（平滑后），见 latency.go
+	rttAt      time.Time
 }
 
 // New 创建引擎，还没有网卡。onChange 在成员或连接方式变化时调用（界面刷新）。
@@ -325,8 +328,10 @@ func (e *Engine) State() Snapshot {
 		mode := ModeOffline
 		switch {
 		case p.key == "":
-		case p.direct != nil:
+		case p.direct != nil && !p.directDown:
 			mode = ModeDirect
+		case p.direct != nil:
+			mode = ModeRelay // 直连暂时没响应，数据先走中继
 		case p.ice != nil:
 			mode = ModeConnecting
 		default:
@@ -362,6 +367,9 @@ func (e *Engine) send(slot int, pkt []byte) error {
 	relay := ""
 	if p := e.peers[slot]; p != nil {
 		d, relay = p.direct, p.relay
+		if p.directDown {
+			d = nil
+		}
 	}
 	e.mu.Unlock()
 	if d != nil {
@@ -545,7 +553,7 @@ func (e *Engine) useDirect(p *peer, s *iceSession, c *directConn) {
 		_ = c.conn.Close()
 		return
 	}
-	p.direct = c
+	p.direct, p.directDown = c, false
 	b := e.bind
 	e.mu.Unlock()
 	e.logf("vnet: %s 打洞成功，直连", p.nickname)
@@ -573,6 +581,7 @@ func (e *Engine) dropDirectLocked(p *peer) {
 		_ = p.direct.conn.Close()
 		p.direct = nil
 	}
+	p.directDown = false
 }
 
 // retryLater：打洞没成功，过一会再试（数据一直走中继）。只由发起方（座位号小的）调用。

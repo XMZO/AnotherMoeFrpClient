@@ -302,7 +302,7 @@ const login = () => account.openAuth('login')
             <span class="tile-ic lg ok"><Icon name="users" /></span>
             <div class="rl-t">
               <small>正在房间里</small>
-              <b>{{ active?.name ?? '…' }}</b>
+              <b>{{ active?.name ?? '…' }} <span v-if="active?.allowGuests" class="bdg info">允许游客</span></b>
             </div>
             <div v-if="state.ip" class="rl-ip">
               <small>我的虚拟 IP</small>
@@ -339,15 +339,8 @@ const login = () => account.openAuth('login')
           <article v-for="r in rooms" :key="r.id" class="card room-card" :class="{ cur: r.id === state.room }">
             <div class="rc-top">
               <b class="rc-name">{{ r.name }}</b>
-              <button v-if="isOwner(r)" type="button" class="btn soft xs" title="允许游客、默认中继" @click="openSettings(r)"><Icon name="settings" size="xs" />设置</button>
             </div>
             <small class="rc-meta">房主 {{ r.ownerName }} · {{ r.members.filter((m) => m.online).length }}/{{ r.members.length }} 人在线</small>
-            <div class="rc-code">
-              <button type="button" class="mono copyable code" title="复制邀请码，发给朋友" @click="copy(fmtCode(r.code), '邀请码')">
-                <Icon name="link" size="xs" />邀请码 {{ fmtCode(r.code) }}<Icon name="copy" size="xs" />
-              </button>
-              <span v-if="r.allowGuests" class="bdg info">允许游客</span>
-            </div>
             <div class="rc-members">
               <span v-for="m in r.members" :key="m.userId" class="rc-m" :class="{ on: m.online }" :title="m.ip">
                 <i />{{ m.nickname }}<small class="mono">.{{ m.slot }}</small>

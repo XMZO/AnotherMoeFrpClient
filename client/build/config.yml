@@ -11,7 +11,7 @@ info:
   description: "萌！FRP 高级客户端" # The application description
   copyright: "Copyright © 2026 XMZO. All rights reserved." # Copyright text
   comments: "MoeFrp client" # Comments
-  version: "3.2.9" # The application version
+  version: "3.2.10" # The application version
   # cfBundleIconName: "appicon" # The macOS icon name in Assets.car icon bundles (optional)
   #                               # Should match the name of your .icon file without the extension
   #                               # If not set and Assets.car exists, defaults to "appicon"

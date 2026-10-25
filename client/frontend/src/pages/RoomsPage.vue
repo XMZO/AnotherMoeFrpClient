@@ -438,12 +438,12 @@ const login = () => account.openAuth('login')
         <div class="room-grid">
           <article v-for="r in rooms" :key="r.id" class="card room-card" :class="{ cur: r.id === state.room }">
             <div class="rc-top">
-              <b class="rc-name">{{ r.name }}</b>
+              <b class="rc-name" :title="roomName(r)">{{ roomName(r) }}</b>
+              <small class="rc-meta" :title="`房主 ${r.ownerName}`">{{ r.members.filter((m) => m.online).length }}/{{ r.members.length }} 在线 · 房主 {{ r.ownerName }}</small>
             </div>
-            <small class="rc-meta">房主 {{ r.ownerName }} · {{ r.members.filter((m) => m.online).length }}/{{ r.members.length }} 人在线</small>
             <div class="rc-members">
-              <span v-for="m in shownMembers(r)" :key="m.userId" class="rc-m" :class="{ on: m.online }" :title="m.ip">
-                <i />{{ m.nickname }}<small class="mono">.{{ m.slot }}</small>
+              <span v-for="m in shownMembers(r)" :key="m.userId" class="rc-m" :class="{ on: m.online }" :title="`${m.nickname} · ${m.ip}`">
+                <i /><span class="rc-mn">{{ m.nickname }}</span><small class="mono">.{{ m.slot }}</small>
                 <button v-if="isOwner(r) && m.userId !== myId" type="button" class="rc-kick" title="移出房间" :disabled="busy === 'kick-' + m.userId" @click="kick(r, m)">
                   <Icon name="x" size="xs" />
                 </button>
@@ -776,22 +776,25 @@ const login = () => account.openAuth('login')
 }
 .room-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  align-items: start; /* 卡片按自己的内容高，不被同一排高的卡片拉长 */
+  gap: 10px;
 }
 .room-card {
-  padding: 14px 16px;
+  min-width: 0;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 7px;
 }
 .room-card.cur {
   border-color: var(--pri);
 }
 .rc-top {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
 }
 .rc-t {
   flex: 1;
@@ -819,8 +822,13 @@ const login = () => account.openAuth('login')
   white-space: nowrap;
 }
 .rc-meta {
-  margin-top: -6px;
-  font-size: 12px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
   color: var(--text-3);
   font-weight: 600;
 }
@@ -843,13 +851,15 @@ const login = () => account.openAuth('login')
 .rc-members {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
+  min-width: 0;
 }
 .rc-m {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 8px;
+  max-width: 100%;
+  padding: 2px 8px;
   border-radius: 99px;
   background: var(--fill);
   font-size: 12px;
@@ -867,6 +877,19 @@ const login = () => account.openAuth('login')
 }
 .rc-m small {
   color: var(--text-3);
+}
+/* 超长昵称：省略号，不把卡片撑大（完整名字在悬停提示里） */
+.rc-mn {
+  min-width: 0;
+  max-width: 9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rc-m i,
+.rc-m small,
+.rc-m .rc-kick {
+  flex: none;
 }
 .rc-kick {
   display: inline-flex;

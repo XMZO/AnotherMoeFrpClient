@@ -107,8 +107,14 @@ async function takeNotices() {
   } catch {}
 }
 
+// 侧栏"关于"下面的小版本号
+const appVersion = ref('')
+
 onMounted(async () => {
   initVoice()
+  AppService.Version()
+    .then((v) => (appVersion.value = v.app))
+    .catch(() => {})
   VnetService.OpenRoomsOnStart().then((v) => v && (page.value = 'rooms')).catch(() => {}) // "以管理员身份重启"后回到联机页
   runEvents.init()
   await Promise.all([tunnel.init(), logs.init(), account.init(), settingsStore.load()]).catch(() => {})
@@ -153,6 +159,7 @@ onMounted(async () => {
             <Icon :name="n.icon" />
             <span>{{ n.label }}</span>
             <span v-if="n.key === 'tunnel' && tunnel.active" class="nav-dot" title="隧道运行中" />
+            <small v-if="n.key === 'about' && appVersion" class="nav-ver">v{{ appVersion }}</small>
           </button>
         </div>
         <div class="rail-fill" />
@@ -270,6 +277,14 @@ onMounted(async () => {
 }
 .nav-btn.on .ic {
   animation: boing 0.55s var(--ease-spring);
+}
+.nav-ver {
+  margin-top: -2px;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--text-3);
+  opacity: 0.75;
+  letter-spacing: 0.2px;
 }
 .nav-dot {
   position: absolute;

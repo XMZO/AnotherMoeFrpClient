@@ -52,6 +52,8 @@ tasks:
         vars:
           ARCH: '{{.ARCH}}'
       - '{{if eq .OBFUSCATED "true"}}garble {{.GARBLE_ARGS}} build{{else}}go build{{end}} {{.BUILD_FLAGS}} -o "{{.BIN_DIR}}/{{.APP_NAME}}.exe"'
+      # 发布用的副本带版本号：bin/MoeFrp-3.2.4.exe（开发版本 *-dev 不复制）（MoeFrp）
+      - '{{if contains "-dev" .VERSION}}echo dev build{{else}}wails3 tool cp "{{.BIN_DIR}}/{{.APP_NAME}}.exe" "{{.BIN_DIR}}/{{.APP_NAME}}-{{.VERSION}}.exe"{{end}}'
       - cmd: powershell Remove-item *.syso
         platforms: [windows]
       - cmd: rm -f *.syso

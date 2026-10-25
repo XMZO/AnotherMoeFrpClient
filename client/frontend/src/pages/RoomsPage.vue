@@ -440,14 +440,29 @@ const login = () => account.openAuth('login')
               </button>
             </template>
             <template v-else>
-              <span class="rl-vt">语音已连接 · {{ voiceCount }} 人</span>
-              <button type="button" class="btn sm" :class="micOn ? 'soft' : 'ghost'" :disabled="!voice.hasMic || isMuted(voice.self)" @click="setMic(!micOn)">
-                <Icon :name="micOn ? 'mic' : 'micOff'" size="s" />{{ isMuted(voice.self) ? '被房主禁言' : !voice.hasMic ? '没有麦克风' : micOn ? '麦克风开' : '麦克风关' }}
+              <span class="rl-vt">已连接 · {{ voiceCount }} 人</span>
+              <button
+                type="button"
+                class="btn sm rl-vbtn"
+                :class="micOn ? 'soft' : 'ghost off'"
+                :disabled="!voice.hasMic || isMuted(voice.self)"
+                :title="isMuted(voice.self) ? '被房主禁言' : !voice.hasMic ? '没有麦克风' : micOn ? '麦克风开着（点击关闭）' : '麦克风关着（点击打开）'"
+                :aria-label="micOn ? '关闭麦克风' : '打开麦克风'"
+                @click="setMic(!micOn)"
+              >
+                <Icon :name="micOn ? 'mic' : 'micOff'" size="s" />
               </button>
-              <button type="button" class="btn sm" :class="voice.deaf ? 'ghost' : 'soft'" @click="setDeaf(!voice.deaf)">
-                <Icon :name="voice.deaf ? 'headsetOff' : 'headset'" size="s" />{{ voice.deaf ? '扬声器关' : '扬声器开' }}
+              <button
+                type="button"
+                class="btn sm rl-vbtn"
+                :class="voice.deaf ? 'ghost off' : 'soft'"
+                :title="voice.deaf ? '扬声器关着（点击打开）' : '扬声器开着（点击关闭，同时闭麦）'"
+                :aria-label="voice.deaf ? '打开扬声器' : '关闭扬声器'"
+                @click="setDeaf(!voice.deaf)"
+              >
+                <Icon :name="voice.deaf ? 'headsetOff' : 'headset'" size="s" />
               </button>
-              <button type="button" class="btn quiet sm danger" @click="leaveVoice"><Icon name="logout" size="s" />退出语音</button>
+              <button type="button" class="btn quiet sm danger" title="退出语音" @click="leaveVoice"><Icon name="logout" size="s" />退出</button>
             </template>
           </div>
           <div class="rl-sub">
@@ -754,11 +769,21 @@ const login = () => account.openAuth('login')
 }
 .rl-vt {
   flex: 1;
-  min-width: 100px;
-  text-align: right;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12.5px;
   font-weight: 800;
   color: var(--text-2);
+}
+.rl-vbtn {
+  width: 34px;
+  padding: 0;
+  justify-content: center;
+}
+.rl-vbtn.off {
+  color: var(--bad-text);
 }
 .rl-pv {
   flex: none;
@@ -840,7 +865,7 @@ const login = () => account.openAuth('login')
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 180px;
+  width: 170px;
   min-width: 0;
   color: var(--text-3);
 }

@@ -61,9 +61,9 @@ func (e *Engine) updateRelaysLocked(b api.LiveVnetBody) {
 	if b.Settings != nil {
 		r.settings = *b.Settings
 	}
-	if !r.measured && len(r.nodes) > 0 {
+	if !r.measured && len(r.nodes) > 0 && e.done != nil {
 		r.measured = true
-		go e.measure()
+		go e.measureLoop(e.done)
 	}
 	e.chooseHomeLocked()
 }
@@ -99,6 +99,10 @@ func (e *Engine) chooseHomeLocked() {
 					best, want = l, id
 				}
 			}
+			// 防抖：现在用的还能连、只比最快的慢一点（20% + 10ms 以内）就不换，免得每次重测都来回切
+			if cur, ok := r.latency[r.home]; ok && cur > 0 && best > 0 && cur <= best*6/5+10 {
+				want = r.home
+			}
 		}
 	default:
 		if _, ok := r.nodes[pick]; ok {
@@ -124,7 +128,24 @@ func (e *Engine) chooseHomeLocked() {
 	}()
 }
 
-// measure 测到各中继节点的延迟（TCP 连接时间），测完重新选收件中继。
+// measureEvery 是重测中继延迟的间隔（线路的延迟会变，界面上的数字也跟着更新）。
+const measureEvery = 5 * time.Second
+
+// measureLoop 进房间后马上测一次中继延迟，之后定期重测，直到离开房间。
+func (e *Engine) measureLoop(done chan struct{}) {
+	t := time.NewTicker(measureEvery)
+	defer t.Stop()
+	for {
+		e.measure()
+		select {
+		case <-done:
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// measure 测到各中继节点的延迟（TCP 连接时间，连两次取快的），测完重新选收件中继。
 func (e *Engine) measure() {
 	e.mu.Lock()
 	nodes := make([]api.VnetRelay, 0, len(e.rs.nodes))
@@ -139,12 +160,18 @@ func (e *Engine) measure() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			start := time.Now()
-			c, err := net.DialTimeout("tcp", net.JoinHostPort(x.Addr, strconv.Itoa(x.Port)), 3*time.Second)
 			ms := -1
-			if err == nil {
-				ms = max(1, int(time.Since(start).Milliseconds()))
+			for range 2 {
+				start := time.Now()
+				c, err := net.DialTimeout("tcp", net.JoinHostPort(x.Addr, strconv.Itoa(x.Port)), 3*time.Second)
+				if err != nil {
+					continue
+				}
+				d := max(1, int(time.Since(start).Milliseconds()))
 				_ = c.Close()
+				if ms < 0 || d < ms {
+					ms = d
+				}
 			}
 			mu.Lock()
 			res[x.ID] = ms

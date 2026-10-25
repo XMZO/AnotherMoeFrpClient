@@ -8,6 +8,8 @@ import Icon from './Icon.vue'
 export interface SelectOption {
   value: string
   label: string
+  hint?: string // 右边的小字（比如延迟），只在弹出层里显示
+  tone?: 'good' | 'mid' | 'bad' | '' // hint 的颜色
 }
 defineOptions({ inheritAttrs: false })
 const model = defineModel<string>({ default: '' })
@@ -151,6 +153,7 @@ onBeforeUnmount(() => listen(false))
           @click="pick(i, true)"
         >
           <span class="sel-opt-l">{{ o.label }}</span>
+          <span v-if="o.hint" class="sel-opt-hint" :class="o.tone">{{ o.hint }}</span>
           <Icon v-if="o.value === model" name="check" size="xs" />
         </button>
       </div>
@@ -215,8 +218,25 @@ onBeforeUnmount(() => listen(false))
   color: var(--pri);
 }
 .sel-opt-l {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.sel-opt-hint {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+.sel-opt-hint.good {
+  color: var(--ok-text);
+}
+.sel-opt-hint.mid {
+  color: var(--warn-text);
+}
+.sel-opt-hint.bad {
+  color: var(--bad-text);
 }
 </style>

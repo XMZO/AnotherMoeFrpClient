@@ -319,11 +319,8 @@ func TestWithFrps(t *testing.T) {
 	if r := m.ApplySettings(1, set); !r.Applied {
 		t.Fatalf("frps: %+v", r)
 	}
-	// 用 Cleanup 而不是 defer：Cleanup 后注册的先执行，下面每个 frpc 的 Close 会排在 frps 前面。
-	// 先关 frps 的话，还在重连的 frpc 正好连进来会撞上 frp 自己（golib mux）的数据竞争，-race 下偶尔报错
-	t.Cleanup(m.Close)
-	// frpc 都关了以后再等一会：已经连到一半的重连（握手还没读完）要先在 frps 那边失败退出
-	t.Cleanup(func() { time.Sleep(300 * time.Millisecond) })
+	// 测试结束不关 frps：frp 用的 golib mux 往监听通道发连接和关闭通道之间没有同步，
+	// 关 frps 时 -race 偶尔会报（和等多久无关），测试进程退出时自然清理。下面每个 frpc 仍然在 Cleanup 里关。
 	s.Kick, s.Alive = m.CloseClient, m.HasClient
 	echo := echoServer(t)
 

@@ -66,7 +66,7 @@ const modeView: Record<string, [string, string]> = {
   offline: ['不在线', ''],
 }
 // 成员延迟（毫秒）的颜色：60 以内绿，150 以内黄，再高红
-const rttClass = (ms?: number) => (!ms ? '' : ms < 60 ? 'good' : ms < 150 ? 'mid' : 'bad')
+const rttClass = (ms?: number): 'good' | 'mid' | 'bad' | '' => (!ms || ms < 0 ? '' : ms < 60 ? 'good' : ms < 150 ? 'mid' : 'bad')
 const fmtCode = (c: string) => (c.length === 8 ? `${c.slice(0, 4)}-${c.slice(4)}` : c)
 const latencyText = (l: number) => (l > 0 ? `${l} ms` : l < 0 ? '连不上' : '测速中')
 const titles = { create: '创建房间', join: '加入房间', guest: '游客加入' }
@@ -79,7 +79,7 @@ const relayOptions = computed(() => {
   return [
     { value: 'auto', label: `自动（${homeName}）` },
     { value: 'panel', label: '面板（不用节点）' },
-    ...st.relays.map((r) => ({ value: r.id, label: `${r.name} · ${latencyText(r.latency)}` })),
+    ...st.relays.map((r) => ({ value: r.id, label: r.name, hint: latencyText(r.latency), tone: r.latency < 0 ? ('bad' as const) : rttClass(r.latency) })),
   ]
 })
 const relayLocked = computed(() => state.value.settings.relayLocked)

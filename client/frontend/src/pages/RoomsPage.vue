@@ -438,8 +438,12 @@ const login = () => account.openAuth('login')
         <div class="room-grid">
           <article v-for="r in rooms" :key="r.id" class="card room-card" :class="{ cur: r.id === state.room }">
             <div class="rc-top">
-              <b class="rc-name" :title="roomName(r)">{{ roomName(r) }}</b>
-              <small class="rc-meta" :title="`房主 ${r.ownerName}`">{{ r.members.filter((m) => m.online).length }}/{{ r.members.length }} 在线 · 房主 {{ r.ownerName }}</small>
+              <span class="rc-ic">{{ ([...roomName(r)][0] ?? '#').toUpperCase() }}</span>
+              <div class="rc-t">
+                <b :title="roomName(r)">{{ roomName(r) }}</b>
+                <small :title="`房主 ${r.ownerName}`">房主 {{ r.ownerName }} · {{ r.members.filter((m) => m.online).length }}/{{ r.members.length }} 在线</small>
+              </div>
+              <span v-if="r.id === state.room" class="bdg ok">当前</span>
             </div>
             <div class="rc-members">
               <span v-for="m in shownMembers(r)" :key="m.userId" class="rc-m" :class="{ on: m.online }" :title="`${m.nickname} · ${m.ip}`">
@@ -782,19 +786,39 @@ const login = () => account.openAuth('login')
 }
 .room-card {
   min-width: 0;
-  padding: 10px 12px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 10px;
 }
 .room-card.cur {
   border-color: var(--pri);
 }
 .rc-top {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
+}
+/* 房间名首字的小方块 */
+.rc-ic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  background: var(--pri-soft);
+  color: var(--pri-text);
+  font-size: 15px;
+  font-weight: 900;
+}
+.room-card.cur .rc-ic {
+  background: var(--ok-soft);
+  color: var(--ok-text);
+}
+.rc-top .bdg {
+  flex: none;
 }
 .rc-t {
   flex: 1;
@@ -803,6 +827,7 @@ const login = () => account.openAuth('login')
   flex-direction: column;
 }
 .rc-t b {
+  font-size: 14.5px;
   font-weight: 900;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -812,6 +837,9 @@ const login = () => account.openAuth('login')
   font-size: 12px;
   color: var(--text-3);
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .rc-name {
   flex: 1;

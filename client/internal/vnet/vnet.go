@@ -234,7 +234,7 @@ func (e *Engine) setPeersLocked(msg api.LiveVnetBody) (*device.Device, string, e
 	defer e.updateRelaysLocked(msg)
 	if e.self != self {
 		e.self = self
-		if err := configureAdapter(AdapterName, api.VnetIP(self)); err != nil {
+		if err := configureAdapter(AdapterName, api.VnetIP(self), api.VnetIP6(self)); err != nil {
 			e.logf("vnet: configure adapter: %v", err)
 			return nil, "", fmt.Errorf("设置虚拟网卡地址失败：%w", err)
 		}
@@ -269,7 +269,8 @@ func (e *Engine) setPeersLocked(msg api.LiveVnetBody) (*device.Device, string, e
 		}
 		p.key, p.rtt = x.Key, 0
 		if k := wgKeyHex(x.Key); k != "" {
-			fmt.Fprintf(&b, "public_key=%s\nreplace_allowed_ips=true\nallowed_ip=%s/32\nendpoint=%d\npersistent_keepalive_interval=25\n", k, x.IP, x.Slot)
+			fmt.Fprintf(&b, "public_key=%s\nreplace_allowed_ips=true\nallowed_ip=%s/32\nallowed_ip=%s/128\nendpoint=%d\npersistent_keepalive_interval=25\n",
+				k, x.IP, api.VnetIP6(x.Slot), x.Slot)
 			if self < x.Slot { // 座位号小的一方发起打洞
 				e.startICELocked(p, 0)
 			}
@@ -371,6 +372,16 @@ func (e *Engine) send(slot int, pkt []byte) error {
 		return nil
 	}
 	return e.tr.Relay(slot, pkt)
+}
+
+// selfIP 返回自己的虚拟 IP（还没分到座位时 ok 为 false）。
+func (e *Engine) selfIP() (netip.Addr, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.self < 1 || e.self > 250 {
+		return netip.Addr{}, false
+	}
+	return netip.AddrFrom4([4]byte{10, 241, 0, byte(e.self)}), true
 }
 
 // onlineIPs 返回在线成员的虚拟 IP（广播复制给他们）。

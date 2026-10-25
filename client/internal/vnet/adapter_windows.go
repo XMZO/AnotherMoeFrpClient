@@ -21,9 +21,9 @@ func IsAdmin() bool {
 	return windows.GetCurrentProcessToken().IsElevated()
 }
 
-// configureAdapter 给虚拟网卡配地址：静态 IP、/24、不设网关（不影响默认路由）；
+// configureAdapter 给虚拟网卡配地址：静态 IP、/24、不设网关（不影响默认路由），再加一个 IPv6 地址（/64）；
 // 局域网发现的广播 / 组播优先从这块网卡发出（setLanPriority）；网络类别设成"专用"，防火墙不按公用网络拦。
-func configureAdapter(name, ip string) error {
+func configureAdapter(name, ip, ip6 string) error {
 	var err error
 	for i := 0; i < 10; i++ { // 网卡刚建出来，系统可能还没准备好
 		if err = run("netsh", "interface", "ipv4", "set", "address", "name="+name, "source=static",
@@ -35,6 +35,8 @@ func configureAdapter(name, ip string) error {
 	if err != nil {
 		return err
 	}
+	// IPv6 地址：没有 IPv6（系统里关掉了）也能用，只是用 IPv6 的游戏连不了
+	_ = run("netsh", "interface", "ipv6", "add", "address", "interface="+name, "address="+ip6+"/64", "store=active")
 	for i := 0; i < 6 && !setLanPriority(name); i++ { // 地址刚配上，系统的路由可能还没生成
 		time.Sleep(300 * time.Millisecond)
 	}
@@ -59,6 +61,9 @@ func setLanPriority(name string) bool {
 			ok = false
 		}
 	}
+	// IPv6 的组播（新版 MC 开了 IPv6 优先时用 ff75:230::60）同样优先从这块网卡出；失败不算（可能没有 IPv6）
+	_ = run("netsh", "interface", "ipv6", "set", "interface", "interface="+name, "metric=0")
+	_ = run("netsh", "interface", "ipv6", "set", "route", "ff00::/8", "interface="+name, "metric=0", "store=active")
 	return ok
 }
 

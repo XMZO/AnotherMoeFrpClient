@@ -39,6 +39,13 @@ const (
 // VnetIP 返回座位号对应的虚拟 IP。
 func VnetIP(slot int) string { return fmt.Sprintf("%s%d", VnetPrefix, slot) }
 
+// VnetIP6Prefix 是虚拟网的 IPv6 网段（/64，ULA）：成员的 IPv6 地址是 VnetIP6Prefix + 座位号（十六进制）。
+// 客户端自己按座位号算，面板不用管；有的游戏（新版 MC 开了 IPv6 优先时）用 IPv6 发现和连接局域网房间。
+const VnetIP6Prefix = "fd4d:6f65:4672::"
+
+// VnetIP6 返回座位号对应的虚拟 IPv6 地址。
+func VnetIP6(slot int) string { return fmt.Sprintf("%s%x", VnetIP6Prefix, slot) }
+
 // Room 是一个联机房间。
 type Room struct {
 	ID        string       `json:"id"`

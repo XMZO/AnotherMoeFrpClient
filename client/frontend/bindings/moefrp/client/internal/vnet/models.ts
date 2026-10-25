@@ -17,7 +17,7 @@ export interface PeerState {
     "rtt"?: number;
 
     /**
-     * 走中继时，发给他的数据经哪个节点（"面板" 表示面板）
+     * 走中继时，发给他的数据经哪个节点（"面板服务器" 表示面板）
      */
     "via"?: string;
 }

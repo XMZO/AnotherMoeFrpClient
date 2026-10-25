@@ -54,7 +54,7 @@ type PeerState struct {
 	Self     bool   `json:"self"`
 	Mode     string `json:"mode"`
 	RTT      int    `json:"rtt,omitempty"` // 延迟（毫秒），0 表示还不知道
-	Via      string `json:"via,omitempty"` // 走中继时，发给他的数据经哪个节点（"面板" 表示面板）
+	Via      string `json:"via,omitempty"` // 走中继时，发给他的数据经哪个节点（"面板服务器" 表示面板）
 }
 
 // AdapterName 是虚拟网卡的名字（网络连接里看到的）。
@@ -300,7 +300,7 @@ func (e *Engine) State() Snapshot {
 		}
 		via := ""
 		if mode == ModeRelay || mode == ModeConnecting {
-			via = "面板"
+			via = "面板服务器"
 			if n, ok := e.rs.nodes[p.relay]; ok && e.rs.conns[p.relay] != nil {
 				via = n.Name
 			}

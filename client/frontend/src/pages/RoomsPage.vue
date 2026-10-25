@@ -302,7 +302,7 @@ const login = () => account.openAuth('login')
             <span class="tile-ic lg ok"><Icon name="users" /></span>
             <div class="rl-t">
               <small>正在房间里</small>
-              <b>{{ active?.name ?? '…' }} <span v-if="active?.allowGuests" class="bdg info">允许游客</span></b>
+              <b>{{ active?.name ?? '…' }} <span v-if="active" class="bdg" :class="active.allowGuests ? 'info' : ''">{{ active.allowGuests ? '允许游客' : '禁止游客' }}</span></b>
             </div>
             <div v-if="state.ip" class="rl-ip">
               <small>我的虚拟 IP</small>

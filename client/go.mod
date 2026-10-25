@@ -9,6 +9,7 @@ require (
 	github.com/fatedier/golib v0.8.2
 	github.com/pion/ice/v4 v4.4.8
 	github.com/pion/stun/v4 v4.0.1
+	github.com/pion/transport/v5 v5.0.1
 	github.com/wailsapp/wails/v3 v3.0.0-beta.31
 	golang.design/x/clipboard v0.11.0
 	golang.org/x/image v0.41.0
@@ -43,7 +44,6 @@ require (
 	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/mdns/v2 v2.2.2 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
-	github.com/pion/transport/v5 v5.0.1 // indirect
 	github.com/pion/turn/v5 v5.1.2 // indirect
 	github.com/pires/go-proxyproto v0.15.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect

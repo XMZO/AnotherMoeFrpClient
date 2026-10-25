@@ -82,7 +82,12 @@ func newAgent() (*ice.Agent, error) {
 			urls = append(urls, x)
 		}
 	}
+	n, err := newBufNet()
+	if err != nil {
+		return nil, err
+	}
 	return ice.NewAgent(&ice.AgentConfig{
+		Net:             n,
 		Urls:            urls,
 		NetworkTypes:    []ice.NetworkType{ice.NetworkTypeUDP4, ice.NetworkTypeUDP6},
 		CandidateTypes:  []ice.CandidateType{ice.CandidateTypeHost, ice.CandidateTypeServerReflexive},

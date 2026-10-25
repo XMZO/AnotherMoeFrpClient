@@ -21,7 +21,7 @@ const emit = defineEmits<{ back: [] }>()
 interface Member { userId: string; nickname: string; slot: number; ip: string; online: boolean }
 interface Settings { allowGuests: boolean; relay: string; relayLocked: boolean; noVoice?: boolean; muted?: number[] | null; noDirect?: boolean }
 interface Room extends Settings { id: string; name: string; code: string; ownerId: string; ownerName: string; members: Member[] }
-interface PeerState { slot: number; nickname: string; ip: string; mode: string; rtt?: number; via?: string; guest?: boolean }
+interface PeerState { slot: number; nickname: string; ip: string; mode: string; rtt?: number; via?: string; guest?: boolean; loss?: number; redundant?: boolean }
 interface RelayView { id: string; name: string; region?: string; latency: number }
 interface VnetState {
   admin: boolean
@@ -492,8 +492,9 @@ const login = () => account.openAuth('login')
               <b :title="p.nickname">{{ p.guest ? plainName(p.nickname) : p.nickname }}</b>
               <span v-if="p.guest" class="bdg gold rl-guest" title="没登录、用邀请码进来的游客">游客</span>
               <button type="button" class="mono copyable peerip" title="复制" @click="copy(p.ip, p.nickname + ' 的虚拟 IP')">{{ p.ip }}<Icon name="copy" size="xs" /></button>
-              <span v-if="p.mode !== 'offline'" class="rl-rtt mono" :class="rttClass(p.rtt)" title="到他的延迟（往返）">{{ p.rtt ? p.rtt + ' ms' : '— ms' }}</span>
-              <span class="bdg" :class="modeView[p.mode]?.[1]" :title="p.via ? `发给他的数据经 ${p.via} 转发` : undefined">{{ modeView[p.mode]?.[0] ?? p.mode }}{{ p.mode === 'relay' && p.via ? ' · ' + p.via : '' }}</span>
+              <span v-if="p.mode !== 'offline'" class="rl-rtt mono" :class="rttClass(p.rtt)" :title="`到他的延迟（往返）${p.loss ? ' · 最近丢包 ' + p.loss + '%' : ''}`">{{ p.rtt ? p.rtt + ' ms' : '— ms' }}</span>
+              <span v-if="p.loss" class="rl-loss mono" :title="`最近一分钟探测丢包 ${p.loss}%`">丢{{ p.loss }}%</span>
+              <span class="bdg" :class="modeView[p.mode]?.[1]" :title="p.redundant ? '直连有丢包：每个包同时经中继再发一份，哪份先到用哪份' : p.via ? `发给他的数据经 ${p.via} 转发` : undefined">{{ modeView[p.mode]?.[0] ?? p.mode }}{{ p.redundant ? '+冗余' : '' }}{{ p.mode === 'relay' && p.via ? ' · ' + p.via : '' }}</span>
               <button v-if="isOwner(active) && !voice.noVoice" type="button" class="rc-kick" :class="{ on: isMuted(p.slot) }" :title="isMuted(p.slot) ? '解除禁言' : '语音禁言'" @click="toggleMute(p.slot)">
                 <Icon :name="isMuted(p.slot) ? 'micOff' : 'mic'" size="xs" />
               </button>
@@ -951,6 +952,12 @@ const login = () => account.openAuth('login')
   font-weight: 700;
   color: var(--text-3);
   white-space: nowrap;
+}
+.rl-loss {
+  flex: none;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--warn-text);
 }
 .rl-rtt.good {
   color: var(--ok-text);

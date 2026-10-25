@@ -26,7 +26,7 @@ func (e *Engine) handleProbe(from int, b []byte) bool {
 		resp := make([]byte, 9)
 		resp[0] = pingResp
 		copy(resp[1:], b[1:])
-		go func() { _ = e.send(from, resp) }()
+		go func() { _ = e.sendPkt(from, resp, false) }() // 回复也只走直连（量的是直连本身的丢包）
 		return true
 	}
 	sent := int64(binary.BigEndian.Uint64(b[1:]))
@@ -42,9 +42,52 @@ func (e *Engine) handleProbe(from int, b []byte) bool {
 			p.rtt = (p.rtt + rtt) / 2 // 平滑一下，跳得没那么厉害
 		}
 		p.rttAt = time.Now()
+		if sent == p.probeSent {
+			p.probeGot = true
+		}
 	}
 	e.mu.Unlock()
 	return true
+}
+
+// 直连丢包检测：每次探测记一笔"上一个探测有没有回"，保留最近 lossWindow 次。
+// 最近这些次里有丢的就打开冗余发送（直连 + 中继各发一份，WireGuard 自带防重放，重复的包对方直接丢掉），
+// 连续 lossWindow 次都没丢才关。MC 这类用 TCP 的游戏丢一个包整条连接都要等重传，回弹、卡区块就是这么来的。
+const lossWindow = 30
+
+// recordProbeLocked 记录上一个探测的结果，返回这次探测的时间戳（发出去的包里带它）。调用方持有 e.mu。
+func (p *peer) recordProbeLocked(now int64) {
+	if p.probeSent != 0 {
+		p.probeHist = append(p.probeHist, p.probeGot)
+		if len(p.probeHist) > lossWindow {
+			p.probeHist = p.probeHist[len(p.probeHist)-lossWindow:]
+		}
+	}
+	p.probeSent, p.probeGot = now, false
+}
+
+// lossPct 是最近的探测丢包率（%），探测次数太少时为 0。
+func (p *peer) lossPct() int {
+	if len(p.probeHist) < 5 {
+		return 0
+	}
+	lost := 0
+	for _, ok := range p.probeHist {
+		if !ok {
+			lost++
+		}
+	}
+	return lost * 100 / len(p.probeHist)
+}
+
+// lossy：最近有丢包，直连时要冗余发送。
+func (p *peer) lossy() bool {
+	for _, ok := range p.probeHist {
+		if !ok {
+			return true
+		}
+	}
+	return false
 }
 
 // pingLoop 定期给在线成员发探测包，延迟有变化时刷新界面。
@@ -60,12 +103,18 @@ func (e *Engine) pingLoop(done chan struct{}) {
 		}
 		e.mu.Lock()
 		var slots []int
+		stamps := map[int]int64{}
 		now := map[int]int{}
 		for slot, p := range e.peers {
 			if p.key != "" {
 				slots = append(slots, slot)
+				ts := time.Now().UnixNano()
+				p.recordProbeLocked(ts)
+				stamps[slot] = ts
+			} else {
+				p.probeHist, p.probeSent = nil, 0
 			}
-			now[slot] = p.rttMs()
+			now[slot] = p.rttMs()*1000 + p.lossPct() // 延迟或丢包变了都刷新界面
 		}
 		e.mu.Unlock()
 		changed := len(now) != len(last)
@@ -81,8 +130,8 @@ func (e *Engine) pingLoop(done chan struct{}) {
 		for _, slot := range slots {
 			b := make([]byte, 9)
 			b[0] = pingReq
-			binary.BigEndian.PutUint64(b[1:], uint64(time.Now().UnixNano()))
-			_ = e.send(slot, b)
+			binary.BigEndian.PutUint64(b[1:], uint64(stamps[slot]))
+			_ = e.sendPkt(slot, b, false)
 		}
 	}
 }

@@ -48,14 +48,16 @@ const (
 
 // PeerState 是界面上的一个成员。
 type PeerState struct {
-	Slot     int    `json:"slot"`
-	Nickname string `json:"nickname"`
-	IP       string `json:"ip"`
-	Self     bool   `json:"self"`
-	Mode     string `json:"mode"`
-	RTT      int    `json:"rtt,omitempty"`   // 延迟（毫秒），0 表示还不知道
-	Guest    bool   `json:"guest,omitempty"` // 游客
-	Via      string `json:"via,omitempty"`   // 走中继时，发给他的数据经哪个节点（"面板服务器" 表示面板）
+	Slot      int    `json:"slot"`
+	Nickname  string `json:"nickname"`
+	IP        string `json:"ip"`
+	Self      bool   `json:"self"`
+	Mode      string `json:"mode"`
+	RTT       int    `json:"rtt,omitempty"`       // 延迟（毫秒），0 表示还不知道
+	Loss      int    `json:"loss,omitempty"`      // 最近的探测丢包率（%）
+	Redundant bool   `json:"redundant,omitempty"` // 直连有丢包，正在同时经中继冗余发送
+	Guest     bool   `json:"guest,omitempty"`     // 游客
+	Via       string `json:"via,omitempty"`       // 走中继时，发给他的数据经哪个节点（"面板服务器" 表示面板）
 }
 
 // AdapterName 是虚拟网卡的名字（网络连接里看到的）。
@@ -98,8 +100,12 @@ type peer struct {
 	// directDown：直连暂时没响应（ICE Disconnected，网络抖动时常见，一般几秒后自己恢复）。
 	// 这期间数据先走中继，直连留着；恢复成 Connected 就切回来。彻底失败（Failed）才关掉直连重新打洞。
 	directDown bool
-	rtt        time.Duration // 延迟（平滑后），见 latency.go
-	rttAt      time.Time
+	// 探测（latency.go）：上一个探测的时间戳、回了没有，最近的结果（直连丢包检测，决定要不要冗余发送）
+	probeSent int64
+	probeGot  bool
+	probeHist []bool
+	rtt       time.Duration // 延迟（平滑后），见 latency.go
+	rttAt     time.Time
 }
 
 // New 创建引擎，还没有网卡。onChange 在成员或连接方式变化时调用（界面刷新）。
@@ -346,7 +352,8 @@ func (e *Engine) State() Snapshot {
 				via = e.rs.nodes[id].Name
 			}
 		}
-		st.Peers = append(st.Peers, PeerState{Slot: p.slot, Nickname: p.nickname, IP: p.ip, Mode: mode, RTT: p.rttMs(), Via: via, Guest: p.guest})
+		st.Peers = append(st.Peers, PeerState{Slot: p.slot, Nickname: p.nickname, IP: p.ip, Mode: mode, RTT: p.rttMs(), Via: via, Guest: p.guest,
+			Loss: p.lossPct(), Redundant: mode == ModeDirect && p.lossy() && e.relayForLocked(p) != ""})
 	}
 	slices.SortFunc(st.Peers, func(a, b PeerState) int { return a.Slot - b.Slot })
 	return st
@@ -363,19 +370,28 @@ func (e *Engine) OnPacket(from int, payload []byte) {
 }
 
 // send 把 WireGuard 的数据包送给座位号为 slot 的成员：打通了就直连，否则送到他的收件中继，再不行走面板。
-func (e *Engine) send(slot int, pkt []byte) error {
+// 直连最近有丢包时，同时经中继再发一份（冗余，见 latency.go）。
+func (e *Engine) send(slot int, pkt []byte) error { return e.sendPkt(slot, pkt, true) }
+
+// sendPkt：dup 为 false 时不冗余（探测包用，量的是直连本身）。
+func (e *Engine) sendPkt(slot int, pkt []byte, dup bool) error {
 	e.mu.Lock()
 	var d *directConn
 	relay, homes := "", []string(nil)
+	redundant := false
 	if p := e.peers[slot]; p != nil {
 		d, relay, homes = p.direct, p.relay, p.homes
 		if p.directDown {
 			d = nil
 		}
+		redundant = dup && d != nil && p.lossy()
 	}
 	e.mu.Unlock()
 	if d != nil {
 		if _, err := d.conn.Write(pkt); err == nil {
+			if redundant {
+				e.relaySend(relay, homes, slot, pkt) // 中继那份只是补漏，发不出去就算了（不走面板）
+			}
 			return nil
 		}
 		e.mu.Lock()

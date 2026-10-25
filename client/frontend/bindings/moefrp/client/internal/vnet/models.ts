@@ -17,6 +17,16 @@ export interface PeerState {
     "rtt"?: number;
 
     /**
+     * 最近的探测丢包率（%）
+     */
+    "loss"?: number;
+
+    /**
+     * 直连有丢包，正在同时经中继冗余发送
+     */
+    "redundant"?: boolean;
+
+    /**
      * 游客
      */
     "guest"?: boolean;

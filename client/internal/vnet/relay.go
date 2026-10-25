@@ -37,7 +37,11 @@ type RelayView struct {
 type relayConn struct {
 	ws   *websocket.Conn
 	done chan struct{}
+	q    chan []byte // 待发的帧：单独的协程写，发包的人不用等（中继的 TCP 堵了也不拖慢直连）
 }
+
+// relayQueue 是每条中继连接的发送队列长度，满了就丢（和网络拥塞丢包一样，TCP 会重传）。
+const relayQueue = 512
 
 // relayState 是中继相关的状态，Engine.mu 保护。
 type relayState struct {
@@ -276,8 +280,24 @@ func (e *Engine) ensureRelayLocked(id string) {
 			return
 		}
 		ws.SetReadLimit(64 << 10)
-		c := &relayConn{ws: ws, done: make(chan struct{})}
+		c := &relayConn{ws: ws, done: make(chan struct{}), q: make(chan []byte, relayQueue)}
 		r.conns[id] = c
+		go func() { // 发
+			for {
+				select {
+				case <-c.done:
+					return
+				case b := <-c.q:
+					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					err := ws.Write(ctx, websocket.MessageBinary, b)
+					cancel()
+					if err != nil {
+						ws.CloseNow() // 收的协程会读到错误、清理、重连
+						return
+					}
+				}
+			}
+		}()
 		b := e.bind
 		e.reportHomesLocked()
 		e.mu.Unlock()
@@ -372,9 +392,13 @@ func (e *Engine) relaySend(primary string, homes []string, slot int, pkt []byte)
 	b := make([]byte, 1+len(pkt))
 	b[0] = byte(slot)
 	copy(b[1:], pkt)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return c.ws.Write(ctx, websocket.MessageBinary, b) == nil
+	select {
+	case c.q <- b:
+	case <-c.done:
+		return false
+	default: // 队列满了：丢（拥塞），不改走面板
+	}
+	return true
 }
 
 // closeRelaysLocked 断开所有中继。调用方持有 e.mu。

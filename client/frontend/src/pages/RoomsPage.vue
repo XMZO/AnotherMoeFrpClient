@@ -310,7 +310,7 @@ const login = () => account.openAuth('login')
       <div class="pg-head head">
         <div>
           <h1>联机房间 <span v-if="guest" class="bdg gold">游客</span></h1>
-          <p>和朋友组成一个虚拟局域网：游戏里找"局域网"房间，或者直接连对方的虚拟 IP。优先打洞直连，连不上自动经节点或面板中继。</p>
+          <p v-if="!state.room">和朋友组成一个虚拟局域网：游戏里找"局域网"房间，或者直接连对方的虚拟 IP。优先打洞直连，连不上自动经节点或面板中继。</p>
         </div>
         <div v-if="usable && state.admin && state.driver" class="pg-actions">
           <button type="button" class="btn ghost sm" :disabled="loading" @click="load"><Icon name="refresh" size="s" :class="{ spin: loading }" />刷新</button>
@@ -355,10 +355,9 @@ const login = () => account.openAuth('login')
 
         <section v-if="state.room" class="card room-live">
           <div class="rl-head">
-            <span class="tile-ic lg ok"><Icon name="users" /></span>
+            <span class="tile-ic ok"><Icon name="users" size="s" /></span>
             <div class="rl-t">
-              <small>正在房间里</small>
-              <b><span class="rl-name">{{ active ? roomName(active) : '…' }}</span><span v-if="active" class="bdg" :class="active.allowGuests ? 'info' : ''">{{ active.allowGuests ? '允许游客' : '禁止游客' }}</span></b>
+              <b><span class="rl-name">{{ active ? roomName(active) : '…' }}</span><span class="bdg ok">正在房间里</span><span v-if="active" class="bdg" :class="active.allowGuests ? 'info' : ''">{{ active.allowGuests ? '允许游客' : '禁止游客' }}</span></b>
             </div>
             <div class="rl-acts">
               <button v-if="isOwner(active)" type="button" class="btn soft sm" @click="openSettings(active!)"><Icon name="settings" size="s" />房间设置</button>
@@ -370,16 +369,16 @@ const login = () => account.openAuth('login')
           </div>
           <div class="rl-tiles">
             <div class="rl-tile">
-              <small>我的虚拟 IP</small>
+              <small>我的 IP</small>
               <button v-if="state.ip" type="button" class="mono copyable rl-val" title="复制" @click="copy(state.ip, '虚拟 IP')">{{ state.ip }}<Icon name="copy" size="s" /></button>
               <span v-else class="rl-val muted">分配中…</span>
             </div>
             <div v-if="active" class="rl-tile pri">
-              <small>邀请码（发给朋友）</small>
+              <small>邀请码</small>
               <button type="button" class="mono copyable rl-val" title="复制邀请码" @click="copy(fmtCode(active.code), '邀请码')">{{ fmtCode(active.code) }}<Icon name="copy" size="s" /></button>
             </div>
             <div class="rl-tile" :title="relayLocked ? '房主锁定了中继' : '打洞打不通时，别人发给你的数据经它转发；“自动”选最近的'">
-              <small>收件中继{{ relayLocked ? '（房主已锁定）' : '' }}</small>
+              <small>中继{{ relayLocked ? '（锁定）' : '' }}</small>
               <Select class="rl-relay-sel" :model-value="relayLocked ? state.home || 'panel' : state.pref" :options="relayOptions" :disabled="relayLocked" @change="setRelay" />
             </div>
           </div>
@@ -552,14 +551,14 @@ const login = () => account.openAuth('login')
   flex: 1;
 }
 .room-live {
-  padding: 14px 16px;
-  margin-bottom: 16px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
 }
 .rl-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 .rl-t {
   flex: 1;
@@ -598,20 +597,25 @@ const login = () => account.openAuth('login')
 /* 三个一样大的信息块：虚拟 IP、邀请码、收件中继 */
 .rl-tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 10px;
-  margin-top: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
 }
+/* 单行：标签在左，值在右，高度和按钮差不多 */
 .rl-tile {
   display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 6px;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
-  min-height: 74px;
-  padding: 10px 14px;
-  border-radius: 14px;
+  height: 46px;
+  padding: 0 8px 0 12px;
+  border-radius: 13px;
   background: var(--fill);
+}
+.rl-tile small {
+  flex: none;
+  max-width: 5.5em;
+  line-height: 1.25;
 }
 .rl-tile.pri {
   background: var(--pri-soft);
@@ -622,23 +626,25 @@ const login = () => account.openAuth('login')
 }
 .copyable.rl-val,
 .rl-val {
-  align-self: flex-start;
-  font-size: 22px;
+  min-width: 0;
+  font-size: 19px;
   font-weight: 800;
   letter-spacing: 0.5px;
   line-height: 1.2;
+  white-space: nowrap;
 }
 .rl-relay-sel {
-  width: 100%;
-  height: 34px;
+  flex: 1;
+  min-width: 0;
+  height: 32px;
 }
 .rl-voice {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-top: 10px;
-  padding: 8px 10px;
+  margin-top: 8px;
+  padding: 5px 8px;
   border-radius: 14px;
   border: 1.5px dashed var(--line-2);
 }
@@ -699,7 +705,7 @@ const login = () => account.openAuth('login')
   display: flex;
   align-items: baseline;
   gap: 8px;
-  margin-top: 16px;
+  margin-top: 10px;
   font-size: 12px;
   color: var(--text-3);
   font-weight: 700;

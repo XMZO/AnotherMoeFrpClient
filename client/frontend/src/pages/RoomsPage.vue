@@ -501,12 +501,16 @@ const login = () => account.openAuth('login')
 .copyable .ic {
   color: var(--text-3);
 }
-/* 成员多的时候是紧凑的多列网格，32 人也只有几行 */
+/* 成员多的时候是紧凑的多列网格，超过 4 行在框里滚动，页面不会越拉越长 */
 .rl-peers {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  align-content: start;
   gap: 6px;
   margin-top: 12px;
+  max-height: 168px; /* 最多 4 行，再多在框里滚动 */
+  overflow-y: auto;
+  padding-right: 2px;
 }
 .rl-peers > .fld-help {
   grid-column: 1 / -1;

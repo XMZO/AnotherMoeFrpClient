@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -34,6 +35,11 @@ func configureAdapter(name, ip, ip6 string) error {
 	}
 	if err != nil {
 		return err
+	}
+	// MTU：Wintun 网卡默认 65535，TCP 会按它算出很大的 MSS，发出比 WireGuard 能带的大得多的包，
+	// 大包全丢（IPv6 的连接直接卡死，IPv4 靠重传也慢得多）。设成和 WireGuard 一样的 mtu（IPv4、IPv6 各设一次）。
+	for _, v := range []string{"ipv4", "ipv6"} {
+		_ = run("netsh", "interface", v, "set", "subinterface", name, "mtu="+strconv.Itoa(mtu), "store=active")
 	}
 	// IPv6 地址：没有 IPv6（系统里关掉了）也能用，只是用 IPv6 的游戏连不了
 	_ = run("netsh", "interface", "ipv6", "add", "address", "interface="+name, "address="+ip6+"/64", "store=active")

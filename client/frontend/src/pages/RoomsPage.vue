@@ -79,10 +79,10 @@ const hints = { create: '创建后把邀请码发给朋友', join: '朋友创建
 // 收件中继的选项：自动（显示实际选中的）、面板、各节点（带延迟）
 const relayOptions = computed(() => {
   const st = state.value
-  const homeName = st.relays.find((r) => r.id === st.home)?.name ?? '面板'
+  const homeName = st.relays.find((r) => r.id === st.home)?.name ?? '面板服务器'
   return [
-    { value: 'auto', label: `自动（${homeName}）` },
-    { value: 'panel', label: '面板（不用节点）' },
+    { value: 'auto', label: `自动（${homeName}）`, hint: '推荐' },
+    { value: 'panel', label: '面板服务器转发', hint: '兜底，较慢' },
     ...st.relays.map((r) => ({ value: r.id, label: r.name, hint: latencyText(r.latency), tone: r.latency < 0 ? ('bad' as const) : rttClass(r.latency) })),
   ]
 })

@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -268,8 +269,13 @@ func (s *Server) handleRoomRelays(w http.ResponseWriter, r *http.Request) {
 
 // PATCH /api/v1/rooms/{id}：房主改设置（允许游客、默认中继、锁定中继）。
 func (s *Server) handleRoomSettings(w http.ResponseWriter, r *http.Request) {
-	var req api.RoomSettings
-	if err := decodeJSON(r, &req); err != nil {
+	// noVoice、muted 没带就保持原样（旧版本客户端改设置时不会把语音设置清掉）
+	var body struct {
+		api.RoomSettings
+		NoVoice *bool  `json:"noVoice"`
+		Muted   *[]int `json:"muted"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
 		s.writeError(w, r, err)
 		return
 	}
@@ -283,6 +289,19 @@ func (s *Server) handleRoomSettings(w http.ResponseWriter, r *http.Request) {
 	if room.OwnerID != p.User.ID {
 		s.writeError(w, r, apierr.Newf(apierr.Forbidden, "只有房主能改房间设置"))
 		return
+	}
+	req := body.RoomSettings
+	req.NoVoice, req.Muted = room.NoVoice, room.Muted
+	if body.NoVoice != nil {
+		req.NoVoice = *body.NoVoice
+	}
+	if body.Muted != nil {
+		req.Muted = []int{}
+		for _, n := range *body.Muted {
+			if n >= 1 && n <= 250 && !slices.Contains(req.Muted, n) {
+				req.Muted = append(req.Muted, n)
+			}
+		}
 	}
 	if req.Relay != "" {
 		if _, err := store.GetNode(r.Context(), s.st.DB(), req.Relay); err != nil {

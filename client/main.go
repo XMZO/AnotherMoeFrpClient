@@ -264,7 +264,7 @@ func main() {
 		},
 		Vnet:       vnetSvc.OnLive,
 		VnetPacket: vnetSvc.OnPacket,
-		Log:    func(format string, args ...any) { diag(format, args...) },
+		Log:        func(format string, args ...any) { diag(format, args...) },
 	})
 	vnetSvc.SetLive(liveCh)
 	tunnelCtl.OnStatus(func(st engine.Status) { liveCh.SetStatus(tunnelCtl.LiveStatus(st)) })
@@ -407,6 +407,8 @@ func main() {
 			Frameless: true,
 			URL:       "/",
 			Hidden:    !visible,
+			// 联机房间的语音要麦克风：直接允许，不弹 WebView2 的权限框
+			Permissions: map[application.PermissionType]application.Permission{application.PermissionMicrophone: application.PermissionAllow},
 		})
 		// 点关闭按钮：默认每次询问（前端弹窗，勾"记住"后写进设置），也可以在设置里固定为最小化到托盘或退出（PLAN 6.8）。
 		// 最小化到托盘时默认关闭窗口、释放 WebView2，从托盘打开时重新创建；设置里关掉则只是隐藏。

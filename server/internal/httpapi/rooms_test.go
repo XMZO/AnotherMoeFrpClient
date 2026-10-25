@@ -159,6 +159,16 @@ func TestRooms(t *testing.T) {
 	n.do(req{method: "POST", path: api.RouteRoomGuest, body: api.GuestJoinRequest{Code: room.Code, Nickname: "路人"}}).apiErr(apierr.Forbidden)
 	n.do(req{method: "PATCH", path: strings.Replace(api.RouteRoom, "{id}", room.ID, 1), token: tb, body: api.RoomSettings{AllowGuests: true}}).apiErr(apierr.Forbidden)
 	n.do(req{method: "PATCH", path: strings.Replace(api.RouteRoom, "{id}", room.ID, 1), token: ta, body: api.RoomSettings{AllowGuests: true}}).expect(http.StatusNoContent)
+	// 语音设置：禁言列表去重、去掉无效座位；旧版本客户端改设置（不带 noVoice / muted）时保持原样
+	n.do(req{method: "PATCH", path: strings.Replace(api.RouteRoom, "{id}", room.ID, 1), token: ta,
+		body: map[string]any{"allowGuests": true, "noVoice": true, "muted": []int{3, 3, 999}}}).expect(http.StatusNoContent)
+	n.do(req{method: "PATCH", path: strings.Replace(api.RouteRoom, "{id}", room.ID, 1), token: ta, body: map[string]any{"allowGuests": true}}).expect(http.StatusNoContent)
+	var vr api.RoomsResponse
+	n.do(req{method: "GET", path: api.RouteRooms, token: ta}).expect(http.StatusOK).decode(&vr)
+	if len(vr.Rooms) != 1 || !vr.Rooms[0].NoVoice || len(vr.Rooms[0].Muted) != 1 || vr.Rooms[0].Muted[0] != 3 {
+		t.Fatalf("语音设置：%+v", vr.Rooms)
+	}
+	n.do(req{method: "PATCH", path: strings.Replace(api.RouteRoom, "{id}", room.ID, 1), token: ta, body: api.RoomSettings{AllowGuests: true, Muted: []int{}}}).expect(http.StatusNoContent)
 	var gj api.GuestJoinResponse
 	n.do(req{method: "POST", path: api.RouteRoomGuest, body: api.GuestJoinRequest{Code: room.Code, Nickname: "路人"}}).expect(http.StatusOK).decode(&gj)
 	if gj.Token == "" || !gj.Room.AllowGuests {

@@ -179,3 +179,10 @@ export function State(): $CancellablePromise<$models.VnetState> {
 export function UpdateRoom(id: string, st: api$0.RoomSettings): $CancellablePromise<void> {
     return $Call.ByID(1657566651, id, st);
 }
+
+/**
+ * VoiceSignal 把语音协商消息发给座位号为 slot 的成员（经面板转发）。data 必须是 {"t":"voice",...}。
+ */
+export function VoiceSignal(slot: number, data: string): $CancellablePromise<void> {
+    return $Call.ByID(3446991745, slot, data);
+}

@@ -55,6 +55,8 @@ type RoomSettings struct {
 	AllowGuests bool   `json:"allowGuests"` // 允许没登录的人用邀请码以游客身份进来
 	Relay       string `json:"relay"`       // 默认中继：节点 ID，空表示自动（每人选最近的）
 	RelayLocked bool   `json:"relayLocked"` // 锁定：所有人只能用 Relay（为空时都用自动）
+	NoVoice     bool   `json:"noVoice"`     // 关闭语音（默认开着）
+	Muted       []int  `json:"muted"`       // 被禁言的座位号（不能在语音里说话）
 }
 
 // GuestJoinRequest：POST /api/v1/rooms/guest。
@@ -119,6 +121,7 @@ const (
 	VnetClosed  = "closed" // 面板 → 客户端：房间没了或被踢出，Reason 是原因
 	VnetRelayOp = "relay"  // 客户端 → 面板：我的收件中继换成 Relay（节点 ID，空表示面板）
 	VnetChat    = "chat"   // 双向：房间聊天。客户端发 Text；面板转发给房间里所有人（Chat），进房间时带最近的（History）
+	// 语音（WebRTC，走虚拟网）的协商借用 signal：Data 是客户端自己的 JSON（{"t":"voice",...}），面板原样转发。
 )
 
 // VnetChatMax 是一条聊天消息的最大字数，VnetChatKeep 是面板给每个房间在内存里留的条数。

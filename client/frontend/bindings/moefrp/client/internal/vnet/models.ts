@@ -15,6 +15,11 @@ export interface PeerState {
      * 延迟（毫秒），0 表示还不知道
      */
     "rtt"?: number;
+
+    /**
+     * 走中继时，发给他的数据经哪个节点（"面板" 表示面板）
+     */
+    "via"?: string;
 }
 
 /**

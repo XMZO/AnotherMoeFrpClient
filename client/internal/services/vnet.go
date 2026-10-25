@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strconv"
 	"sync"
@@ -28,6 +29,16 @@ type VnetChatEvent struct {
 }
 
 const vnetChatKeep = 100
+
+// EventVnetVoice：语音的协商消息（前端的 WebRTC 用），数据是 VnetVoiceEvent。
+// 语音协商借用打洞的 signal 通道：Data 是 {"t":"voice",...}（前端自己定的格式），打洞引擎不认识 t=voice，旧版本会忽略。
+const EventVnetVoice = "vnet:voice"
+
+// VnetVoiceEvent 是一条语音协商消息。
+type VnetVoiceEvent struct {
+	From int    `json:"from"`
+	Data string `json:"data"`
+}
 
 // apperr 码：建虚拟网卡要管理员权限。
 const codeNeedAdmin apierr.Code = "vnet_need_admin"
@@ -281,6 +292,19 @@ func (s *VnetService) SendChat(text string) error {
 	return apperr.Normalize(l.SendVnet(api.LiveVnetBody{Op: api.VnetChat, Room: room, Text: text}))
 }
 
+// VoiceSignal 把语音协商消息发给座位号为 slot 的成员（经面板转发）。data 必须是 {"t":"voice",...}。
+func (s *VnetService) VoiceSignal(slot int, data string) error {
+	room := s.eng.Room()
+	if room == "" {
+		return apperr.New(apperr.InvalidArg, "not in a room")
+	}
+	l := s.liveConn()
+	if l == nil {
+		return apperr.New(apperr.ServerUnreachable, "live channel not connected")
+	}
+	return apperr.Normalize(l.SendVnet(api.LiveVnetBody{Op: api.VnetSignal, Room: room, To: slot, Data: data}))
+}
+
 // ChatHistory 返回当前房间的聊天（打开聊天窗口时用）。
 func (s *VnetService) ChatHistory() []api.VnetChatMsg {
 	s.mu.Lock()
@@ -399,6 +423,18 @@ func (s *VnetService) OnLive(b api.LiveVnetBody) {
 		}
 		s.changed()
 	case api.VnetSignal:
+		var head struct {
+			T string `json:"t"`
+		}
+		if json.Unmarshal([]byte(b.Data), &head) == nil && head.T == "voice" {
+			s.mu.Lock()
+			emit := s.emit
+			s.mu.Unlock()
+			if emit != nil {
+				emit(EventVnetVoice, VnetVoiceEvent{From: b.From, Data: b.Data})
+			}
+			return
+		}
 		s.eng.OnSignal(b.From, b.Data)
 	case api.VnetChat:
 		s.onChat(b)

@@ -10,6 +10,7 @@ import AuthModal from './components/AuthModal.vue'
 import ConflictDialog from './components/ConflictDialog.vue'
 import CloseAsk from './components/CloseAsk.vue'
 import RoomChat from './components/RoomChat.vue'
+import { initVoice } from './voice'
 import SyncNotices from './components/SyncNotices.vue'
 import ImagePanel from './components/ImagePanel.vue'
 import TitleBar from './components/TitleBar.vue'
@@ -107,6 +108,7 @@ async function takeNotices() {
 }
 
 onMounted(async () => {
+  initVoice()
   VnetService.OpenRoomsOnStart().then((v) => v && (page.value = 'rooms')).catch(() => {}) // "以管理员身份重启"后回到联机页
   runEvents.init()
   await Promise.all([tunnel.init(), logs.init(), account.init(), settingsStore.load()]).catch(() => {})

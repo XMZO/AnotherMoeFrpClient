@@ -177,6 +177,16 @@ export interface Room {
      * 锁定：所有人只能用 Relay（为空时都用自动）
      */
     "relayLocked": boolean;
+
+    /**
+     * 关闭语音（默认开着）
+     */
+    "noVoice": boolean;
+
+    /**
+     * 被禁言的座位号（不能在语音里说话）
+     */
+    "muted": number[] | null;
 }
 
 /**
@@ -212,6 +222,16 @@ export interface RoomSettings {
      * 锁定：所有人只能用 Relay（为空时都用自动）
      */
     "relayLocked": boolean;
+
+    /**
+     * 关闭语音（默认开着）
+     */
+    "noVoice": boolean;
+
+    /**
+     * 被禁言的座位号（不能在语音里说话）
+     */
+    "muted": number[] | null;
 }
 
 /**

@@ -11,6 +11,7 @@ import { Events, VnetService } from '../api'
 import { useAccountStore } from '../stores/account'
 import { describeError, toAppError } from '../errors'
 import mascot from '../assets/mascot.png'
+import { joinVoice, leaveVoice, setDeaf, setMic, voice } from '../voice'
 
 // 联机房间：和朋友组成虚拟局域网（客户端 internal/vnet，面板 shared/api/vnet.go，docs/vnet.md）。
 // 进页面先把关：没登录 → 登录 / 游客加入 / 返回；没有管理员权限 → 以管理员身份重启（装驱动）/ 返回；
@@ -18,7 +19,7 @@ import mascot from '../assets/mascot.png'
 const emit = defineEmits<{ back: [] }>()
 
 interface Member { userId: string; nickname: string; slot: number; ip: string; online: boolean }
-interface Settings { allowGuests: boolean; relay: string; relayLocked: boolean }
+interface Settings { allowGuests: boolean; relay: string; relayLocked: boolean; noVoice?: boolean; muted?: number[] | null }
 interface Room extends Settings { id: string; name: string; code: string; ownerId: string; ownerName: string; members: Member[] }
 interface PeerState { slot: number; nickname: string; ip: string; mode: string; rtt?: number; via?: string }
 interface RelayView { id: string; name: string; region?: string; latency: number }
@@ -45,10 +46,11 @@ const state = ref<VnetState>({ admin: true, driver: true, room: '', self: 0, ip:
 const installing = ref(false)
 const installErr = ref('')
 const modal = ref<{ show: boolean; mode: 'create' | 'join' | 'guest'; value: string; nick: string; error: string }>({ show: false, mode: 'create', value: '', nick: '', error: '' })
-const setDlg = ref<{ show: boolean; room: Room | null; allowGuests: boolean; relay: string; relayLocked: boolean; relays: { id: string; name: string }[] }>({
+const setDlg = ref<{ show: boolean; room: Room | null; allowGuests: boolean; voice: boolean; relay: string; relayLocked: boolean; relays: { id: string; name: string }[] }>({
   show: false,
   room: null,
   allowGuests: false,
+  voice: true,
   relay: '',
   relayLocked: false,
   relays: [],
@@ -208,13 +210,34 @@ async function leave(r: Room) {
   if (yes) act('leave-' + r.id, () => VnetService.LeaveRoom(r.id), owner ? '房间已解散' : '已离开房间')
 }
 
+// 语音：房主禁言 / 解除禁言某个座位
+const isMuted = (slot: number) => (state.value.settings.muted ?? []).includes(slot)
+const voiceCount = computed(() => Object.keys(voice.members).length + 1)
+const micOn = computed(() => voice.mic && !voice.deaf && voice.hasMic && !isMuted(voice.self))
+async function toggleMute(slot: number) {
+  const r = active.value
+  if (!r) return
+  const st = state.value.settings
+  const cur = st.muted ?? []
+  const muted = cur.includes(slot) ? cur.filter((x) => x !== slot) : [...cur, slot]
+  try {
+    await VnetService.UpdateRoom(r.id, { allowGuests: st.allowGuests, relay: st.relay, relayLocked: st.relayLocked, noVoice: !!st.noVoice, muted })
+  } catch (e) {
+    message.error(describeError(e))
+  }
+}
+async function startVoice() {
+  await joinVoice()
+  if (voice.error) message.warning(voice.error)
+}
+
 async function kick(r: Room, m: Member) {
   const yes = await confirm({ title: `移出 ${m.nickname}`, content: '移出后对方要重新输入邀请码才能回来。', positiveText: '移出', danger: true })
   if (yes) act('kick-' + m.userId, () => VnetService.KickMember(r.id, m.userId), '已移出')
 }
 
 async function openSettings(r: Room) {
-  setDlg.value = { show: true, room: r, allowGuests: r.allowGuests, relay: r.relay, relayLocked: r.relayLocked, relays: [] }
+  setDlg.value = { show: true, room: r, allowGuests: r.allowGuests, voice: !r.noVoice, relay: r.relay, relayLocked: r.relayLocked, relays: [] }
   try {
     setDlg.value.relays = ((await VnetService.RoomRelays()) ?? []).map((x: any) => ({ id: x.id, name: x.name }))
   } catch {
@@ -227,7 +250,13 @@ async function saveSettings() {
   if (!d.room) return
   busy.value = 'settings'
   try {
-    await VnetService.UpdateRoom(d.room.id, { allowGuests: d.allowGuests, relay: d.relay, relayLocked: d.relayLocked })
+    await VnetService.UpdateRoom(d.room.id, {
+      allowGuests: d.allowGuests,
+      relay: d.relay,
+      relayLocked: d.relayLocked,
+      noVoice: !d.voice,
+      muted: state.value.settings.muted ?? d.room.muted ?? [],
+    })
     message.success('房间设置已保存')
     d.show = false
     await load()
@@ -334,16 +363,46 @@ const login = () => account.openAuth('login')
               <Select class="rl-relay-sel" :model-value="relayLocked ? state.home || 'panel' : state.pref" :options="relayOptions" :disabled="relayLocked" @change="setRelay" />
             </div>
           </div>
+          <div class="rl-voice" :class="{ on: voice.joined }">
+            <span class="rl-vic" :class="{ talk: voice.speaking[voice.self] }"><Icon name="headset" size="s" /></span>
+            <template v-if="!voice.joined">
+              <span class="rl-vt">{{ voice.noVoice ? '房主关闭了语音' : '语音（自动降噪，只走虚拟网）' }}</span>
+              <button type="button" class="btn pri sm" :disabled="voice.noVoice || voice.joining" data-testid="voice-join" @click="startVoice">
+                <Icon name="headset" size="s" />{{ voice.joining ? '连接中…' : '加入语音' }}
+              </button>
+            </template>
+            <template v-else>
+              <span class="rl-vt">语音已连接 · {{ voiceCount }} 人</span>
+              <button type="button" class="btn sm" :class="micOn ? 'soft' : 'ghost'" :disabled="!voice.hasMic || isMuted(voice.self)" @click="setMic(!micOn)">
+                <Icon :name="micOn ? 'mic' : 'micOff'" size="s" />{{ isMuted(voice.self) ? '被房主禁言' : !voice.hasMic ? '没有麦克风' : micOn ? '麦克风开' : '麦克风关' }}
+              </button>
+              <button type="button" class="btn sm" :class="voice.deaf ? 'ghost' : 'soft'" @click="setDeaf(!voice.deaf)">
+                <Icon :name="voice.deaf ? 'headsetOff' : 'headset'" size="s" />{{ voice.deaf ? '扬声器关' : '扬声器开' }}
+              </button>
+              <button type="button" class="btn quiet sm danger" @click="leaveVoice"><Icon name="logout" size="s" />退出语音</button>
+            </template>
+          </div>
           <div class="rl-sub">
             <b>成员</b>
             <span>{{ state.peers.filter((p) => p.mode !== 'offline').length + 1 }} 人在线 · 共 {{ state.peers.length + 1 }} 人</span>
           </div>
           <div class="rl-peers">
             <div v-for="p in state.peers" :key="p.slot" class="rl-peer">
+              <Icon
+                v-if="voice.joined && voice.members[p.slot]"
+                :name="voice.members[p.slot].mic && !isMuted(p.slot) ? 'mic' : 'micOff'"
+                size="xs"
+                class="rl-pv"
+                :class="{ talk: voice.speaking[p.slot] }"
+                :title="isMuted(p.slot) ? '被禁言' : '在语音里'"
+              />
               <b :title="p.nickname">{{ p.nickname }}</b>
               <button type="button" class="mono copyable peerip" title="复制" @click="copy(p.ip, p.nickname + ' 的虚拟 IP')">{{ p.ip }}<Icon name="copy" size="xs" /></button>
               <span v-if="p.mode !== 'offline'" class="rl-rtt mono" :class="rttClass(p.rtt)" title="到他的延迟（往返）">{{ p.rtt ? p.rtt + ' ms' : '— ms' }}</span>
               <span class="bdg" :class="modeView[p.mode]?.[1]" :title="p.via ? `发给他的数据经 ${p.via} 转发` : undefined">{{ modeView[p.mode]?.[0] ?? p.mode }}{{ p.mode === 'relay' && p.via ? ' · ' + p.via : '' }}</span>
+              <button v-if="isOwner(active) && !voice.noVoice" type="button" class="rc-kick" :class="{ on: isMuted(p.slot) }" :title="isMuted(p.slot) ? '解除禁言' : '语音禁言'" @click="toggleMute(p.slot)">
+                <Icon :name="isMuted(p.slot) ? 'micOff' : 'mic'" size="xs" />
+              </button>
               <button v-if="isOwner(active) && memberOf(p.slot)" type="button" class="rc-kick" title="移出房间" @click="kick(active!, memberOf(p.slot)!)"><Icon name="x" size="xs" /></button>
             </div>
             <p v-if="!state.peers.length" class="fld-help">房间里只有你，把邀请码发给朋友吧</p>
@@ -414,6 +473,10 @@ const login = () => account.openAuth('login')
       <div class="sw-line">
         <div class="set-txt"><b>允许游客</b><small>没登录的人也能用邀请码以游客身份进来</small></div>
         <Switch v-model="setDlg.allowGuests" label="允许游客" />
+      </div>
+      <div class="sw-line" style="margin-top: 12px">
+        <div class="set-txt"><b>允许语音</b><small>成员可以进语音聊天；单个人可以在成员列表里禁言</small></div>
+        <Switch v-model="setDlg.voice" label="允许语音" />
       </div>
       <div class="fld" style="margin-top: 12px">
         <span class="lbl">默认中继</span>
@@ -542,6 +605,54 @@ const login = () => account.openAuth('login')
 .rl-relay-sel {
   width: 100%;
   height: 34px;
+}
+.rl-voice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  border: 1.5px dashed var(--line-2);
+}
+.rl-voice.on {
+  border-style: solid;
+  border-color: color-mix(in oklab, var(--ok) 45%, transparent);
+  background: var(--ok-soft);
+}
+.rl-vic {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--fill);
+  color: var(--text-3);
+  transition: box-shadow 0.12s;
+}
+.rl-voice.on .rl-vic {
+  color: var(--ok-text);
+  background: var(--raised);
+}
+.rl-vic.talk,
+.rl-pv.talk {
+  box-shadow: 0 0 0 2.5px var(--ok);
+}
+.rl-vt {
+  flex: 1;
+  min-width: 120px;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--text-2);
+}
+.rl-pv {
+  flex: none;
+  border-radius: 50%;
+  color: var(--ok-text);
+}
+.rc-kick.on {
+  color: var(--bad-text);
 }
 .rl-sub {
   display: flex;

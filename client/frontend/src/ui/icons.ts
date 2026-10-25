@@ -53,6 +53,10 @@ export const icons = {
   image: 'M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M14 9a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0',
   save: 'M5 4h11l3 3v13H5zM8 4v5h7V4M8 20v-6h8v6',
   zoom: 'M4 10.5a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0 -13 0M15.5 15.5L20 20M10.5 8v5M8 10.5h5',
+  mic: 'M9 6a3 3 0 0 1 6 0v5a3 3 0 0 1 -6 0zM5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7',
+  micOff: 'M9 6a3 3 0 0 1 6 0v5a3 3 0 0 1 -6 0zM5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7M4 4l16 16',
+  headset: 'M4 15v-3a8 8 0 0 1 16 0v3M4 15h3v5H4zM17 15h3v5h-3z',
+  headsetOff: 'M4 15v-3a8 8 0 0 1 16 0v3M4 15h3v5H4zM17 15h3v5h-3zM3 3l18 18',
 } as const
 
 export type IconName = keyof typeof icons

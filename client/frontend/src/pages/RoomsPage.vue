@@ -779,7 +779,7 @@ const login = () => account.openAuth('login')
 /* 成员多的时候是紧凑的多列网格，超过 4 行在框里滚动，页面不会越拉越长 */
 .rl-peers {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   align-content: start;
   gap: 6px;
   margin-top: 8px;
@@ -793,7 +793,7 @@ const login = () => account.openAuth('login')
 .rl-peer {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   padding: 5px 10px;
   border-radius: 12px;
@@ -801,13 +801,14 @@ const login = () => account.openAuth('login')
   font-size: 13px;
 }
 .rl-peer b {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 auto;
+  min-width: 4.5em; /* 名字至少留几个字，挤的时候先压别的 */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .rl-rtt {
+  flex: none;
   font-size: 12px;
   font-weight: 700;
   color: var(--text-3);
@@ -921,7 +922,8 @@ const login = () => account.openAuth('login')
   font-size: 12.5px;
 }
 .copyable.peerip {
-  font-size: 15px;
+  flex: none;
+  font-size: 13.5px;
 }
 .rc-members {
   display: flex;

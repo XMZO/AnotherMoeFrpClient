@@ -134,11 +134,11 @@ func (e *Engine) Start(room string) (string, error) {
 	go e.pingLoop(e.done)
 	e.dev = device.NewDevice(&bcastTun{Device: t, e: e}, e.bind, device.NewLogger(device.LogLevelError, "vnet: "))
 	if err := e.dev.IpcSet("private_key=" + hex.EncodeToString(e.priv) + "\n"); err != nil {
-		e.closeLocked()
+		go e.closeLocked()()
 		return "", err
 	}
 	if err := e.dev.Up(); err != nil {
-		e.closeLocked()
+		go e.closeLocked()()
 		return "", err
 	}
 	return e.pub, nil
@@ -147,11 +147,14 @@ func (e *Engine) Start(room string) (string, error) {
 // Stop 关掉虚拟网卡和所有连接。
 func (e *Engine) Stop() {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.closeLocked()
+	closeDev := e.closeLocked()
+	e.mu.Unlock()
+	closeDev()
 }
 
-func (e *Engine) closeLocked() {
+// closeLocked 清掉状态，返回关设备的函数：调用方必须放开 e.mu 之后再调用它。
+// 不能拿着 e.mu 关 WireGuard 设备：关设备要等它的发送协程退出，而发送协程可能正在 bind.Send → e.send 里等 e.mu。
+func (e *Engine) closeLocked() func() {
 	for _, p := range e.peers {
 		e.dropDirectLocked(p)
 		if p.ice != nil {
@@ -164,12 +167,15 @@ func (e *Engine) closeLocked() {
 		close(e.done)
 		e.done, e.sigq = nil, nil
 	}
-	if e.dev != nil {
-		e.dev.Close() // 也会关掉 tun 和 bind
-	} else if e.tun != nil {
-		_ = e.tun.Close()
-	}
+	dev, t := e.dev, e.tun
 	e.dev, e.tun, e.bind, e.room, e.self, e.name, e.code = nil, nil, nil, "", 0, "", ""
+	return func() {
+		if dev != nil {
+			dev.Close() // 也会关掉 tun 和 bind
+		} else if t != nil {
+			_ = t.Close()
+		}
+	}
 }
 
 // Room 返回当前房间（没在房间里为空）。
@@ -194,11 +200,29 @@ func (e *Engine) PublicKey() string {
 }
 
 // SetPeers 按面板推来的成员列表更新：自己的座位（第一次时配上虚拟 IP）、WireGuard peers、打洞、中继。
+//
+// WireGuard 的配置（IpcSet）在放开 e.mu 之后才做：加 peer 时 WireGuard 会马上发握手，
+// 走 bind.Send → e.send 要拿 e.mu，拿着锁调 IpcSet 会死锁（成员一直"分配中"，之后进出房间都卡住）。
 func (e *Engine) SetPeers(msg api.LiveVnetBody) error {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	dev, cfg, err := e.setPeersLocked(msg)
+	e.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if dev != nil && cfg != "" {
+		if err := dev.IpcSet(cfg); err != nil {
+			return err
+		}
+	}
+	go e.onChange()
+	return nil
+}
+
+// setPeersLocked 更新成员状态，返回要交给 WireGuard 的配置（调用方放开 e.mu 后再 IpcSet）。
+func (e *Engine) setPeersLocked(msg api.LiveVnetBody) (*device.Device, string, error) {
 	if e.dev == nil {
-		return nil
+		return nil, "", nil
 	}
 	self, list := msg.Self, msg.Peers
 	if msg.RoomName != "" {
@@ -212,7 +236,7 @@ func (e *Engine) SetPeers(msg api.LiveVnetBody) error {
 		e.self = self
 		if err := configureAdapter(AdapterName, api.VnetIP(self)); err != nil {
 			e.logf("vnet: configure adapter: %v", err)
-			return fmt.Errorf("设置虚拟网卡地址失败：%w", err)
+			return nil, "", fmt.Errorf("设置虚拟网卡地址失败：%w", err)
 		}
 	}
 	seen := map[int]bool{}
@@ -261,13 +285,7 @@ func (e *Engine) SetPeers(msg api.LiveVnetBody) error {
 		}
 		delete(e.peers, slot)
 	}
-	if b.Len() > 0 {
-		if err := e.dev.IpcSet(b.String()); err != nil {
-			return err
-		}
-	}
-	go e.onChange()
-	return nil
+	return e.dev, b.String(), nil
 }
 
 // Snapshot 是界面上的状态。

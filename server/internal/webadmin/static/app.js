@@ -1494,15 +1494,19 @@
     function resetClientButton() {
       const reset = button('恢复为配置文件', {
         small: true, disabled: !data.client.fromPanel,
-        onclick: () => busy(reset, async () => {
-          try {
-            await api('DELETE', '/client-config');
-            toast('已恢复为配置文件里的设置，并推送给在线客户端');
-            reload(await api('GET', '/panel-settings'));
-          } catch (e) {
-            fail(e);
-          }
-        }),
+        // 一点就清掉面板里保存的整组设置，先确认（以前误点过，图源全没了）
+        onclick: async () => {
+          if (!(await confirmDialog({ title: '恢复为配置文件', danger: true, ok: '恢复', message: '客户端的版本、下载地址、更新说明、公告和图源会一起清掉，改用配置文件里的（配置文件没写的就是空的），并马上推给在线客户端。' }))) return;
+          await busy(reset, async () => {
+            try {
+              await api('DELETE', '/client-config');
+              toast('已恢复为配置文件里的设置，并推送给在线客户端');
+              reload(await api('GET', '/panel-settings'));
+            } catch (e) {
+              fail(e);
+            }
+          });
+        },
       });
       return reset;
     }
@@ -1632,14 +1636,18 @@
       });
       const reset = button('恢复为配置文件', {
         small: true, disabled: !data.auth.fromPanel,
-        onclick: () => busy(reset, async () => {
-          try {
-            reload(await api('DELETE', '/panel-settings/auth'));
-            toast('已恢复为配置文件里的设置');
-          } catch (e) {
-            fail(e);
-          }
-        }),
+        // 一点就清掉面板里保存的整组设置，先确认（以前误点过，图源全没了）
+        onclick: async () => {
+          if (!(await confirmDialog({ title: '恢复为配置文件', danger: true, ok: '恢复', message: '面板里改过的登录设置会清掉，改用配置文件里的。' }))) return;
+          await busy(reset, async () => {
+            try {
+              reload(await api('DELETE', '/panel-settings/auth'));
+              toast('已恢复为配置文件里的设置');
+            } catch (e) {
+              fail(e);
+            }
+          });
+        },
       });
       return card('账号与登录', data.auth.fromPanel, [
         h('div', { class: 'form-grid settings-grid' },
@@ -1670,14 +1678,18 @@
       });
       const reset = button('恢复为配置文件', {
         small: true, disabled: !data.nodes.fromPanel,
-        onclick: () => busy(reset, async () => {
-          try {
-            reload(await api('DELETE', '/panel-settings/nodes'));
-            toast('已恢复为配置文件里的设置');
-          } catch (e) {
-            fail(e);
-          }
-        }),
+        // 一点就清掉面板里保存的整组设置，先确认（以前误点过，图源全没了）
+        onclick: async () => {
+          if (!(await confirmDialog({ title: '恢复为配置文件', danger: true, ok: '恢复', message: '面板里改过的节点设置会清掉，改用配置文件里的。' }))) return;
+          await busy(reset, async () => {
+            try {
+              reload(await api('DELETE', '/panel-settings/nodes'));
+              toast('已恢复为配置文件里的设置');
+            } catch (e) {
+              fail(e);
+            }
+          });
+        },
       });
       return card('节点', data.nodes.fromPanel, [
         h('div', { class: 'form-grid settings-grid' },

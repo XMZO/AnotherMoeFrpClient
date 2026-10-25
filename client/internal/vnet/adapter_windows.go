@@ -82,16 +82,29 @@ func lanPriorityOK(name string) bool {
 
 // keepLanPriority 在房间里时每隔几秒检查一次：别的联机工具（Radmin、ZeroTier、Tailscale 等）后开、
 // 或者把路由重置了，出口不是这块网卡就重新设置。
+// 如果别的工具也在反复抢（1 分钟里被抢超过 3 次），停 5 分钟再说，免得两边每隔几秒互相改。
 func keepLanPriority(name string, done <-chan struct{}, logf func(string, ...any)) {
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
+	var fixes []time.Time
+	var pauseUntil time.Time
 	for {
 		select {
 		case <-done:
 			return
-		case <-t.C:
-		}
-		if !lanPriorityOK(name) {
+		case now := <-t.C:
+			if now.Before(pauseUntil) || lanPriorityOK(name) {
+				continue
+			}
+			fixes = append(fixes, now)
+			for len(fixes) > 0 && now.Sub(fixes[0]) > time.Minute {
+				fixes = fixes[1:]
+			}
+			if len(fixes) > 3 {
+				logf("vnet: 局域网发现的出口一直被别的网卡抢（可能另一个联机工具也在抢），停 5 分钟")
+				pauseUntil, fixes = now.Add(5*time.Minute), nil
+				continue
+			}
 			logf("vnet: 局域网发现的出口被别的网卡抢了，重新设置")
 			setLanPriority(name)
 		}

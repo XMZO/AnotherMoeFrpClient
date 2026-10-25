@@ -261,7 +261,7 @@ func (s *VnetService) Connect(roomID string) error {
 	s.setErr("")
 	if l := s.liveConn(); l != nil {
 		if err := l.SendVnet(api.LiveVnetBody{Op: api.VnetJoin, Room: roomID, Key: key}); err != nil {
-			s.setErr("和面板的实时连接断了，连上后会自动进房间")
+			s.setErr("正在连接面板，连上后自动进房间…")
 		}
 	}
 	s.changed()
@@ -394,6 +394,8 @@ func (s *VnetService) OnLive(b api.LiveVnetBody) {
 	case api.VnetPeers:
 		if err := s.eng.SetPeers(b); err != nil {
 			s.setErr(err.Error())
+		} else {
+			s.setErr("") // 面板推来了成员列表，说明已经在房间里了（之前"连接断了"之类的提示作废）
 		}
 		s.changed()
 	case api.VnetSignal:
@@ -421,7 +423,10 @@ func (s *VnetService) OnLiveOnline(on bool) {
 	}
 	if room := s.eng.Room(); room != "" {
 		if l := s.liveConn(); l != nil {
-			_ = l.SendVnet(api.LiveVnetBody{Op: api.VnetJoin, Room: room, Key: s.eng.PublicKey()})
+			if l.SendVnet(api.LiveVnetBody{Op: api.VnetJoin, Room: room, Key: s.eng.PublicKey()}) == nil {
+				s.setErr("")
+				s.changed()
+			}
 			if h := s.eng.State().Home; h != "" {
 				_ = l.SendVnet(api.LiveVnetBody{Op: api.VnetRelayOp, Room: room, Relay: h})
 			}

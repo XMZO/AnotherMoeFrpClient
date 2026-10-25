@@ -35,6 +35,17 @@ func configureAdapter(name, ip string) error {
 		return err
 	}
 	_ = run("netsh", "interface", "ipv4", "set", "interface", "interface="+name, "metric=1")
+	// 组播（224.0.0.0/4，MC 的局域网发现发到 224.0.2.60）和受限广播（255.255.255.255）：程序没指定网卡时，
+	// Windows 按"路由跃点 + 网卡跃点"选出口。别的虚拟网卡（Radmin VPN 等）跃点也是 1 时会打平，包从它那里发出去，
+	// 房间里的人就发现不了。把这块网卡上这两条路由的跃点改成 0（只改当前，网卡删掉就没了）。
+	for _, r := range []string{"224.0.0.0/4", "255.255.255.255/32"} {
+		for i := 0; i < 6; i++ { // 地址刚配上，系统的路由可能还没生成
+			if run("netsh", "interface", "ipv4", "set", "route", r, "interface="+name, "metric=0", "store=active") == nil {
+				break
+			}
+			time.Sleep(300 * time.Millisecond)
+		}
+	}
 	go func() { // 慢（PowerShell 启动要一两秒），不等
 		_ = run("powershell", "-NoProfile", "-NonInteractive", "-Command",
 			"Set-NetConnectionProfile -InterfaceAlias '"+name+"' -NetworkCategory Private")

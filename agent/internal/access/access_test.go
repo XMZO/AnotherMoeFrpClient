@@ -322,6 +322,8 @@ func TestWithFrps(t *testing.T) {
 	// 用 Cleanup 而不是 defer：Cleanup 后注册的先执行，下面每个 frpc 的 Close 会排在 frps 前面。
 	// 先关 frps 的话，还在重连的 frpc 正好连进来会撞上 frp 自己（golib mux）的数据竞争，-race 下偶尔报错
 	t.Cleanup(m.Close)
+	// frpc 都关了以后再等一会：已经连到一半的重连（握手还没读完）要先在 frps 那边失败退出
+	t.Cleanup(func() { time.Sleep(300 * time.Millisecond) })
 	s.Kick, s.Alive = m.CloseClient, m.HasClient
 	echo := echoServer(t)
 

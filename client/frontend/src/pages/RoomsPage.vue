@@ -309,26 +309,34 @@ const login = () => account.openAuth('login')
             <span class="tile-ic lg ok"><Icon name="users" /></span>
             <div class="rl-t">
               <small>正在房间里</small>
-              <b>{{ active?.name ?? '…' }} <span v-if="active" class="bdg" :class="active.allowGuests ? 'info' : ''">{{ active.allowGuests ? '允许游客' : '禁止游客' }}</span></b>
+              <b><span class="rl-name">{{ active?.name ?? '…' }}</span><span v-if="active" class="bdg" :class="active.allowGuests ? 'info' : ''">{{ active.allowGuests ? '允许游客' : '禁止游客' }}</span></b>
             </div>
-            <div v-if="state.ip" class="rl-ip">
-              <small>我的虚拟 IP</small>
-              <button type="button" class="mono copyable bigip" title="复制" @click="copy(state.ip, '虚拟 IP')">{{ state.ip }}<Icon name="copy" size="s" /></button>
+            <div class="rl-acts">
+              <button v-if="isOwner(active)" type="button" class="btn soft sm" @click="openSettings(active!)"><Icon name="settings" size="s" />房间设置</button>
+              <button type="button" class="btn ghost sm" :disabled="busy === 'disc'" @click="disconnect"><Icon name="stop" size="s" />断开</button>
+              <button v-if="active" type="button" class="btn quiet sm danger" :disabled="busy === 'leave-' + active.id" @click="leave(active)">
+                <Icon name="logout" size="s" />{{ isOwner(active) ? '解散' : '离开' }}
+              </button>
             </div>
-            <div v-if="active" class="rl-ip">
-              <small>邀请码（发给朋友）</small>
-              <button type="button" class="mono copyable code big" title="复制邀请码" @click="copy(fmtCode(active.code), '邀请码')">{{ fmtCode(active.code) }}<Icon name="copy" size="s" /></button>
-            </div>
-            <button v-if="isOwner(active)" type="button" class="btn soft sm" @click="openSettings(active!)"><Icon name="settings" size="s" />房间设置</button>
-            <button type="button" class="btn ghost sm" :disabled="busy === 'disc'" @click="disconnect"><Icon name="stop" size="s" />断开</button>
-            <button v-if="active" type="button" class="btn quiet sm danger" :disabled="busy === 'leave-' + active.id" @click="leave(active)">
-              <Icon name="logout" size="s" />{{ isOwner(active) ? '解散' : '离开' }}
-            </button>
           </div>
-          <div class="rl-relay">
-            <span class="lbl">收件中继</span>
-            <Select class="rl-relay-sel" :model-value="relayLocked ? state.home || 'panel' : state.pref" :options="relayOptions" :disabled="relayLocked" @change="setRelay" />
-            <span class="fld-help">{{ relayLocked ? '房主锁定了中继' : '打洞打不通时，别人发给你的数据经它转发；"自动"选最近的' }}</span>
+          <div class="rl-tiles">
+            <div class="rl-tile">
+              <small>我的虚拟 IP</small>
+              <button v-if="state.ip" type="button" class="mono copyable rl-val" title="复制" @click="copy(state.ip, '虚拟 IP')">{{ state.ip }}<Icon name="copy" size="s" /></button>
+              <span v-else class="rl-val muted">分配中…</span>
+            </div>
+            <div v-if="active" class="rl-tile pri">
+              <small>邀请码（发给朋友）</small>
+              <button type="button" class="mono copyable rl-val" title="复制邀请码" @click="copy(fmtCode(active.code), '邀请码')">{{ fmtCode(active.code) }}<Icon name="copy" size="s" /></button>
+            </div>
+            <div class="rl-tile" :title="relayLocked ? '房主锁定了中继' : '打洞打不通时，别人发给你的数据经它转发；“自动”选最近的'">
+              <small>收件中继{{ relayLocked ? '（房主已锁定）' : '' }}</small>
+              <Select class="rl-relay-sel" :model-value="relayLocked ? state.home || 'panel' : state.pref" :options="relayOptions" :disabled="relayLocked" @change="setRelay" />
+            </div>
+          </div>
+          <div class="rl-sub">
+            <b>成员</b>
+            <span>{{ state.peers.filter((p) => p.mode !== 'offline').length + 1 }} 人在线 · 共 {{ state.peers.length + 1 }} 人</span>
           </div>
           <div class="rl-peers">
             <div v-for="p in state.peers" :key="p.slot" class="rl-peer">
@@ -460,42 +468,94 @@ const login = () => account.openAuth('login')
 }
 .rl-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
 }
-.rl-t,
-.rl-ip {
+.rl-t {
+  flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
-.rl-t {
-  flex: 1;
-}
 .rl-t small,
-.rl-ip small {
+.rl-tile small {
   font-size: 11.5px;
   color: var(--text-3);
   font-weight: 700;
 }
 .rl-t b {
-  font-size: 16px;
-  font-weight: 900;
-}
-.rl-relay {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 12px;
+  gap: 8px;
+  min-width: 0;
+  font-size: 17px;
+  font-weight: 900;
 }
-.rl-relay .lbl {
-  font-size: 12.5px;
-  font-weight: 800;
+.rl-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
+.rl-t .bdg {
+  flex: none;
+}
+.rl-acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+/* 三个一样大的信息块：虚拟 IP、邀请码、收件中继 */
+.rl-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.rl-tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  min-height: 74px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--fill);
+}
+.rl-tile.pri {
+  background: var(--pri-soft);
+}
+.rl-tile.pri small,
+.rl-tile.pri .rl-val {
+  color: var(--pri-text);
+}
+.copyable.rl-val,
+.rl-val {
+  align-self: flex-start;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  line-height: 1.2;
+}
 .rl-relay-sel {
-  width: 240px;
+  width: 100%;
   height: 34px;
+}
+.rl-sub {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--text-3);
+  font-weight: 700;
+}
+.rl-sub b {
+  font-size: 13px;
+  font-weight: 900;
+  color: var(--text);
 }
 .copyable {
   display: inline-flex;
@@ -513,7 +573,7 @@ const login = () => account.openAuth('login')
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   align-content: start;
   gap: 6px;
-  margin-top: 12px;
+  margin-top: 8px;
   max-height: 168px; /* 最多 4 行，再多在框里滚动 */
   overflow-y: auto;
   padding-right: 2px;
@@ -619,19 +679,8 @@ const login = () => account.openAuth('login')
   color: var(--pri-text);
   font-size: 12.5px;
 }
-.copyable.bigip {
-  font-size: 20px;
-  font-weight: 800;
-}
 .copyable.peerip {
   font-size: 15px;
-}
-.copyable.code.big {
-  padding: 6px 14px;
-  border-radius: 12px;
-  font-size: 20px;
-  font-weight: 800;
-  letter-spacing: 1px;
 }
 .rc-members {
   display: flex;

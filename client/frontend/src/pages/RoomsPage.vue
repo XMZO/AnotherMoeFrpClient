@@ -241,6 +241,11 @@ async function copy(text: string, what: string) {
   message.success(`${what}已复制`)
 }
 
+// 房间卡片最多列出这么多成员（在线的在前），其余显示 +N，卡片高度不跟着人数长
+const CARD_MEMBERS = 8
+const shownMembers = (r: Room) => [...r.members].sort((a, b) => Number(b.online) - Number(a.online)).slice(0, CARD_MEMBERS)
+const memberOf = (slot: number) => active.value?.members.find((m) => m.slot === slot)
+
 const disconnect = () => act('disc', () => VnetService.Disconnect())
 const enter = (r: Room) => act('go-' + r.id, () => VnetService.Connect(r.id))
 const setRelay = (v: string) => VnetService.SetRelay(v)
@@ -322,9 +327,10 @@ const login = () => account.openAuth('login')
           </div>
           <div class="rl-peers">
             <div v-for="p in state.peers" :key="p.slot" class="rl-peer">
-              <b>{{ p.nickname }}</b>
+              <b :title="p.nickname">{{ p.nickname }}</b>
               <button type="button" class="mono copyable peerip" title="复制" @click="copy(p.ip, p.nickname + ' 的虚拟 IP')">{{ p.ip }}<Icon name="copy" size="xs" /></button>
               <span class="bdg" :class="modeView[p.mode]?.[1]">{{ modeView[p.mode]?.[0] ?? p.mode }}</span>
+              <button v-if="isOwner(active) && memberOf(p.slot)" type="button" class="rc-kick" title="移出房间" @click="kick(active!, memberOf(p.slot)!)"><Icon name="x" size="xs" /></button>
             </div>
             <p v-if="!state.peers.length" class="fld-help">房间里只有你，把邀请码发给朋友吧</p>
           </div>
@@ -342,12 +348,13 @@ const login = () => account.openAuth('login')
             </div>
             <small class="rc-meta">房主 {{ r.ownerName }} · {{ r.members.filter((m) => m.online).length }}/{{ r.members.length }} 人在线</small>
             <div class="rc-members">
-              <span v-for="m in r.members" :key="m.userId" class="rc-m" :class="{ on: m.online }" :title="m.ip">
+              <span v-for="m in shownMembers(r)" :key="m.userId" class="rc-m" :class="{ on: m.online }" :title="m.ip">
                 <i />{{ m.nickname }}<small class="mono">.{{ m.slot }}</small>
                 <button v-if="isOwner(r) && m.userId !== myId" type="button" class="rc-kick" title="移出房间" :disabled="busy === 'kick-' + m.userId" @click="kick(r, m)">
                   <Icon name="x" size="xs" />
                 </button>
               </span>
+              <span v-if="r.members.length > CARD_MEMBERS" class="rc-m more" title="进入房间后在上面看完整名单">+{{ r.members.length - CARD_MEMBERS }}</span>
             </div>
             <div class="rc-foot">
               <button v-if="r.id === state.room" type="button" class="btn ghost xs" :disabled="busy === 'disc'" @click="disconnect">断开</button>
@@ -494,20 +501,35 @@ const login = () => account.openAuth('login')
 .copyable .ic {
   color: var(--text-3);
 }
+/* 成员多的时候是紧凑的多列网格，32 人也只有几行 */
 .rl-peers {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 6px;
   margin-top: 12px;
+}
+.rl-peers > .fld-help {
+  grid-column: 1 / -1;
 }
 .rl-peer {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  min-width: 0;
+  padding: 5px 10px;
   border-radius: 12px;
   background: var(--fill);
   font-size: 13px;
+}
+.rl-peer b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rc-m.more {
+  color: var(--text-3);
 }
 .room-grid {
   display: grid;

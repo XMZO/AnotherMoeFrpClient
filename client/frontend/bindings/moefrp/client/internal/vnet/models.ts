@@ -17,6 +17,11 @@ export interface PeerState {
     "rtt"?: number;
 
     /**
+     * 游客
+     */
+    "guest"?: boolean;
+
+    /**
      * 走中继时，发给他的数据经哪个节点（"面板服务器" 表示面板）
      */
     "via"?: string;

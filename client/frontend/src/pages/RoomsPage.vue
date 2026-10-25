@@ -21,7 +21,7 @@ const emit = defineEmits<{ back: [] }>()
 interface Member { userId: string; nickname: string; slot: number; ip: string; online: boolean }
 interface Settings { allowGuests: boolean; relay: string; relayLocked: boolean; noVoice?: boolean; muted?: number[] | null; noDirect?: boolean }
 interface Room extends Settings { id: string; name: string; code: string; ownerId: string; ownerName: string; members: Member[] }
-interface PeerState { slot: number; nickname: string; ip: string; mode: string; rtt?: number; via?: string }
+interface PeerState { slot: number; nickname: string; ip: string; mode: string; rtt?: number; via?: string; guest?: boolean }
 interface RelayView { id: string; name: string; region?: string; latency: number }
 interface VnetState {
   admin: boolean
@@ -73,6 +73,10 @@ const modeView: Record<string, [string, string]> = {
 }
 // 成员延迟（毫秒）的颜色：60 以内绿，150 以内黄，再高红
 const rttClass = (ms?: number): 'good' | 'mid' | 'bad' | '' => (!ms || ms < 0 ? '' : ms < 60 ? 'good' : ms < 150 ? 'mid' : 'bad')
+// 游客：面板给游客的昵称后面带"（游客）"（给旧版本看），这里去掉后缀，改成单独的"游客"标签
+const GUEST_SUFFIX = '（游客）'
+const plainName = (n: string) => (n.endsWith(GUEST_SUFFIX) ? n.slice(0, -GUEST_SUFFIX.length) : n)
+const isGuestMember = (m: Member) => m.userId.startsWith('guest:')
 const fmtCode = (c: string) => (c.length === 8 ? `${c.slice(0, 4)}-${c.slice(4)}` : c)
 const latencyText = (l: number) => (l > 0 ? `${l} ms` : l < 0 ? '连不上' : '测速中')
 const titles = { create: '创建房间', join: '加入房间', guest: '游客加入' }
@@ -483,7 +487,8 @@ const login = () => account.openAuth('login')
               >
                 <Icon :name="voice.members[p.slot].mic && !isMuted(p.slot) ? 'mic' : 'micOff'" size="xs" />
               </button>
-              <b :title="p.nickname">{{ p.nickname }}</b>
+              <b :title="p.nickname">{{ p.guest ? plainName(p.nickname) : p.nickname }}</b>
+              <span v-if="p.guest" class="bdg gold rl-guest" title="没登录、用邀请码进来的游客">游客</span>
               <button type="button" class="mono copyable peerip" title="复制" @click="copy(p.ip, p.nickname + ' 的虚拟 IP')">{{ p.ip }}<Icon name="copy" size="xs" /></button>
               <span v-if="p.mode !== 'offline'" class="rl-rtt mono" :class="rttClass(p.rtt)" title="到他的延迟（往返）">{{ p.rtt ? p.rtt + ' ms' : '— ms' }}</span>
               <span class="bdg" :class="modeView[p.mode]?.[1]" :title="p.via ? `发给他的数据经 ${p.via} 转发` : undefined">{{ modeView[p.mode]?.[0] ?? p.mode }}{{ p.mode === 'relay' && p.via ? ' · ' + p.via : '' }}</span>
@@ -513,7 +518,9 @@ const login = () => account.openAuth('login')
             </div>
             <div class="rc-members">
               <span v-for="m in shownMembers(r)" :key="m.userId" class="rc-m" :class="{ on: m.online }" :title="`${m.nickname} · ${m.ip}`">
-                <i /><span class="rc-mn">{{ m.nickname }}</span><small class="mono">.{{ m.slot }}</small>
+                <i /><span class="rc-mn">{{ isGuestMember(m) ? plainName(m.nickname) : m.nickname }}</span>
+                <small v-if="isGuestMember(m)" class="rc-g">游客</small>
+                <small class="mono">.{{ m.slot }}</small>
                 <button v-if="isOwner(r) && m.userId !== myId" type="button" class="rc-kick" title="移出房间" :disabled="busy === 'kick-' + m.userId" @click="kick(r, m)">
                   <Icon name="x" size="xs" />
                 </button>
@@ -1085,6 +1092,18 @@ const login = () => account.openAuth('login')
   color: var(--text-3);
 }
 /* 超长昵称：省略号，不把卡片撑大（完整名字在悬停提示里） */
+.rl-guest {
+  flex: none;
+}
+.rc-g {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: var(--gold-soft);
+  color: var(--gold-text) !important;
+  font-size: 10.5px;
+  font-weight: 800;
+}
 .rc-mn {
   min-width: 0;
   max-width: 9em;

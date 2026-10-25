@@ -205,7 +205,8 @@ func (h *Hub) VnetRoomChanged(ctx context.Context, room string) {
 
 	peers := make([]api.VnetPeer, 0, len(members))
 	for _, m := range members {
-		peers = append(peers, api.VnetPeer{Slot: m.Slot, Nickname: m.Nickname, IP: m.IP, Key: keys[m.Slot], Relay: relays[m.Slot]})
+		peers = append(peers, api.VnetPeer{Slot: m.Slot, Nickname: m.Nickname, IP: m.IP, Key: keys[m.Slot], Relay: relays[m.Slot],
+			Guest: strings.HasPrefix(m.UserID, api.GuestPrefix)})
 	}
 	var info api.Room
 	var relayNodes []api.VnetRelay

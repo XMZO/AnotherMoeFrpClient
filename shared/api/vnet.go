@@ -185,6 +185,7 @@ type VnetPeer struct {
 	IP       string `json:"ip"`
 	Key      string `json:"key,omitempty"`
 	Relay    string `json:"relay,omitempty"` // 他的收件中继（节点 ID），空表示面板；发给他的中继包送到这里
+	Guest    bool   `json:"guest,omitempty"` // 游客（没登录、用邀请码进来的）；昵称后面也带"（游客）"，给旧版本客户端看
 }
 
 // 中继帧（实时通道的二进制消息）：第一个字节是座位号，后面是 WireGuard 数据包。

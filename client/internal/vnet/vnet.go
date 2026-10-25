@@ -53,8 +53,9 @@ type PeerState struct {
 	IP       string `json:"ip"`
 	Self     bool   `json:"self"`
 	Mode     string `json:"mode"`
-	RTT      int    `json:"rtt,omitempty"` // 延迟（毫秒），0 表示还不知道
-	Via      string `json:"via,omitempty"` // 走中继时，发给他的数据经哪个节点（"面板服务器" 表示面板）
+	RTT      int    `json:"rtt,omitempty"`   // 延迟（毫秒），0 表示还不知道
+	Guest    bool   `json:"guest,omitempty"` // 游客
+	Via      string `json:"via,omitempty"`   // 走中继时，发给他的数据经哪个节点（"面板服务器" 表示面板）
 }
 
 // AdapterName 是虚拟网卡的名字（网络连接里看到的）。
@@ -87,6 +88,7 @@ type Engine struct {
 type peer struct {
 	slot     int
 	nickname string
+	guest    bool
 	ip       string
 	key      string // base64 公钥，空表示不在线
 	relay    string // 他的收件中继（节点 ID），空表示面板
@@ -259,7 +261,7 @@ func (e *Engine) setPeersLocked(msg api.LiveVnetBody) (*device.Device, string, e
 			p = &peer{slot: x.Slot}
 			e.peers[x.Slot] = p
 		}
-		p.nickname, p.ip, p.relay = x.Nickname, x.IP, x.Relay
+		p.nickname, p.ip, p.relay, p.guest = x.Nickname, x.IP, x.Relay, x.Guest
 		if p.key == x.Key {
 			continue
 		}
@@ -337,7 +339,7 @@ func (e *Engine) State() Snapshot {
 				via = n.Name
 			}
 		}
-		st.Peers = append(st.Peers, PeerState{Slot: p.slot, Nickname: p.nickname, IP: p.ip, Mode: mode, RTT: p.rttMs(), Via: via})
+		st.Peers = append(st.Peers, PeerState{Slot: p.slot, Nickname: p.nickname, IP: p.ip, Mode: mode, RTT: p.rttMs(), Via: via, Guest: p.guest})
 	}
 	slices.SortFunc(st.Peers, func(a, b PeerState) int { return a.Slot - b.Slot })
 	return st

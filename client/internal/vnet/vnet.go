@@ -238,6 +238,9 @@ func (e *Engine) setPeersLocked(msg api.LiveVnetBody) (*device.Device, string, e
 			e.logf("vnet: configure adapter: %v", err)
 			return nil, "", fmt.Errorf("设置虚拟网卡地址失败：%w", err)
 		}
+		if e.done != nil {
+			go keepLanPriority(AdapterName, e.done, e.logf)
+		}
 	}
 	seen := map[int]bool{}
 	var b strings.Builder

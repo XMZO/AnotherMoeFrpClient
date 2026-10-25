@@ -2,6 +2,7 @@ package vnet
 
 import (
 	"fmt"
+	"net"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -21,7 +22,7 @@ func IsAdmin() bool {
 }
 
 // configureAdapter 给虚拟网卡配地址：静态 IP、/24、不设网关（不影响默认路由）；
-// 跃点数设成 1，游戏的局域网广播从这块网卡发出；网络类别设成"专用"，防火墙不按公用网络拦。
+// 局域网发现的广播 / 组播优先从这块网卡发出（setLanPriority）；网络类别设成"专用"，防火墙不按公用网络拦。
 func configureAdapter(name, ip string) error {
 	var err error
 	for i := 0; i < 10; i++ { // 网卡刚建出来，系统可能还没准备好
@@ -34,23 +35,67 @@ func configureAdapter(name, ip string) error {
 	if err != nil {
 		return err
 	}
-	_ = run("netsh", "interface", "ipv4", "set", "interface", "interface="+name, "metric=1")
-	// 组播（224.0.0.0/4，MC 的局域网发现发到 224.0.2.60）和受限广播（255.255.255.255）：程序没指定网卡时，
-	// Windows 按"路由跃点 + 网卡跃点"选出口。别的虚拟网卡（Radmin VPN 等）跃点也是 1 时会打平，包从它那里发出去，
-	// 房间里的人就发现不了。把这块网卡上这两条路由的跃点改成 0（只改当前，网卡删掉就没了）。
-	for _, r := range []string{"224.0.0.0/4", "255.255.255.255/32"} {
-		for i := 0; i < 6; i++ { // 地址刚配上，系统的路由可能还没生成
-			if run("netsh", "interface", "ipv4", "set", "route", r, "interface="+name, "metric=0", "store=active") == nil {
-				break
-			}
-			time.Sleep(300 * time.Millisecond)
-		}
+	for i := 0; i < 6 && !setLanPriority(name); i++ { // 地址刚配上，系统的路由可能还没生成
+		time.Sleep(300 * time.Millisecond)
 	}
 	go func() { // 慢（PowerShell 启动要一两秒），不等
 		_ = run("powershell", "-NoProfile", "-NonInteractive", "-Command",
 			"Set-NetConnectionProfile -InterfaceAlias '"+name+"' -NetworkCategory Private")
 	}()
 	return nil
+}
+
+// lanTargets 是局域网发现用的地址：MC Java 的组播 224.0.2.60，和受限广播。
+var lanTargets = [][4]byte{{224, 0, 2, 60}, {255, 255, 255, 255}}
+
+// setLanPriority 让局域网发现的组播（224.0.0.0/4）和受限广播（255.255.255.255）优先从这块网卡发出。
+// 程序没指定网卡时，Windows 按"路由跃点 + 网卡跃点"选出口；Radmin VPN、ZeroTier 等跃点也很低，打平时包会从它们那里出去，
+// 房间里的人就发现不了。这里把网卡跃点和这两条路由的跃点都设成 0（最小值；只改当前，网卡删掉就没了）。
+func setLanPriority(name string) bool {
+	_ = run("netsh", "interface", "ipv4", "set", "interface", "interface="+name, "metric=0")
+	ok := true
+	for _, r := range []string{"224.0.0.0/4", "255.255.255.255/32"} {
+		if run("netsh", "interface", "ipv4", "set", "route", r, "interface="+name, "metric=0", "store=active") != nil {
+			ok = false
+		}
+	}
+	return ok
+}
+
+// lanPriorityOK 检查局域网发现的包现在是不是从这块网卡出去（Windows 的 GetBestInterfaceEx）。
+func lanPriorityOK(name string) bool {
+	ifc, err := net.InterfaceByName(name)
+	if err != nil {
+		return true // 网卡不在了：不用管
+	}
+	for _, a := range lanTargets {
+		var idx uint32
+		if windows.GetBestInterfaceEx(&windows.SockaddrInet4{Addr: a}, &idx) != nil {
+			continue
+		}
+		if int(idx) != ifc.Index {
+			return false
+		}
+	}
+	return true
+}
+
+// keepLanPriority 在房间里时每隔几秒检查一次：别的联机工具（Radmin、ZeroTier、Tailscale 等）后开、
+// 或者把路由重置了，出口不是这块网卡就重新设置。
+func keepLanPriority(name string, done <-chan struct{}, logf func(string, ...any)) {
+	t := time.NewTicker(5 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-t.C:
+		}
+		if !lanPriorityOK(name) {
+			logf("vnet: 局域网发现的出口被别的网卡抢了，重新设置")
+			setLanPriority(name)
+		}
+	}
 }
 
 func run(name string, args ...string) error {

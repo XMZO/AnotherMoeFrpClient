@@ -183,6 +183,9 @@ func (e *Engine) measure() {
 	e.rs.latency = res
 	if e.dev != nil {
 		e.chooseHomeLocked()
+		if e.rs.home != "" { // 定期检查：收件中继没连着就补上
+			e.ensureRelayLocked(e.rs.home)
+		}
 	}
 	e.mu.Unlock()
 	e.onChange()
@@ -215,6 +218,7 @@ func (e *Engine) ensureRelayLocked(id string) {
 			e.mu.Unlock()
 			if err != nil {
 				e.logf("vnet: relay %s: %v", n.Name, err)
+				e.redialHomeLater(id, done, 3*time.Second)
 			} else {
 				ws.CloseNow()
 			}
@@ -235,6 +239,7 @@ func (e *Engine) ensureRelayLocked(id string) {
 				e.mu.Unlock()
 				close(c.done)
 				ws.CloseNow()
+				e.redialHomeLater(id, done, time.Second)
 			}()
 			for {
 				typ, p, err := ws.Read(context.Background())
@@ -246,6 +251,23 @@ func (e *Engine) ensureRelayLocked(id string) {
 				}
 			}
 		}()
+	}()
+}
+
+// redialHomeLater：连收件中继的连接断了（或没连上）就过一会重连。
+// 收件中继必须一直连着：别人发给我的包送到那个节点，我不在的话节点只能丢掉，对方还以为发出去了（黑洞，游戏超时）。
+func (e *Engine) redialHomeLater(id string, done chan struct{}, after time.Duration) {
+	go func() {
+		select {
+		case <-done:
+			return
+		case <-time.After(after):
+		}
+		e.mu.Lock()
+		if e.done == done && e.rs.home == id {
+			e.ensureRelayLocked(id)
+		}
+		e.mu.Unlock()
 	}()
 }
 
